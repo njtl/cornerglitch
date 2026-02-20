@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/content"
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/labyrinth"
@@ -32,6 +33,7 @@ type Handler struct {
 	errGen    *errors.Generator
 	pageGen   *pages.Generator
 	lab       *labyrinth.Labyrinth
+	content   *content.Engine
 }
 
 func NewHandler(
@@ -41,6 +43,7 @@ func NewHandler(
 	errGen *errors.Generator,
 	pageGen *pages.Generator,
 	lab *labyrinth.Labyrinth,
+	contentEng *content.Engine,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -49,6 +52,7 @@ func NewHandler(
 		errGen:    errGen,
 		pageGen:   pageGen,
 		lab:       lab,
+		content:   contentEng,
 	}
 }
 
@@ -129,6 +133,15 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	responseType := "ok"
 	if errors.IsDelay(errType) {
 		responseType = "delayed"
+	}
+
+	// Try content engine first for rich HTML pages
+	if h.content != nil && h.content.ShouldHandle(r.URL.Path) {
+		accept := r.Header.Get("Accept")
+		if accept == "" || contains(accept, "text/html") || contains(accept, "*/*") {
+			status := h.content.Serve(w, r)
+			return status, responseType
+		}
 	}
 
 	// Serve a page based on the path and behavior settings
