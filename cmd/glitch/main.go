@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/api"
 	"github.com/glitchWebServer/internal/content"
 	"github.com/glitchWebServer/internal/dashboard"
 	"github.com/glitchWebServer/internal/errors"
@@ -34,8 +35,9 @@ func main() {
 	pageGen := pages.NewGenerator()
 	lab := labyrinth.NewLabyrinth()
 	contentEng := content.NewEngine()
+	apiRouter := api.NewRouter()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)

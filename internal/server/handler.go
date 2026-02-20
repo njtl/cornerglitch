@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/api"
 	"github.com/glitchWebServer/internal/content"
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
@@ -34,6 +35,7 @@ type Handler struct {
 	pageGen   *pages.Generator
 	lab       *labyrinth.Labyrinth
 	content   *content.Engine
+	apiRouter *api.Router
 }
 
 func NewHandler(
@@ -44,6 +46,7 @@ func NewHandler(
 	pageGen *pages.Generator,
 	lab *labyrinth.Labyrinth,
 	contentEng *content.Engine,
+	apiRouter *api.Router,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -53,6 +56,7 @@ func NewHandler(
 		pageGen:   pageGen,
 		lab:       lab,
 		content:   contentEng,
+		apiRouter: apiRouter,
 	}
 }
 
@@ -102,6 +106,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		color = purple
 	case responseType == "delayed":
 		color = yellow
+	case responseType == "api":
+		color = cyan
 	}
 
 	log.Printf("%s[%s]%s %s %s %d %s (client=%s class=%s mode=%s)",
@@ -111,6 +117,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *adaptive.ClientBehavior) (int, string) {
+	// API requests bypass error injection and go straight to the API router
+	if h.apiRouter != nil && h.apiRouter.ShouldHandle(r.URL.Path) {
+		status := h.apiRouter.ServeHTTP(w, r)
+		return status, "api"
+	}
+
 	// Check if this should go to the labyrinth
 	if h.shouldLabyrinth(r, behavior) {
 		status := h.lab.Serve(w, r)
