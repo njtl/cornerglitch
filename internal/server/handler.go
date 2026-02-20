@@ -11,6 +11,7 @@ import (
 	"github.com/glitchWebServer/internal/content"
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
+	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/pages"
@@ -36,6 +37,7 @@ type Handler struct {
 	lab       *labyrinth.Labyrinth
 	content   *content.Engine
 	apiRouter *api.Router
+	honey     *honeypot.Honeypot
 }
 
 func NewHandler(
@@ -47,6 +49,7 @@ func NewHandler(
 	lab *labyrinth.Labyrinth,
 	contentEng *content.Engine,
 	apiRouter *api.Router,
+	honey *honeypot.Honeypot,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -57,6 +60,7 @@ func NewHandler(
 		lab:       lab,
 		content:   contentEng,
 		apiRouter: apiRouter,
+		honey:     honey,
 	}
 }
 
@@ -108,6 +112,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		color = yellow
 	case responseType == "api":
 		color = cyan
+	case responseType == "honeypot":
+		color = red
 	}
 
 	log.Printf("%s[%s]%s %s %s %d %s (client=%s class=%s mode=%s)",
@@ -121,6 +127,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.apiRouter != nil && h.apiRouter.ShouldHandle(r.URL.Path) {
 		status := h.apiRouter.ServeHTTP(w, r)
 		return status, "api"
+	}
+
+	// Honeypot: catch scanner probes on known vuln paths
+	if h.honey != nil && h.honey.ShouldHandle(r.URL.Path) {
+		status := h.honey.ServeHTTP(w, r)
+		return status, "honeypot"
 	}
 
 	// Check if this should go to the labyrinth
