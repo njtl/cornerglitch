@@ -8,6 +8,7 @@ import (
 
 	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/api"
+	"github.com/glitchWebServer/internal/captcha"
 	"github.com/glitchWebServer/internal/content"
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
@@ -40,6 +41,7 @@ type Handler struct {
 	apiRouter *api.Router
 	honey     *honeypot.Honeypot
 	fw        *framework.Emulator
+	captcha   *captcha.Engine
 }
 
 func NewHandler(
@@ -53,6 +55,7 @@ func NewHandler(
 	apiRouter *api.Router,
 	honey *honeypot.Honeypot,
 	fw *framework.Emulator,
+	captchaEng *captcha.Engine,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -65,6 +68,7 @@ func NewHandler(
 		apiRouter: apiRouter,
 		honey:     honey,
 		fw:        fw,
+		captcha:   captchaEng,
 	}
 }
 
@@ -87,7 +91,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	behavior := h.adapt.Decide(clientID, clientClass)
 
 	// Step 4: Decide what to do with this request
-	statusCode, responseType := h.dispatch(w, r, behavior)
+	statusCode, responseType := h.dispatch(w, r, behavior, clientID, string(clientClass))
 
 	// Step 5: Record metrics
 	latency := time.Since(start)
@@ -124,6 +128,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		color = cyan
 	case responseType == "honeypot":
 		color = red
+	case responseType == "captcha":
+		color = yellow
 	}
 
 	log.Printf("%s[%s]%s %s %s %d %s (client=%s class=%s mode=%s)",
@@ -132,17 +138,37 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		clientID[:16], clientClass, behavior.Mode)
 }
 
-func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *adaptive.ClientBehavior) (int, string) {
+func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *adaptive.ClientBehavior, clientID, clientClass string) (int, string) {
 	// API requests bypass error injection and go straight to the API router
 	if h.apiRouter != nil && h.apiRouter.ShouldHandle(r.URL.Path) {
 		status := h.apiRouter.ServeHTTP(w, r)
 		return status, "api"
 	}
 
+	// Captcha verification endpoint
+	if h.captcha != nil && r.URL.Path == "/captcha/verify" && r.Method == "POST" {
+		status := h.captcha.HandleVerify(w, r)
+		return status, "captcha"
+	}
+
 	// Honeypot: catch scanner probes on known vuln paths
 	if h.honey != nil && h.honey.ShouldHandle(r.URL.Path) {
 		status := h.honey.ServeHTTP(w, r)
 		return status, "honeypot"
+	}
+
+	// Captcha challenge: intercept requests that should be challenged
+	if h.captcha != nil {
+		var reqCount int
+		if cp := h.collector.GetClientProfile(clientID); cp != nil {
+			snap := cp.Snapshot()
+			reqCount = int(snap.TotalRequests)
+		}
+		if h.captcha.ShouldChallenge(r.URL.Path, clientClass, reqCount) {
+			ct := h.captcha.SelectChallenge(clientID)
+			status := h.captcha.ServeChallenge(w, r, ct)
+			return status, "captcha"
+		}
 	}
 
 	// Check if this should go to the labyrinth
