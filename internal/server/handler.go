@@ -22,6 +22,7 @@ import (
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/recorder"
+	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/vuln"
 	"github.com/glitchWebServer/internal/websocket"
 )
@@ -56,6 +57,7 @@ type Handler struct {
 	privacyH  *privacy.Handler
 	wsH       *websocket.Handler
 	rec       *recorder.Recorder
+	searchH   *search.Handler
 }
 
 func NewHandler(
@@ -77,6 +79,7 @@ func NewHandler(
 	privacyH *privacy.Handler,
 	wsH *websocket.Handler,
 	rec *recorder.Recorder,
+	searchH *search.Handler,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -97,6 +100,7 @@ func NewHandler(
 		privacyH:  privacyH,
 		wsH:       wsH,
 		rec:       rec,
+		searchH:   searchH,
 	}
 }
 
@@ -214,6 +218,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.rec != nil && h.rec.ShouldHandle(r.URL.Path) {
 		status := h.rec.ServeHTTP(w, r)
 		return status, "recorder"
+	}
+
+	// Search engine endpoints
+	if h.searchH != nil && h.searchH.ShouldHandle(r.URL.Path) {
+		status := h.searchH.ServeHTTP(w, r)
+		return status, "search"
 	}
 
 	// Captcha verification endpoint
