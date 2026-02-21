@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/analytics"
 	"github.com/glitchWebServer/internal/api"
 	"github.com/glitchWebServer/internal/captcha"
 	"github.com/glitchWebServer/internal/content"
@@ -44,6 +45,7 @@ type Handler struct {
 	fw        *framework.Emulator
 	captcha   *captcha.Engine
 	vulnH     *vuln.Handler
+	analytix  *analytics.Engine
 }
 
 func NewHandler(
@@ -59,6 +61,7 @@ func NewHandler(
 	fw *framework.Emulator,
 	captchaEng *captcha.Engine,
 	vulnH *vuln.Handler,
+	analytix *analytics.Engine,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -73,6 +76,7 @@ func NewHandler(
 		fw:        fw,
 		captcha:   captchaEng,
 		vulnH:     vulnH,
+		analytix:  analytix,
 	}
 }
 
@@ -149,6 +153,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.apiRouter != nil && h.apiRouter.ShouldHandle(r.URL.Path) {
 		status := h.apiRouter.ServeHTTP(w, r)
 		return status, "api"
+	}
+
+	// Analytics beacon/tracking endpoints
+	if h.analytix != nil && h.analytix.ShouldHandle(r.URL.Path) {
+		status := h.analytix.ServeHTTP(w, r)
+		return status, "analytics"
 	}
 
 	// Captcha verification endpoint
