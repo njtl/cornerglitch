@@ -19,6 +19,7 @@ import (
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/captcha"
+	"github.com/glitchWebServer/internal/cdn"
 	"github.com/glitchWebServer/internal/framework"
 	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/labyrinth"
@@ -46,8 +47,9 @@ func main() {
 	captchaEng := captcha.NewEngine()
 	vulnH := vuln.NewHandler()
 	analytix := analytics.NewEngine()
+	cdnEng := cdn.NewEngine()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)

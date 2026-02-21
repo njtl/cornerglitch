@@ -9,6 +9,7 @@ import (
 	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/analytics"
 	"github.com/glitchWebServer/internal/api"
+	"github.com/glitchWebServer/internal/cdn"
 	"github.com/glitchWebServer/internal/captcha"
 	"github.com/glitchWebServer/internal/content"
 	"github.com/glitchWebServer/internal/errors"
@@ -46,6 +47,7 @@ type Handler struct {
 	captcha   *captcha.Engine
 	vulnH     *vuln.Handler
 	analytix  *analytics.Engine
+	cdnEng    *cdn.Engine
 }
 
 func NewHandler(
@@ -62,6 +64,7 @@ func NewHandler(
 	captchaEng *captcha.Engine,
 	vulnH *vuln.Handler,
 	analytix *analytics.Engine,
+	cdnEng *cdn.Engine,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -77,6 +80,7 @@ func NewHandler(
 		captcha:   captchaEng,
 		vulnH:     vulnH,
 		analytix:  analytix,
+		cdnEng:    cdnEng,
 	}
 }
 
@@ -93,6 +97,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.fw != nil {
 		fwProfile := h.fw.ForClient(clientID)
 		h.fw.Apply(w, fwProfile, clientID)
+	}
+
+	// Step 2.5: Apply CDN headers for this client
+	if h.cdnEng != nil {
+		h.cdnEng.ApplyHeaders(w, r.URL.Path, clientID)
 	}
 
 	// Step 3: Get adaptive behavior for this client
@@ -165,6 +174,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.captcha != nil && r.URL.Path == "/captcha/verify" && r.Method == "POST" {
 		status := h.captcha.HandleVerify(w, r)
 		return status, "captcha"
+	}
+
+	// CDN static asset serving
+	if h.cdnEng != nil && h.cdnEng.ShouldHandle(r.URL.Path) {
+		status := h.cdnEng.ServeHTTP(w, r)
+		return status, "cdn"
 	}
 
 	// OWASP vulnerability emulation
