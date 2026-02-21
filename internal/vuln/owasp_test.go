@@ -570,17 +570,21 @@ func TestA04_Reset_DeterministicToken(t *testing.T) {
 		if idx < 0 {
 			return ""
 		}
-		sub := body[idx : idx+30]
+		end := idx + 50
+		if end > len(body) {
+			end = len(body)
+		}
+		sub := body[idx:end]
 		// The format is "reset_token":"NNNN"
 		start := strings.Index(sub, ":\"")
 		if start < 0 {
 			return ""
 		}
-		end := strings.Index(sub[start+2:], "\"")
-		if end < 0 {
+		qEnd := strings.Index(sub[start+2:], "\"")
+		if qEnd < 0 {
 			return ""
 		}
-		return sub[start+2 : start+2+end]
+		return sub[start+2 : start+2+qEnd]
 	}
 	t1 := extractToken(body1)
 	t2 := extractToken(body2)
