@@ -11,6 +11,7 @@ import (
 	"github.com/glitchWebServer/internal/api"
 	"github.com/glitchWebServer/internal/cdn"
 	"github.com/glitchWebServer/internal/captcha"
+	"github.com/glitchWebServer/internal/email"
 	"github.com/glitchWebServer/internal/content"
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
@@ -58,6 +59,7 @@ type Handler struct {
 	wsH       *websocket.Handler
 	rec       *recorder.Recorder
 	searchH   *search.Handler
+	emailH    *email.Handler
 }
 
 func NewHandler(
@@ -80,6 +82,7 @@ func NewHandler(
 	wsH *websocket.Handler,
 	rec *recorder.Recorder,
 	searchH *search.Handler,
+	emailH *email.Handler,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -101,6 +104,7 @@ func NewHandler(
 		wsH:       wsH,
 		rec:       rec,
 		searchH:   searchH,
+		emailH:    emailH,
 	}
 }
 
@@ -218,6 +222,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.rec != nil && h.rec.ShouldHandle(r.URL.Path) {
 		status := h.rec.ServeHTTP(w, r)
 		return status, "recorder"
+	}
+
+	// Email/webmail endpoints
+	if h.emailH != nil && h.emailH.ShouldHandle(r.URL.Path) {
+		status := h.emailH.ServeHTTP(w, r)
+		return status, "email"
 	}
 
 	// Search engine endpoints

@@ -20,6 +20,7 @@ import (
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/captcha"
 	"github.com/glitchWebServer/internal/cdn"
+	"github.com/glitchWebServer/internal/email"
 	"github.com/glitchWebServer/internal/framework"
 	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/labyrinth"
@@ -58,8 +59,9 @@ func main() {
 	wsH := websocket.NewHandler()
 	rec := recorder.NewRecorder("captures")
 	searchH := search.NewHandler()
+	emailH := email.NewHandler()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)
