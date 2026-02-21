@@ -22,6 +22,7 @@ import (
 	"github.com/glitchWebServer/internal/cdn"
 	"github.com/glitchWebServer/internal/email"
 	"github.com/glitchWebServer/internal/framework"
+	"github.com/glitchWebServer/internal/health"
 	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
@@ -60,8 +61,9 @@ func main() {
 	rec := recorder.NewRecorder("captures")
 	searchH := search.NewHandler()
 	emailH := email.NewHandler()
+	healthH := health.NewHandler(time.Now())
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)
