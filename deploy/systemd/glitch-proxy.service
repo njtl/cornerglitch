@@ -1,0 +1,18 @@
+[Unit]
+Description=Glitch Reverse Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=glitch
+Group=glitch
+ExecStart=/usr/local/bin/glitch-proxy -target http://localhost:80 -listen :8080 -threshold 50 -mode glitch -dashboard 8766
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

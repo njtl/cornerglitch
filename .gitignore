@@ -1,5 +1,7 @@
-# Binary
-glitch
+# Binary outputs
+/glitch
+/glitch-crawler
+/glitch-proxy
 *.exe
 
 # Go

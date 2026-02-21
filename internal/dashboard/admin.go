@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/glitchWebServer/internal/adaptive"
 )
 
 // ---------------------------------------------------------------------------
@@ -20,27 +22,53 @@ import (
 type FeatureFlags struct {
 	mu sync.RWMutex
 
-	labyrinth    bool
-	errorInject  bool
-	captcha      bool
-	honeypot     bool
-	vuln         bool
-	analytics    bool
-	cdn          bool
-	oauth        bool
+	labyrinth       bool
+	errorInject     bool
+	captcha         bool
+	honeypot        bool
+	vuln            bool
+	analytics       bool
+	cdn             bool
+	oauth           bool
+	headerCorrupt   bool
+	cookieTraps     bool
+	jsTraps         bool
+	botDetection    bool
+	randomBlocking  bool
+	frameworkEmul   bool
+	search          bool
+	email           bool
+	i18n            bool
+	recorder        bool
+	websocket       bool
+	privacy         bool
+	health          bool
 }
 
 // NewFeatureFlags returns a FeatureFlags with every feature enabled.
 func NewFeatureFlags() *FeatureFlags {
 	return &FeatureFlags{
-		labyrinth:   true,
-		errorInject: true,
-		captcha:     true,
-		honeypot:    true,
-		vuln:        true,
-		analytics:   true,
-		cdn:         true,
-		oauth:       true,
+		labyrinth:      true,
+		errorInject:    true,
+		captcha:        true,
+		honeypot:       true,
+		vuln:           true,
+		analytics:      true,
+		cdn:            true,
+		oauth:          true,
+		headerCorrupt:  true,
+		cookieTraps:    true,
+		jsTraps:        true,
+		botDetection:   true,
+		randomBlocking: true,
+		frameworkEmul:  true,
+		search:         true,
+		email:          true,
+		i18n:           true,
+		recorder:       true,
+		websocket:      true,
+		privacy:        true,
+		health:         true,
 	}
 }
 
@@ -92,6 +120,84 @@ func (f *FeatureFlags) IsOAuthEnabled() bool {
 	return f.oauth
 }
 
+func (f *FeatureFlags) IsHeaderCorruptEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.headerCorrupt
+}
+
+func (f *FeatureFlags) IsCookieTrapsEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.cookieTraps
+}
+
+func (f *FeatureFlags) IsJSTrapsEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.jsTraps
+}
+
+func (f *FeatureFlags) IsBotDetectionEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.botDetection
+}
+
+func (f *FeatureFlags) IsRandomBlockingEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.randomBlocking
+}
+
+func (f *FeatureFlags) IsFrameworkEmulEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.frameworkEmul
+}
+
+func (f *FeatureFlags) IsSearchEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.search
+}
+
+func (f *FeatureFlags) IsEmailEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.email
+}
+
+func (f *FeatureFlags) IsI18nEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.i18n
+}
+
+func (f *FeatureFlags) IsRecorderEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.recorder
+}
+
+func (f *FeatureFlags) IsWebSocketEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.websocket
+}
+
+func (f *FeatureFlags) IsPrivacyEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.privacy
+}
+
+func (f *FeatureFlags) IsHealthEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.health
+}
+
 // Set toggles a named feature. Returns false if the name is unknown.
 func (f *FeatureFlags) Set(name string, enabled bool) bool {
 	f.mu.Lock()
@@ -113,6 +219,32 @@ func (f *FeatureFlags) Set(name string, enabled bool) bool {
 		f.cdn = enabled
 	case "oauth":
 		f.oauth = enabled
+	case "header_corrupt":
+		f.headerCorrupt = enabled
+	case "cookie_traps":
+		f.cookieTraps = enabled
+	case "js_traps":
+		f.jsTraps = enabled
+	case "bot_detection":
+		f.botDetection = enabled
+	case "random_blocking":
+		f.randomBlocking = enabled
+	case "framework_emul":
+		f.frameworkEmul = enabled
+	case "search":
+		f.search = enabled
+	case "email":
+		f.email = enabled
+	case "i18n":
+		f.i18n = enabled
+	case "recorder":
+		f.recorder = enabled
+	case "websocket":
+		f.websocket = enabled
+	case "privacy":
+		f.privacy = enabled
+	case "health":
+		f.health = enabled
 	default:
 		return false
 	}
@@ -124,14 +256,27 @@ func (f *FeatureFlags) Snapshot() map[string]bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return map[string]bool{
-		"labyrinth":    f.labyrinth,
-		"error_inject": f.errorInject,
-		"captcha":      f.captcha,
-		"honeypot":     f.honeypot,
-		"vuln":         f.vuln,
-		"analytics":    f.analytics,
-		"cdn":          f.cdn,
-		"oauth":        f.oauth,
+		"labyrinth":       f.labyrinth,
+		"error_inject":    f.errorInject,
+		"captcha":         f.captcha,
+		"honeypot":        f.honeypot,
+		"vuln":            f.vuln,
+		"analytics":       f.analytics,
+		"cdn":             f.cdn,
+		"oauth":           f.oauth,
+		"header_corrupt":  f.headerCorrupt,
+		"cookie_traps":    f.cookieTraps,
+		"js_traps":        f.jsTraps,
+		"bot_detection":   f.botDetection,
+		"random_blocking": f.randomBlocking,
+		"framework_emul":  f.frameworkEmul,
+		"search":          f.search,
+		"email":           f.email,
+		"i18n":            f.i18n,
+		"recorder":        f.recorder,
+		"websocket":       f.websocket,
+		"privacy":         f.privacy,
+		"health":          f.health,
 	}
 }
 
@@ -146,6 +291,14 @@ type AdminConfig struct {
 	MaxLabyrinthDepth     int     // 1-100
 	ErrorRateMultiplier   float64 // 0.0-5.0
 	CaptchaTriggerThresh  int     // request count threshold before captcha fires
+	BlockChance           float64 // 0.0-1.0, random block probability
+	BlockDurationSec      int     // how long blocks last
+	BotScoreThreshold     float64 // 0-100, score above which to flag as bot
+	HeaderCorruptLevel    int     // 0-4 (none/subtle/moderate/aggressive/chaos)
+	DelayMinMs            int     // minimum added delay (ms)
+	DelayMaxMs            int     // maximum added delay (ms)
+	LabyrinthLinkDensity  int     // 1-20, links per labyrinth page
+	AdaptiveIntervalSec   int     // seconds between adaptive re-evaluation
 }
 
 // NewAdminConfig returns an AdminConfig with sensible defaults.
@@ -154,6 +307,14 @@ func NewAdminConfig() *AdminConfig {
 		MaxLabyrinthDepth:    50,
 		ErrorRateMultiplier:  1.0,
 		CaptchaTriggerThresh: 100,
+		BlockChance:          0.02,
+		BlockDurationSec:     30,
+		BotScoreThreshold:    60,
+		HeaderCorruptLevel:   1,
+		DelayMinMs:           0,
+		DelayMaxMs:           0,
+		LabyrinthLinkDensity: 8,
+		AdaptiveIntervalSec:  30,
 	}
 }
 
@@ -165,6 +326,14 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"max_labyrinth_depth":    c.MaxLabyrinthDepth,
 		"error_rate_multiplier":  c.ErrorRateMultiplier,
 		"captcha_trigger_thresh": c.CaptchaTriggerThresh,
+		"block_chance":           c.BlockChance,
+		"block_duration_sec":     c.BlockDurationSec,
+		"bot_score_threshold":    c.BotScoreThreshold,
+		"header_corrupt_level":   c.HeaderCorruptLevel,
+		"delay_min_ms":           c.DelayMinMs,
+		"delay_max_ms":           c.DelayMaxMs,
+		"labyrinth_link_density": c.LabyrinthLinkDensity,
+		"adaptive_interval_sec":  c.AdaptiveIntervalSec,
 	}
 }
 
@@ -196,6 +365,70 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 			v = 0
 		}
 		c.CaptchaTriggerThresh = v
+	case "block_chance":
+		if value < 0 {
+			value = 0
+		}
+		if value > 1.0 {
+			value = 1.0
+		}
+		c.BlockChance = value
+	case "block_duration_sec":
+		v := int(value)
+		if v < 1 {
+			v = 1
+		}
+		if v > 3600 {
+			v = 3600
+		}
+		c.BlockDurationSec = v
+	case "bot_score_threshold":
+		if value < 0 {
+			value = 0
+		}
+		if value > 100 {
+			value = 100
+		}
+		c.BotScoreThreshold = value
+	case "header_corrupt_level":
+		v := int(value)
+		if v < 0 {
+			v = 0
+		}
+		if v > 4 {
+			v = 4
+		}
+		c.HeaderCorruptLevel = v
+	case "delay_min_ms":
+		v := int(value)
+		if v < 0 {
+			v = 0
+		}
+		c.DelayMinMs = v
+	case "delay_max_ms":
+		v := int(value)
+		if v < 0 {
+			v = 0
+		}
+		c.DelayMaxMs = v
+	case "labyrinth_link_density":
+		v := int(value)
+		if v < 1 {
+			v = 1
+		}
+		if v > 20 {
+			v = 20
+		}
+		c.LabyrinthLinkDensity = v
+	case "adaptive_interval_sec":
+		v := int(value)
+		if v < 5 {
+			v = 5
+		}
+		if v > 300 {
+			v = 300
+		}
+		c.AdaptiveIntervalSec = v
 	default:
 		return false
 	}
@@ -250,6 +483,29 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 
 	mux.HandleFunc("/admin/api/log", func(w http.ResponseWriter, r *http.Request) {
 		adminAPILog(w, r, s)
+	})
+
+	// Client detail endpoint
+	mux.HandleFunc("/admin/api/client/", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIClientDetail(w, r, s)
+	})
+
+	// Blocking controls
+	mux.HandleFunc("/admin/api/blocking", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			adminAPIBlockingPost(w, r, s)
+		} else {
+			adminAPIBlockingGet(w, r, s)
+		}
+	})
+
+	// Per-client behavior override
+	mux.HandleFunc("/admin/api/override", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			adminAPIOverridePost(w, r, s)
+		} else {
+			adminAPIOverrideGet(w, r, s)
+		}
 	})
 }
 
@@ -468,6 +724,231 @@ func adminAPILog(w http.ResponseWriter, r *http.Request, s *Server) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"records": data,
 		"count":   len(data),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// API handler: GET /admin/api/client/{id} — detailed client info
+// ---------------------------------------------------------------------------
+
+func adminAPIClientDetail(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract client ID from path: /admin/api/client/{id}
+	clientID := strings.TrimPrefix(r.URL.Path, "/admin/api/client/")
+	if clientID == "" {
+		http.Error(w, `{"error":"client_id required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Find matching client profile
+	profiles := s.collector.GetAllClientProfiles()
+	var matchedProfile interface{}
+	var fullClientID string
+	for _, p := range profiles {
+		snap := p.Snapshot()
+		if snap.ClientID == clientID || strings.HasPrefix(snap.ClientID, clientID) {
+			fullClientID = snap.ClientID
+			// Build detailed profile
+			behavior := s.adapt.GetBehavior(snap.ClientID)
+			var mode, reason string
+			var escalation int
+			var botScore float64
+			if behavior != nil {
+				mode = string(behavior.Mode)
+				reason = behavior.Reason
+				escalation = behavior.EscalationLevel
+				botScore = behavior.BotScore
+			}
+
+			// All paths with counts
+			pathsList := make([]map[string]interface{}, 0, len(snap.PathsVisited))
+			for path, count := range snap.PathsVisited {
+				pathsList = append(pathsList, map[string]interface{}{
+					"path": path, "count": count,
+				})
+			}
+			sort.Slice(pathsList, func(i, j int) bool {
+				return pathsList[i]["count"].(int) > pathsList[j]["count"].(int)
+			})
+
+			// Recent requests for this client
+			recentRecords := s.collector.RecentRecords(1000)
+			clientRecords := make([]map[string]interface{}, 0)
+			for _, rec := range recentRecords {
+				if rec.ClientID == fullClientID {
+					clientRecords = append(clientRecords, map[string]interface{}{
+						"timestamp":     rec.Timestamp.Format(time.RFC3339),
+						"method":        rec.Method,
+						"path":          rec.Path,
+						"status_code":   rec.StatusCode,
+						"latency_ms":    rec.Latency.Milliseconds(),
+						"response_type": rec.ResponseType,
+					})
+				}
+			}
+
+			matchedProfile = map[string]interface{}{
+				"client_id":        snap.ClientID,
+				"first_seen":       snap.FirstSeen.Format(time.RFC3339),
+				"last_seen":        snap.LastSeen.Format(time.RFC3339),
+				"total_requests":   snap.TotalRequests,
+				"requests_per_sec": snap.RequestsPerSec,
+				"errors_received":  snap.ErrorsReceived,
+				"unique_paths":     len(snap.PathsVisited),
+				"all_paths":        pathsList,
+				"status_codes":     snap.StatusCodes,
+				"user_agents":      snap.UserAgents,
+				"burst_windows":    snap.BurstWindows,
+				"labyrinth_depth":  snap.LabyrinthDepth,
+				"adaptive_mode":    mode,
+				"adaptive_reason":  reason,
+				"escalation_level": escalation,
+				"bot_score":        botScore,
+				"recent_requests":  clientRecords,
+			}
+			break
+		}
+	}
+
+	if matchedProfile == nil {
+		http.Error(w, `{"error":"client not found"}`, http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(matchedProfile)
+}
+
+// ---------------------------------------------------------------------------
+// API handler: GET/POST /admin/api/blocking — random blocking controls
+// ---------------------------------------------------------------------------
+
+func adminAPIBlockingGet(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	chance, duration, enabled := s.adapt.GetBlockConfig()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":      enabled,
+		"chance":       chance,
+		"duration_sec": int(duration.Seconds()),
+	})
+}
+
+func adminAPIBlockingPost(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Enabled     *bool    `json:"enabled"`
+		Chance      *float64 `json:"chance"`
+		DurationSec *int     `json:"duration_sec"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Enabled != nil {
+		s.adapt.SetBlockEnabled(*req.Enabled)
+	}
+	if req.Chance != nil {
+		s.adapt.SetBlockChance(*req.Chance)
+	}
+	if req.DurationSec != nil {
+		s.adapt.SetBlockDuration(time.Duration(*req.DurationSec) * time.Second)
+	}
+
+	chance, duration, enabled := s.adapt.GetBlockConfig()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":           true,
+		"enabled":      enabled,
+		"chance":       chance,
+		"duration_sec": int(duration.Seconds()),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// API handler: GET/POST /admin/api/override — manual behavior overrides
+// ---------------------------------------------------------------------------
+
+func adminAPIOverrideGet(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	overrides := s.adapt.GetOverrides()
+	data := make([]map[string]string, 0, len(overrides))
+	for clientID, mode := range overrides {
+		data = append(data, map[string]string{
+			"client_id": clientID,
+			"mode":      string(mode),
+		})
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"overrides": data,
+		"count":     len(data),
+	})
+}
+
+func adminAPIOverridePost(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		ClientID string `json:"client_id"`
+		Mode     string `json:"mode"`
+		Clear    bool   `json:"clear"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.ClientID == "" {
+		http.Error(w, `{"error":"client_id required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Clear {
+		s.adapt.ClearOverride(req.ClientID)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":        true,
+			"client_id": req.ClientID,
+			"cleared":   true,
+		})
+		return
+	}
+
+	// Validate mode
+	validModes := map[string]bool{
+		"normal": true, "cooperative": true, "aggressive": true,
+		"labyrinth": true, "mirror": true, "escalating": true,
+		"intermittent": true, "blocked": true,
+	}
+	if !validModes[req.Mode] {
+		http.Error(w, `{"error":"invalid mode"}`, http.StatusBadRequest)
+		return
+	}
+
+	s.adapt.SetOverride(req.ClientID, adaptive.BehaviorMode(req.Mode))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":        true,
+		"client_id": req.ClientID,
+		"mode":      req.Mode,
 	})
 }
 
@@ -836,6 +1317,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 <div id="panel-sessions" class="panel active">
   <div class="section">
     <h2>// Active Client Sessions</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:10px">Click a client ID to view details and set behavior overrides.</p>
     <div class="tbl-scroll">
       <table>
         <thead><tr>
@@ -847,10 +1329,32 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <th>Lab Depth</th>
           <th>Mode</th>
           <th>Last Seen</th>
+          <th>Actions</th>
         </tr></thead>
         <tbody id="sess-body"></tbody>
       </table>
     </div>
+  </div>
+  <div class="section" id="client-detail" style="display:none">
+    <h2>// Client Detail: <span id="detail-cid" style="color:#00ffcc"></span></h2>
+    <div class="grid" id="detail-cards"></div>
+    <div style="margin:12px 0">
+      <label style="color:#aaa;font-size:0.85em">Override Mode:</label>
+      <select id="override-mode" style="background:#0d0d0d;color:#00ff88;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;margin:0 8px">
+        <option value="">-- auto --</option>
+        <option value="normal">Normal</option>
+        <option value="cooperative">Cooperative</option>
+        <option value="aggressive">Aggressive</option>
+        <option value="labyrinth">Labyrinth</option>
+        <option value="escalating">Escalating</option>
+        <option value="intermittent">Intermittent</option>
+        <option value="mirror">Mirror</option>
+        <option value="blocked">Blocked</option>
+      </select>
+      <button onclick="applyOverride()" style="background:#00aa66;color:#000;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:bold">Apply</button>
+      <button onclick="clearOverride()" style="background:#333;color:#ccc;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-family:inherit;margin-left:4px">Clear</button>
+    </div>
+    <div id="detail-paths" style="max-height:200px;overflow-y:auto"></div>
   </div>
 </div>
 
@@ -973,6 +1477,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   }
 
   // ------ Sessions ------
+  let selectedClient = null;
   async function refreshSessions() {
     try {
       const data = await api('/api/clients');
@@ -982,8 +1487,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       const tbody = document.getElementById('sess-body');
       tbody.innerHTML = clients.map(c => {
         const ago = timeSince(c.last_seen);
+        const cid = escapeHtml(c.client_id);
+        const short = escapeHtml(shortID(c.client_id));
         return '<tr>' +
-          '<td>' + escapeHtml(shortID(c.client_id)) + '</td>' +
+          '<td><a href="#" onclick="viewClient(\'' + cid + '\');return false" style="color:#44aaff">' + short + '</a></td>' +
           '<td>' + c.total_requests + '</td>' +
           '<td>' + (c.requests_per_sec||0).toFixed(1) + '</td>' +
           '<td class="' + (c.errors_received > 0 ? 's5' : '') + '">' + c.errors_received + '</td>' +
@@ -991,10 +1498,72 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           '<td>' + (c.labyrinth_depth||0) + '</td>' +
           '<td class="' + mClass(c.adaptive_mode) + '">' + (c.adaptive_mode||'pending') + '</td>' +
           '<td style="color:#888">' + ago + '</td>' +
+          '<td><a href="#" onclick="viewClient(\'' + cid + '\');return false" style="color:#888;font-size:0.8em">details</a></td>' +
           '</tr>';
       }).join('');
     } catch(e) { console.error('sessions:', e); }
   }
+
+  window.viewClient = async function(clientID) {
+    selectedClient = clientID;
+    try {
+      const detail = await api('/admin/api/client/' + encodeURIComponent(clientID));
+      document.getElementById('client-detail').style.display = 'block';
+      document.getElementById('detail-cid').textContent = shortID(clientID);
+      document.getElementById('detail-cards').innerHTML =
+        card('Total Requests', detail.total_requests, 'v-ok') +
+        card('Req/s', (detail.requests_per_sec||0).toFixed(1), 'v-info') +
+        card('Errors', detail.errors_received, detail.errors_received > 0 ? 'v-err' : 'v-ok') +
+        card('Unique Paths', detail.unique_paths, 'v-info') +
+        card('Mode', detail.adaptive_mode || 'pending', 'v-warn') +
+        card('Bot Score', (detail.bot_score||0).toFixed(1), detail.bot_score > 60 ? 'v-err' : 'v-ok') +
+        card('Escalation', detail.escalation_level, 'v-warn') +
+        card('Lab Depth', detail.labyrinth_depth, 'v-info');
+
+      // Show top paths
+      const paths = (detail.all_paths || []).slice(0, 20);
+      if (paths.length > 0) {
+        const maxC = paths[0].count || 1;
+        document.getElementById('detail-paths').innerHTML = '<h2 style="margin-top:12px">// Top Paths</h2>' +
+          paths.map(p =>
+            '<div class="bar-row">' +
+            '<div class="bar-label" title="' + escapeHtml(p.path) + '">' + escapeHtml(p.path.substring(0,40)) + '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + (p.count/maxC*100) + '%%"></div></div>' +
+            '<div class="bar-count">' + p.count + '</div></div>'
+          ).join('');
+      }
+
+      // Show reason
+      if (detail.adaptive_reason) {
+        document.getElementById('detail-paths').innerHTML +=
+          '<div style="margin-top:10px;color:#888;font-size:0.85em">Reason: ' + escapeHtml(detail.adaptive_reason) + '</div>';
+      }
+    } catch(e) { console.error('viewClient:', e); toast('Client not found'); }
+  };
+
+  window.applyOverride = async function() {
+    if (!selectedClient) return;
+    const mode = document.getElementById('override-mode').value;
+    if (!mode) { toast('Select a mode first'); return; }
+    await api('/admin/api/override', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({client_id: selectedClient, mode: mode})
+    });
+    toast('Override applied: ' + mode);
+    viewClient(selectedClient);
+  };
+
+  window.clearOverride = async function() {
+    if (!selectedClient) return;
+    await api('/admin/api/override', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({client_id: selectedClient, clear: true})
+    });
+    toast('Override cleared');
+    viewClient(selectedClient);
+  };
 
   function timeSince(iso) {
     const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -1131,7 +1700,20 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     vuln: 'Vulnerability Endpoints',
     analytics: 'Analytics Tracking',
     cdn: 'CDN Emulation',
-    oauth: 'OAuth Endpoints'
+    oauth: 'OAuth Endpoints',
+    header_corrupt: 'Header Corruption',
+    cookie_traps: 'Cookie Traps',
+    js_traps: 'JS Traps',
+    bot_detection: 'Bot Detection',
+    random_blocking: 'Random Blocking',
+    framework_emul: 'Framework Emulation',
+    search: 'Search Engine',
+    email: 'Email/Webmail',
+    i18n: 'Internationalization',
+    recorder: 'Traffic Recorder',
+    websocket: 'WebSocket',
+    privacy: 'Privacy/Consent',
+    health: 'Health Endpoints'
   };
 
   async function refreshControls() {
@@ -1153,7 +1735,15 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       document.getElementById('sliders').innerHTML =
         slider('max_labyrinth_depth', 'Max Labyrinth Depth', cfg.max_labyrinth_depth, 1, 100, 1) +
         slider('error_rate_multiplier', 'Error Rate Multiplier', cfg.error_rate_multiplier, 0, 5, 0.1) +
-        slider('captcha_trigger_thresh', 'CAPTCHA Trigger Threshold', cfg.captcha_trigger_thresh, 0, 500, 1);
+        slider('captcha_trigger_thresh', 'CAPTCHA Trigger Threshold', cfg.captcha_trigger_thresh, 0, 500, 1) +
+        slider('block_chance', 'Random Block Chance', cfg.block_chance, 0, 1, 0.01) +
+        slider('block_duration_sec', 'Block Duration (sec)', cfg.block_duration_sec, 1, 3600, 1) +
+        slider('bot_score_threshold', 'Bot Score Threshold', cfg.bot_score_threshold, 0, 100, 1) +
+        slider('header_corrupt_level', 'Header Corruption Level (0-4)', cfg.header_corrupt_level, 0, 4, 1) +
+        slider('delay_min_ms', 'Delay Min (ms)', cfg.delay_min_ms, 0, 10000, 100) +
+        slider('delay_max_ms', 'Delay Max (ms)', cfg.delay_max_ms, 0, 30000, 100) +
+        slider('labyrinth_link_density', 'Labyrinth Links/Page', cfg.labyrinth_link_density, 1, 20, 1) +
+        slider('adaptive_interval_sec', 'Adaptive Re-eval Interval (sec)', cfg.adaptive_interval_sec, 5, 300, 5);
     } catch(e) { console.error('controls:', e); }
   }
 

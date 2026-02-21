@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: glitch-server
+  labels:
+    app.kubernetes.io/name: glitch-server
+    app.kubernetes.io/part-of: glitch-server

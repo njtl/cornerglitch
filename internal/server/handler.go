@@ -9,22 +9,27 @@ import (
 	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/analytics"
 	"github.com/glitchWebServer/internal/api"
-	"github.com/glitchWebServer/internal/cdn"
+	"github.com/glitchWebServer/internal/botdetect"
 	"github.com/glitchWebServer/internal/captcha"
-	"github.com/glitchWebServer/internal/email"
+	"github.com/glitchWebServer/internal/cdn"
 	"github.com/glitchWebServer/internal/content"
+	"github.com/glitchWebServer/internal/cookies"
+	"github.com/glitchWebServer/internal/dashboard"
+	"github.com/glitchWebServer/internal/email"
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/framework"
+	"github.com/glitchWebServer/internal/headers"
 	"github.com/glitchWebServer/internal/health"
 	"github.com/glitchWebServer/internal/honeypot"
+	"github.com/glitchWebServer/internal/i18n"
+	"github.com/glitchWebServer/internal/jstrap"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/oauth"
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/recorder"
-	"github.com/glitchWebServer/internal/i18n"
 	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/vuln"
 	"github.com/glitchWebServer/internal/websocket"
@@ -64,6 +69,12 @@ type Handler struct {
 	emailH    *email.Handler
 	healthH   *health.Handler
 	i18nH     *i18n.Handler
+	headerEng *headers.Engine
+	cookieT   *cookies.Tracker
+	jsEng     *jstrap.Engine
+	botDet    *botdetect.Detector
+	flags     *dashboard.FeatureFlags
+	config    *dashboard.AdminConfig
 }
 
 func NewHandler(
@@ -89,6 +100,10 @@ func NewHandler(
 	emailH *email.Handler,
 	healthH *health.Handler,
 	i18nH *i18n.Handler,
+	headerEng *headers.Engine,
+	cookieT *cookies.Tracker,
+	jsEng *jstrap.Engine,
+	botDet *botdetect.Detector,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -113,6 +128,12 @@ func NewHandler(
 		emailH:    emailH,
 		healthH:   healthH,
 		i18nH:     i18nH,
+		headerEng: headerEng,
+		cookieT:   cookieT,
+		jsEng:     jsEng,
+		botDet:    botDet,
+		flags:     dashboard.GetFeatureFlags(),
+		config:    dashboard.GetAdminConfig(),
 	}
 }
 
@@ -125,28 +146,65 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clientID := h.fp.Identify(r)
 	clientClass := h.fp.ClassifyClient(r)
 
+	// Step 1.5: Bot detection — record request and score
+	if h.botDet != nil && h.flags.IsBotDetectionEnabled() {
+		h.botDet.RecordRequest(clientID, r)
+	}
+
 	// Step 2: Apply framework emulation headers/cookies for this client+path
-	if h.fw != nil {
+	if h.fw != nil && h.flags.IsFrameworkEmulEnabled() {
 		fwProfile := h.fw.ForRequest(clientID, r.URL.Path)
 		h.fw.Apply(w, fwProfile, clientID)
 	}
 
 	// Step 2.5: Apply CDN headers for this client
-	if h.cdnEng != nil {
+	if h.cdnEng != nil && h.flags.IsCDNEnabled() {
 		h.cdnEng.ApplyHeaders(w, r.URL.Path, clientID)
+	}
+
+	// Step 2.7: Cookie traps — set tracking cookies
+	if h.cookieT != nil && h.flags.IsCookieTrapsEnabled() {
+		h.cookieT.SetTraps(w, r, clientID)
+	}
+
+	// Step 2.8: Header corruption — apply before body is written
+	if h.headerEng != nil && h.flags.IsHeaderCorruptEnabled() {
+		if h.headerEng.ShouldCorrupt(string(clientClass)) {
+			level := headers.CorruptionLevel([]string{
+				"none", "subtle", "moderate", "aggressive", "chaos",
+			}[h.config.Get()["header_corrupt_level"].(int)])
+			h.headerEng.Apply(w, r, clientID, level)
+		}
 	}
 
 	// Step 3: Get adaptive behavior for this client
 	behavior := h.adapt.Decide(clientID, clientClass)
+
+	// Step 3.5: Check if client is blocked
+	if behavior.Mode == adaptive.ModeBlocked {
+		statusCode := 403
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "Access Denied", statusCode)
+		latency := time.Since(start)
+		h.collector.Record(metrics.RequestRecord{
+			Timestamp: start, ClientID: clientID, Method: r.Method,
+			Path: r.URL.Path, StatusCode: statusCode, Latency: latency,
+			ResponseType: "blocked", UserAgent: r.UserAgent(), RemoteAddr: r.RemoteAddr,
+		})
+		log.Printf("%s[blocked]%s %s %s %d %s (client=%s class=%s)",
+			red, reset, r.Method, r.URL.Path, statusCode, latency, clientID[:16], clientClass)
+		return
+	}
 
 	// Step 4: Decide what to do with this request
 	statusCode, responseType := h.dispatch(w, r, behavior, clientID, string(clientClass))
 
 	// Step 5: Record metrics
 	latency := time.Since(start)
-	headers := make(map[string]string)
+	reqHeaders := make(map[string]string)
 	for k := range r.Header {
-		headers[k] = r.Header.Get(k)
+		reqHeaders[k] = r.Header.Get(k)
 	}
 
 	h.collector.Record(metrics.RequestRecord{
@@ -159,12 +217,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ResponseType: responseType,
 		UserAgent:    r.UserAgent(),
 		RemoteAddr:   r.RemoteAddr,
-		Headers:      headers,
+		Headers:      reqHeaders,
 	})
 
 	// Step 5.5: Record to traffic capture (if recording)
-	if h.rec != nil && h.rec.IsRecording() {
-		h.rec.RecordFull(r.Method, r.URL.Path, clientID, headers, nil,
+	if h.rec != nil && h.flags.IsRecorderEnabled() && h.rec.IsRecording() {
+		h.rec.RecordFull(r.Method, r.URL.Path, clientID, reqHeaders, nil,
 			statusCode, nil, 0, float64(latency.Milliseconds()))
 	}
 
@@ -189,6 +247,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		color = red
 	case responseType == "i18n":
 		color = cyan
+	case responseType == "jstrap":
+		color = purple
+	case responseType == "blocked":
+		color = red
 	}
 
 	log.Printf("%s[%s]%s %s %s %d %s (client=%s class=%s mode=%s)",
@@ -199,15 +261,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *adaptive.ClientBehavior, clientID, clientClass string) (int, string) {
 	// WebSocket endpoints (must check early — upgrade needs raw connection)
-	if h.wsH != nil && h.wsH.ShouldHandle(r.URL.Path) {
+	if h.wsH != nil && h.flags.IsWebSocketEnabled() && h.wsH.ShouldHandle(r.URL.Path) {
 		status := h.wsH.ServeHTTP(w, r)
 		return status, "websocket"
 	}
 
 	// Health/status/debug endpoints
-	if h.healthH != nil && h.healthH.ShouldHandle(r.URL.Path) {
+	if h.healthH != nil && h.flags.IsHealthEnabled() && h.healthH.ShouldHandle(r.URL.Path) {
 		status := h.healthH.ServeHTTP(w, r)
 		return status, "health"
+	}
+
+	// JS trap challenge/beacon endpoints
+	if h.jsEng != nil && h.flags.IsJSTrapsEnabled() && h.jsEng.ShouldHandle(r.URL.Path) {
+		status := h.jsEng.ServeHTTP(w, r)
+		return status, "jstrap"
 	}
 
 	// API requests bypass error injection and go straight to the API router
@@ -217,73 +285,73 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	}
 
 	// OAuth2/SSO/SAML endpoints
-	if h.oauthH != nil && h.oauthH.ShouldHandle(r.URL.Path) {
+	if h.oauthH != nil && h.flags.IsOAuthEnabled() && h.oauthH.ShouldHandle(r.URL.Path) {
 		status := h.oauthH.ServeHTTP(w, r)
 		return status, "oauth"
 	}
 
 	// Privacy/consent endpoints
-	if h.privacyH != nil && h.privacyH.ShouldHandle(r.URL.Path) {
+	if h.privacyH != nil && h.flags.IsPrivacyEnabled() && h.privacyH.ShouldHandle(r.URL.Path) {
 		status := h.privacyH.ServeHTTP(w, r)
 		return status, "privacy"
 	}
 
 	// Analytics beacon/tracking endpoints
-	if h.analytix != nil && h.analytix.ShouldHandle(r.URL.Path) {
+	if h.analytix != nil && h.flags.IsAnalyticsEnabled() && h.analytix.ShouldHandle(r.URL.Path) {
 		status := h.analytix.ServeHTTP(w, r)
 		return status, "analytics"
 	}
 
 	// Traffic recorder management endpoints
-	if h.rec != nil && h.rec.ShouldHandle(r.URL.Path) {
+	if h.rec != nil && h.flags.IsRecorderEnabled() && h.rec.ShouldHandle(r.URL.Path) {
 		status := h.rec.ServeHTTP(w, r)
 		return status, "recorder"
 	}
 
 	// Email/webmail endpoints
-	if h.emailH != nil && h.emailH.ShouldHandle(r.URL.Path) {
+	if h.emailH != nil && h.flags.IsEmailEnabled() && h.emailH.ShouldHandle(r.URL.Path) {
 		status := h.emailH.ServeHTTP(w, r)
 		return status, "email"
 	}
 
 	// Search engine endpoints
-	if h.searchH != nil && h.searchH.ShouldHandle(r.URL.Path) {
+	if h.searchH != nil && h.flags.IsSearchEnabled() && h.searchH.ShouldHandle(r.URL.Path) {
 		status := h.searchH.ServeHTTP(w, r)
 		return status, "search"
 	}
 
 	// i18n / multi-language endpoints
-	if h.i18nH != nil && h.i18nH.ShouldHandle(r.URL.Path) {
+	if h.i18nH != nil && h.flags.IsI18nEnabled() && h.i18nH.ShouldHandle(r.URL.Path) {
 		status := h.i18nH.ServeHTTP(w, r)
 		return status, "i18n"
 	}
 
 	// Captcha verification endpoint
-	if h.captcha != nil && r.URL.Path == "/captcha/verify" && r.Method == "POST" {
+	if h.captcha != nil && h.flags.IsCaptchaEnabled() && r.URL.Path == "/captcha/verify" && r.Method == "POST" {
 		status := h.captcha.HandleVerify(w, r)
 		return status, "captcha"
 	}
 
 	// CDN static asset serving
-	if h.cdnEng != nil && h.cdnEng.ShouldHandle(r.URL.Path) {
+	if h.cdnEng != nil && h.flags.IsCDNEnabled() && h.cdnEng.ShouldHandle(r.URL.Path) {
 		status := h.cdnEng.ServeHTTP(w, r)
 		return status, "cdn"
 	}
 
 	// OWASP vulnerability emulation
-	if h.vulnH != nil && h.vulnH.ShouldHandle(r.URL.Path) {
+	if h.vulnH != nil && h.flags.IsVulnEnabled() && h.vulnH.ShouldHandle(r.URL.Path) {
 		status := h.vulnH.ServeHTTP(w, r)
 		return status, "vuln"
 	}
 
 	// Honeypot: catch scanner probes on known vuln paths
-	if h.honey != nil && h.honey.ShouldHandle(r.URL.Path) {
+	if h.honey != nil && h.flags.IsHoneypotEnabled() && h.honey.ShouldHandle(r.URL.Path) {
 		status := h.honey.ServeHTTP(w, r)
 		return status, "honeypot"
 	}
 
 	// Captcha challenge: intercept requests that should be challenged
-	if h.captcha != nil {
+	if h.captcha != nil && h.flags.IsCaptchaEnabled() {
 		var reqCount int
 		if cp := h.collector.GetClientProfile(clientID); cp != nil {
 			snap := cp.Snapshot()
@@ -297,35 +365,37 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	}
 
 	// Check if this should go to the labyrinth
-	if h.shouldLabyrinth(r, behavior) {
+	if h.flags.IsLabyrinthEnabled() && h.shouldLabyrinth(r, behavior) {
 		status := h.lab.Serve(w, r)
 		return status, "labyrinth"
 	}
 
 	// Roll for error injection
-	errType := h.errGen.Pick(behavior.ErrorProfile)
+	if h.flags.IsErrorInjectEnabled() {
+		errType := h.errGen.Pick(behavior.ErrorProfile)
 
-	// Apply error — if it fully handled the response, we're done
-	if h.errGen.Apply(w, r, errType) {
-		statusCode := h.errTypeToStatus(errType)
-		if errors.IsError(errType) {
+		// Apply error — if it fully handled the response, we're done
+		if h.errGen.Apply(w, r, errType) {
+			statusCode := h.errTypeToStatus(errType)
 			return statusCode, string(errType)
 		}
-		return statusCode, string(errType)
+
+		// If it was a delay (but not terminal), we still serve a page
+		if errors.IsDelay(errType) {
+			return h.servePage(w, r, behavior, clientID), "delayed"
+		}
 	}
 
-	// If it was a delay (but not terminal), we still serve a page
-	responseType := "ok"
-	if errors.IsDelay(errType) {
-		responseType = "delayed"
-	}
+	return h.servePage(w, r, behavior, clientID), "ok"
+}
 
+// servePage renders the appropriate page content.
+func (h *Handler) servePage(w http.ResponseWriter, r *http.Request, behavior *adaptive.ClientBehavior, clientID string) int {
 	// Try content engine first for rich HTML pages
 	if h.content != nil && h.content.ShouldHandle(r.URL.Path) {
 		accept := r.Header.Get("Accept")
 		if accept == "" || contains(accept, "text/html") || contains(accept, "*/*") {
-			status := h.content.Serve(w, r)
-			return status, responseType
+			return h.content.Serve(w, r)
 		}
 	}
 
@@ -333,7 +403,7 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	pageType := h.selectPageType(r, behavior)
 	h.pageGen.Generate(w, r, pageType)
 
-	return http.StatusOK, responseType
+	return http.StatusOK
 }
 
 func (h *Handler) shouldLabyrinth(r *http.Request, behavior *adaptive.ClientBehavior) bool {
