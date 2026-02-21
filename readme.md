@@ -102,10 +102,6 @@ internal/
   dashboard/server.go        Live HTML dashboard + JSON API endpoints
 ```
 
-## Legacy Python Version
+## History
 
-The original 41-line Python version is still available in `main.py`. Run with:
-```bash
-pip install -r requirements.txt
-python main.py
-```
+The project started as a 41-line Python prototype and was rewritten in Go for performance and expanded to include 20+ subsystems.

@@ -69,13 +69,16 @@ func (e *Engine) buildSignature(r *http.Request) string {
 	}
 	parts = append(parts, "ip:"+ip)
 
-	// 6. TLS fingerprint hint — if Sec-* headers are present
+	// 6. TLS fingerprint hint — if Sec-* headers are present (sorted for stability)
+	var secHeaders []string
 	for k, v := range r.Header {
 		kl := strings.ToLower(k)
 		if strings.HasPrefix(kl, "sec-") {
-			parts = append(parts, kl+":"+strings.Join(v, ","))
+			secHeaders = append(secHeaders, kl+":"+strings.Join(v, ","))
 		}
 	}
+	sort.Strings(secHeaders)
+	parts = append(parts, secHeaders...)
 
 	return strings.Join(parts, "|")
 }

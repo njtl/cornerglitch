@@ -66,6 +66,15 @@ func (e *Emulator) ForClient(clientID string) *Framework {
 	return &fw
 }
 
+// ForRequest deterministically selects a framework based on both clientID
+// and request path, providing variety across different pages for the same client.
+func (e *Emulator) ForRequest(clientID, path string) *Framework {
+	h := sha256.Sum256([]byte(clientID + "::" + path))
+	idx := (int(h[0])<<8 | int(h[1])) % len(e.frameworks)
+	fw := e.frameworks[idx]
+	return &fw
+}
+
 // Apply sets framework-specific response headers and cookies on w.
 func (e *Emulator) Apply(w http.ResponseWriter, fw *Framework, clientID string) {
 	sessionID := deriveSessionID(clientID)

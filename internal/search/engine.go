@@ -102,16 +102,18 @@ func NewHandler() *Handler {
 // ShouldHandle returns true for search-related endpoints.
 func (h *Handler) ShouldHandle(path string) bool {
 	return path == "/search" ||
+		path == "/search/" ||
 		path == "/search/advanced" ||
 		path == "/search/images" ||
-		path == "/api/search/suggest"
+		path == "/api/search/suggest" ||
+		strings.HasPrefix(path, "/search?")
 }
 
 // ServeHTTP dispatches to the appropriate search endpoint and returns the
 // HTTP status code written to the response.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
 	switch r.URL.Path {
-	case "/search":
+	case "/search", "/search/":
 		return h.serveResults(w, r)
 	case "/search/advanced":
 		return h.serveAdvanced(w, r)
