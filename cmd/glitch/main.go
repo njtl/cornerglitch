@@ -24,6 +24,7 @@ import (
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/server"
+	"github.com/glitchWebServer/internal/vuln"
 )
 
 func main() {
@@ -42,8 +43,9 @@ func main() {
 	honey := honeypot.NewHoneypot()
 	fw := framework.NewEmulator()
 	captchaEng := captcha.NewEngine()
+	vulnH := vuln.NewHandler()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)
