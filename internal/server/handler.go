@@ -20,6 +20,7 @@ import (
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/oauth"
 	"github.com/glitchWebServer/internal/pages"
+	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/vuln"
 )
 
@@ -50,6 +51,7 @@ type Handler struct {
 	analytix  *analytics.Engine
 	cdnEng    *cdn.Engine
 	oauthH    *oauth.Handler
+	privacyH  *privacy.Handler
 }
 
 func NewHandler(
@@ -68,6 +70,7 @@ func NewHandler(
 	analytix *analytics.Engine,
 	cdnEng *cdn.Engine,
 	oauthH *oauth.Handler,
+	privacyH *privacy.Handler,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -85,6 +88,7 @@ func NewHandler(
 		analytix:  analytix,
 		cdnEng:    cdnEng,
 		oauthH:    oauthH,
+		privacyH:  privacyH,
 	}
 }
 
@@ -172,6 +176,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.oauthH != nil && h.oauthH.ShouldHandle(r.URL.Path) {
 		status := h.oauthH.ServeHTTP(w, r)
 		return status, "oauth"
+	}
+
+	// Privacy/consent endpoints
+	if h.privacyH != nil && h.privacyH.ShouldHandle(r.URL.Path) {
+		status := h.privacyH.ServeHTTP(w, r)
+		return status, "privacy"
 	}
 
 	// Analytics beacon/tracking endpoints
