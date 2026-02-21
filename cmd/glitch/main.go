@@ -28,6 +28,7 @@ import (
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/recorder"
+	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/server"
 	"github.com/glitchWebServer/internal/websocket"
 	"github.com/glitchWebServer/internal/vuln"
@@ -56,8 +57,9 @@ func main() {
 	privacyH := privacy.NewHandler()
 	wsH := websocket.NewHandler()
 	rec := recorder.NewRecorder("captures")
+	searchH := search.NewHandler()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)
