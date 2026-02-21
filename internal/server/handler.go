@@ -21,6 +21,7 @@ import (
 	"github.com/glitchWebServer/internal/oauth"
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/privacy"
+	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/vuln"
 	"github.com/glitchWebServer/internal/websocket"
 )
@@ -54,6 +55,7 @@ type Handler struct {
 	oauthH    *oauth.Handler
 	privacyH  *privacy.Handler
 	wsH       *websocket.Handler
+	rec       *recorder.Recorder
 }
 
 func NewHandler(
@@ -74,6 +76,7 @@ func NewHandler(
 	oauthH *oauth.Handler,
 	privacyH *privacy.Handler,
 	wsH *websocket.Handler,
+	rec *recorder.Recorder,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -93,6 +96,7 @@ func NewHandler(
 		oauthH:    oauthH,
 		privacyH:  privacyH,
 		wsH:       wsH,
+		rec:       rec,
 	}
 }
 
@@ -141,6 +145,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RemoteAddr:   r.RemoteAddr,
 		Headers:      headers,
 	})
+
+	// Step 5.5: Record to traffic capture (if recording)
+	if h.rec != nil && h.rec.IsRecording() {
+		h.rec.RecordFull(r.Method, r.URL.Path, clientID, headers, nil,
+			statusCode, nil, 0, float64(latency.Milliseconds()))
+	}
 
 	// Step 6: Log with colors
 	color := green
@@ -198,6 +208,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.analytix != nil && h.analytix.ShouldHandle(r.URL.Path) {
 		status := h.analytix.ServeHTTP(w, r)
 		return status, "analytics"
+	}
+
+	// Traffic recorder management endpoints
+	if h.rec != nil && h.rec.ShouldHandle(r.URL.Path) {
+		status := h.rec.ServeHTTP(w, r)
+		return status, "recorder"
 	}
 
 	// Captcha verification endpoint
