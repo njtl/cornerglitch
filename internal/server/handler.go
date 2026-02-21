@@ -11,6 +11,7 @@ import (
 	"github.com/glitchWebServer/internal/content"
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
+	"github.com/glitchWebServer/internal/framework"
 	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
@@ -38,6 +39,7 @@ type Handler struct {
 	content   *content.Engine
 	apiRouter *api.Router
 	honey     *honeypot.Honeypot
+	fw        *framework.Emulator
 }
 
 func NewHandler(
@@ -50,6 +52,7 @@ func NewHandler(
 	contentEng *content.Engine,
 	apiRouter *api.Router,
 	honey *honeypot.Honeypot,
+	fw *framework.Emulator,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -61,6 +64,7 @@ func NewHandler(
 		content:   contentEng,
 		apiRouter: apiRouter,
 		honey:     honey,
+		fw:        fw,
 	}
 }
 
@@ -73,13 +77,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clientID := h.fp.Identify(r)
 	clientClass := h.fp.ClassifyClient(r)
 
-	// Step 2: Get adaptive behavior for this client
+	// Step 2: Apply framework emulation headers/cookies for this client
+	if h.fw != nil {
+		fwProfile := h.fw.ForClient(clientID)
+		h.fw.Apply(w, fwProfile, clientID)
+	}
+
+	// Step 3: Get adaptive behavior for this client
 	behavior := h.adapt.Decide(clientID, clientClass)
 
-	// Step 3: Decide what to do with this request
+	// Step 4: Decide what to do with this request
 	statusCode, responseType := h.dispatch(w, r, behavior)
 
-	// Step 4: Record metrics
+	// Step 5: Record metrics
 	latency := time.Since(start)
 	headers := make(map[string]string)
 	for k := range r.Header {
@@ -99,7 +109,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Headers:      headers,
 	})
 
-	// Step 5: Log with colors
+	// Step 6: Log with colors
 	color := green
 	switch {
 	case statusCode >= 500:
