@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/analytics"
 	"github.com/glitchWebServer/internal/api"
 	"github.com/glitchWebServer/internal/content"
 	"github.com/glitchWebServer/internal/dashboard"
@@ -44,8 +45,9 @@ func main() {
 	fw := framework.NewEmulator()
 	captchaEng := captcha.NewEngine()
 	vulnH := vuln.NewHandler()
+	analytix := analytics.NewEngine()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)
