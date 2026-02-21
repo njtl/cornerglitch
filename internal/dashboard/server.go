@@ -36,6 +36,9 @@ func NewServer(collector *metrics.Collector, fp *fingerprint.Engine, adapt *adap
 	mux.HandleFunc("/api/recent", s.apiRecent)
 	mux.HandleFunc("/api/behaviors", s.apiBehaviors)
 
+	// Register admin panel routes
+	RegisterAdminRoutes(mux, s)
+
 	s.httpSrv = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: mux,
