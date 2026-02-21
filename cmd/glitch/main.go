@@ -17,6 +17,7 @@ import (
 	"github.com/glitchWebServer/internal/dashboard"
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
+	"github.com/glitchWebServer/internal/framework"
 	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
@@ -38,8 +39,9 @@ func main() {
 	contentEng := content.NewEngine()
 	apiRouter := api.NewRouter()
 	honey := honeypot.NewHoneypot()
+	fw := framework.NewEmulator()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)
