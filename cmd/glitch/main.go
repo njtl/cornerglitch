@@ -28,6 +28,7 @@ import (
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/server"
+	"github.com/glitchWebServer/internal/websocket"
 	"github.com/glitchWebServer/internal/vuln"
 )
 
@@ -52,8 +53,9 @@ func main() {
 	cdnEng := cdn.NewEngine()
 	oauthH := oauth.NewHandler()
 	privacyH := privacy.NewHandler()
+	wsH := websocket.NewHandler()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)
