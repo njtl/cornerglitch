@@ -22,6 +22,7 @@ import (
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/vuln"
+	"github.com/glitchWebServer/internal/websocket"
 )
 
 // ANSI color codes for logging
@@ -52,6 +53,7 @@ type Handler struct {
 	cdnEng    *cdn.Engine
 	oauthH    *oauth.Handler
 	privacyH  *privacy.Handler
+	wsH       *websocket.Handler
 }
 
 func NewHandler(
@@ -71,6 +73,7 @@ func NewHandler(
 	cdnEng *cdn.Engine,
 	oauthH *oauth.Handler,
 	privacyH *privacy.Handler,
+	wsH *websocket.Handler,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -89,6 +92,7 @@ func NewHandler(
 		cdnEng:    cdnEng,
 		oauthH:    oauthH,
 		privacyH:  privacyH,
+		wsH:       wsH,
 	}
 }
 
@@ -166,6 +170,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *adaptive.ClientBehavior, clientID, clientClass string) (int, string) {
+	// WebSocket endpoints (must check early — upgrade needs raw connection)
+	if h.wsH != nil && h.wsH.ShouldHandle(r.URL.Path) {
+		status := h.wsH.ServeHTTP(w, r)
+		return status, "websocket"
+	}
+
 	// API requests bypass error injection and go straight to the API router
 	if h.apiRouter != nil && h.apiRouter.ShouldHandle(r.URL.Path) {
 		status := h.apiRouter.ServeHTTP(w, r)
