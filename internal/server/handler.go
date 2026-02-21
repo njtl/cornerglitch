@@ -125,9 +125,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clientID := h.fp.Identify(r)
 	clientClass := h.fp.ClassifyClient(r)
 
-	// Step 2: Apply framework emulation headers/cookies for this client
+	// Step 2: Apply framework emulation headers/cookies for this client+path
 	if h.fw != nil {
-		fwProfile := h.fw.ForClient(clientID)
+		fwProfile := h.fw.ForRequest(clientID, r.URL.Path)
 		h.fw.Apply(w, fwProfile, clientID)
 	}
 
