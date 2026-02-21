@@ -17,6 +17,7 @@ import (
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/pages"
+	"github.com/glitchWebServer/internal/vuln"
 )
 
 // ANSI color codes for logging
@@ -42,6 +43,7 @@ type Handler struct {
 	honey     *honeypot.Honeypot
 	fw        *framework.Emulator
 	captcha   *captcha.Engine
+	vulnH     *vuln.Handler
 }
 
 func NewHandler(
@@ -56,6 +58,7 @@ func NewHandler(
 	honey *honeypot.Honeypot,
 	fw *framework.Emulator,
 	captchaEng *captcha.Engine,
+	vulnH *vuln.Handler,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -69,6 +72,7 @@ func NewHandler(
 		honey:     honey,
 		fw:        fw,
 		captcha:   captchaEng,
+		vulnH:     vulnH,
 	}
 }
 
@@ -130,6 +134,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		color = red
 	case responseType == "captcha":
 		color = yellow
+	case responseType == "vuln":
+		color = red
 	}
 
 	log.Printf("%s[%s]%s %s %s %d %s (client=%s class=%s mode=%s)",
@@ -149,6 +155,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.captcha != nil && r.URL.Path == "/captcha/verify" && r.Method == "POST" {
 		status := h.captcha.HandleVerify(w, r)
 		return status, "captcha"
+	}
+
+	// OWASP vulnerability emulation
+	if h.vulnH != nil && h.vulnH.ShouldHandle(r.URL.Path) {
+		status := h.vulnH.ServeHTTP(w, r)
+		return status, "vuln"
 	}
 
 	// Honeypot: catch scanner probes on known vuln paths
