@@ -3,6 +3,7 @@ package adaptive
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ const (
 	ModeMirror       BehaviorMode = "mirror"        // mirror their request patterns back
 	ModeEscalating   BehaviorMode = "escalating"    // gets worse over time
 	ModeIntermittent BehaviorMode = "intermittent"  // random bursts of failure
+	ModeBlocked      BehaviorMode = "blocked"       // client is temporarily blocked
 )
 
 // ClientBehavior holds the adaptive state for a single client.
@@ -33,6 +35,8 @@ type ClientBehavior struct {
 	AssignedAt      time.Time
 	Reason          string
 	EscalationLevel int // for ModeEscalating
+	BlockedUntil    time.Time // for ModeBlocked
+	BotScore        float64   // 0-100, detection score from botdetect
 }
 
 // Engine decides how to behave toward each client based on their observed patterns.
@@ -41,14 +45,88 @@ type Engine struct {
 	behaviors map[string]*ClientBehavior
 	collector *metrics.Collector
 	fp        *fingerprint.Engine
+
+	// Random blocking configuration
+	blockChance    float64       // probability of random block per evaluation (default 0.02)
+	blockDuration  time.Duration // how long a block lasts (default 30s)
+	blockEnabled   bool          // whether random blocking is active
+
+	// Manual overrides (set via admin panel)
+	overrides map[string]BehaviorMode
 }
 
 func NewEngine(collector *metrics.Collector, fp *fingerprint.Engine) *Engine {
 	return &Engine{
-		behaviors: make(map[string]*ClientBehavior),
-		collector: collector,
-		fp:        fp,
+		behaviors:     make(map[string]*ClientBehavior),
+		collector:     collector,
+		fp:            fp,
+		blockChance:   0.02,
+		blockDuration: 30 * time.Second,
+		blockEnabled:  true,
+		overrides:     make(map[string]BehaviorMode),
 	}
+}
+
+// SetBlockChance updates the random block probability (0.0-1.0).
+func (e *Engine) SetBlockChance(chance float64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if chance < 0 {
+		chance = 0
+	}
+	if chance > 1 {
+		chance = 1
+	}
+	e.blockChance = chance
+}
+
+// SetBlockDuration updates how long random blocks last.
+func (e *Engine) SetBlockDuration(d time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.blockDuration = d
+}
+
+// SetBlockEnabled toggles random blocking.
+func (e *Engine) SetBlockEnabled(enabled bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.blockEnabled = enabled
+}
+
+// GetBlockConfig returns the current blocking configuration.
+func (e *Engine) GetBlockConfig() (chance float64, duration time.Duration, enabled bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.blockChance, e.blockDuration, e.blockEnabled
+}
+
+// SetOverride forces a specific mode for a client (used by admin panel).
+func (e *Engine) SetOverride(clientID string, mode BehaviorMode) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.overrides[clientID] = mode
+	// Clear cached behavior so next Decide picks up the override
+	delete(e.behaviors, clientID)
+}
+
+// ClearOverride removes a manual override for a client.
+func (e *Engine) ClearOverride(clientID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.overrides, clientID)
+	delete(e.behaviors, clientID)
+}
+
+// GetOverrides returns all active manual overrides.
+func (e *Engine) GetOverrides() map[string]BehaviorMode {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	result := make(map[string]BehaviorMode, len(e.overrides))
+	for k, v := range e.overrides {
+		result[k] = v
+	}
+	return result
 }
 
 // Decide returns the behavior for a client, evaluating their profile and updating adaptively.
@@ -56,7 +134,22 @@ func (e *Engine) Decide(clientID string, clientClass fingerprint.ClientClass) *C
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	// Check for active block
 	existing, ok := e.behaviors[clientID]
+	if ok && existing.Mode == ModeBlocked {
+		if time.Now().Before(existing.BlockedUntil) {
+			return existing // still blocked
+		}
+		// Block expired, fall through to re-evaluate
+	}
+
+	// Check for manual override from admin panel
+	if mode, hasOverride := e.overrides[clientID]; hasOverride {
+		behavior := e.buildOverrideBehavior(mode, clientID)
+		e.behaviors[clientID] = behavior
+		return behavior
+	}
+
 	if ok && time.Since(existing.AssignedAt) < 30*time.Second {
 		// Re-evaluate every 30 seconds
 		return existing
@@ -64,6 +157,19 @@ func (e *Engine) Decide(clientID string, clientClass fingerprint.ClientClass) *C
 
 	profile := e.collector.GetClientProfile(clientID)
 	behavior := e.evaluate(clientID, clientClass, profile)
+
+	// Random blocking chance (only for non-browser, non-new clients)
+	if e.blockEnabled && profile != nil && profile.TotalRequests > 10 &&
+		clientClass != fingerprint.ClassBrowser && rand.Float64() < e.blockChance {
+		behavior = &ClientBehavior{
+			Mode:         ModeBlocked,
+			ErrorProfile: errors.DefaultProfile(),
+			AssignedAt:   time.Now(),
+			BlockedUntil: time.Now().Add(e.blockDuration),
+			Reason:       "random block — temporary denial of service",
+		}
+	}
+
 	e.behaviors[clientID] = behavior
 
 	if profile != nil {
@@ -289,6 +395,51 @@ func (e *Engine) GetAllBehaviors() map[string]*ClientBehavior {
 		result[k] = v
 	}
 	return result
+}
+
+func (e *Engine) buildOverrideBehavior(mode BehaviorMode, clientID string) *ClientBehavior {
+	b := &ClientBehavior{
+		Mode:       mode,
+		AssignedAt: time.Now(),
+		Reason:     "manual override via admin panel",
+	}
+	switch mode {
+	case ModeBlocked:
+		b.ErrorProfile = errors.DefaultProfile()
+		b.BlockedUntil = time.Now().Add(24 * time.Hour) // manual blocks last 24h
+	case ModeAggressive:
+		b.ErrorProfile = errors.AggressiveProfile()
+		b.LabyrinthChance = 0.3
+		b.PageVariety = 0.8
+	case ModeLabyrinth:
+		b.ErrorProfile = errors.DefaultProfile()
+		b.LabyrinthChance = 0.9
+		b.PageVariety = 1.0
+	case ModeCooperative:
+		profile := errors.DefaultProfile()
+		for k, v := range profile.Weights {
+			if k != errors.ErrNone {
+				profile.Weights[k] = v * 0.3
+			}
+		}
+		profile.Weights[errors.ErrNone] = 0.9
+		b.ErrorProfile = profile
+		b.LabyrinthChance = 0.0
+		b.PageVariety = 0.3
+	default:
+		b.ErrorProfile = errors.DefaultProfile()
+		b.LabyrinthChance = 0.05
+		b.PageVariety = 0.5
+	}
+	return b
+}
+
+// IsBlocked returns true if the client is currently blocked.
+func (e *Engine) IsBlocked(clientID string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	b, ok := e.behaviors[clientID]
+	return ok && b.Mode == ModeBlocked && time.Now().Before(b.BlockedUntil)
 }
 
 func reasonf(format string, args ...interface{}) string {

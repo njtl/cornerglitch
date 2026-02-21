@@ -1,0 +1,10 @@
+.git
+*.md
+!README.md
+captures/
+glitch
+glitch-proxy
+glitch-crawler
+glitch-linux-*
+glitch-darwin-*
+.claude/

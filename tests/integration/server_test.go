@@ -12,16 +12,20 @@ import (
 	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/analytics"
 	"github.com/glitchWebServer/internal/api"
+	"github.com/glitchWebServer/internal/botdetect"
 	"github.com/glitchWebServer/internal/captcha"
 	"github.com/glitchWebServer/internal/cdn"
 	"github.com/glitchWebServer/internal/content"
+	"github.com/glitchWebServer/internal/cookies"
 	"github.com/glitchWebServer/internal/email"
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/framework"
+	"github.com/glitchWebServer/internal/headers"
 	"github.com/glitchWebServer/internal/health"
 	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/i18n"
+	"github.com/glitchWebServer/internal/jstrap"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/oauth"
@@ -58,11 +62,16 @@ func newTestHandler() *server.Handler {
 	emailH := email.NewHandler()
 	healthH := health.NewHandler(time.Now())
 	i18nH := i18n.NewHandler()
+	headerEng := headers.NewEngine()
+	cookieT := cookies.NewTracker()
+	jsEng := jstrap.NewEngine()
+	botDet := botdetect.NewDetector()
 
 	return server.NewHandler(
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
+		headerEng, cookieT, jsEng, botDet,
 	)
 }
 

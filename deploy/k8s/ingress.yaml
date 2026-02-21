@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: glitch-server
+  namespace: glitch-server
+  labels:
+    app.kubernetes.io/name: glitch-server
+    app.kubernetes.io/component: server
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+spec:
+  ingressClassName: nginx
+  # Uncomment the tls block below to enable TLS
+  # tls:
+  #   - hosts:
+  #       - glitch.example.com
+  #     secretName: glitch-tls-secret
+  rules:
+    - host: glitch.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: glitch-server
+                port:
+                  name: http
