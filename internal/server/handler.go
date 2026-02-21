@@ -16,6 +16,7 @@ import (
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/framework"
+	"github.com/glitchWebServer/internal/health"
 	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
@@ -60,6 +61,7 @@ type Handler struct {
 	rec       *recorder.Recorder
 	searchH   *search.Handler
 	emailH    *email.Handler
+	healthH   *health.Handler
 }
 
 func NewHandler(
@@ -83,6 +85,7 @@ func NewHandler(
 	rec *recorder.Recorder,
 	searchH *search.Handler,
 	emailH *email.Handler,
+	healthH *health.Handler,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -105,6 +108,7 @@ func NewHandler(
 		rec:       rec,
 		searchH:   searchH,
 		emailH:    emailH,
+		healthH:   healthH,
 	}
 }
 
@@ -192,6 +196,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.wsH != nil && h.wsH.ShouldHandle(r.URL.Path) {
 		status := h.wsH.ServeHTTP(w, r)
 		return status, "websocket"
+	}
+
+	// Health/status/debug endpoints
+	if h.healthH != nil && h.healthH.ShouldHandle(r.URL.Path) {
+		status := h.healthH.ServeHTTP(w, r)
+		return status, "health"
 	}
 
 	// API requests bypass error injection and go straight to the API router
