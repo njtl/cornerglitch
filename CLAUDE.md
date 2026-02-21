@@ -37,7 +37,7 @@ internal/
 - **Labyrinth pages are deterministic** — seeded from path via SHA-256 so the same URL always yields the same page.
 - **Adaptive behavior** is per-client (keyed by fingerprint ID) and mode transitions happen in `adaptive/engine.go:evaluate()`.
 - **Dashboard runs on a separate port** (default 8766) and has no auth — it's for internal observability.
-- **The original Python server** (`main.py`, `requirements.txt`) is kept for reference but is not actively developed.
+- **No legacy code.** The original Python prototype has been removed; Go is the sole implementation.
 
 ## Testing
 
