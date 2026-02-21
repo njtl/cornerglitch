@@ -24,6 +24,7 @@ import (
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/recorder"
+	"github.com/glitchWebServer/internal/i18n"
 	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/vuln"
 	"github.com/glitchWebServer/internal/websocket"
@@ -62,6 +63,7 @@ type Handler struct {
 	searchH   *search.Handler
 	emailH    *email.Handler
 	healthH   *health.Handler
+	i18nH     *i18n.Handler
 }
 
 func NewHandler(
@@ -86,6 +88,7 @@ func NewHandler(
 	searchH *search.Handler,
 	emailH *email.Handler,
 	healthH *health.Handler,
+	i18nH *i18n.Handler,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -109,6 +112,7 @@ func NewHandler(
 		searchH:   searchH,
 		emailH:    emailH,
 		healthH:   healthH,
+		i18nH:     i18nH,
 	}
 }
 
@@ -183,6 +187,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		color = yellow
 	case responseType == "vuln":
 		color = red
+	case responseType == "i18n":
+		color = cyan
 	}
 
 	log.Printf("%s[%s]%s %s %s %d %s (client=%s class=%s mode=%s)",
@@ -244,6 +250,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.searchH != nil && h.searchH.ShouldHandle(r.URL.Path) {
 		status := h.searchH.ServeHTTP(w, r)
 		return status, "search"
+	}
+
+	// i18n / multi-language endpoints
+	if h.i18nH != nil && h.i18nH.ShouldHandle(r.URL.Path) {
+		status := h.i18nH.ServeHTTP(w, r)
+		return status, "i18n"
 	}
 
 	// Captcha verification endpoint
