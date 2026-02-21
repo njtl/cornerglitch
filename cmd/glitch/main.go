@@ -24,6 +24,7 @@ import (
 	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
+	"github.com/glitchWebServer/internal/oauth"
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/server"
 	"github.com/glitchWebServer/internal/vuln"
@@ -48,8 +49,9 @@ func main() {
 	vulnH := vuln.NewHandler()
 	analytix := analytics.NewEngine()
 	cdnEng := cdn.NewEngine()
+	oauthH := oauth.NewHandler()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)

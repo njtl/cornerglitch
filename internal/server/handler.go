@@ -18,6 +18,7 @@ import (
 	"github.com/glitchWebServer/internal/honeypot"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/metrics"
+	"github.com/glitchWebServer/internal/oauth"
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/vuln"
 )
@@ -48,6 +49,7 @@ type Handler struct {
 	vulnH     *vuln.Handler
 	analytix  *analytics.Engine
 	cdnEng    *cdn.Engine
+	oauthH    *oauth.Handler
 }
 
 func NewHandler(
@@ -65,6 +67,7 @@ func NewHandler(
 	vulnH *vuln.Handler,
 	analytix *analytics.Engine,
 	cdnEng *cdn.Engine,
+	oauthH *oauth.Handler,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -81,6 +84,7 @@ func NewHandler(
 		vulnH:     vulnH,
 		analytix:  analytix,
 		cdnEng:    cdnEng,
+		oauthH:    oauthH,
 	}
 }
 
@@ -162,6 +166,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.apiRouter != nil && h.apiRouter.ShouldHandle(r.URL.Path) {
 		status := h.apiRouter.ServeHTTP(w, r)
 		return status, "api"
+	}
+
+	// OAuth2/SSO/SAML endpoints
+	if h.oauthH != nil && h.oauthH.ShouldHandle(r.URL.Path) {
+		status := h.oauthH.ServeHTTP(w, r)
+		return status, "oauth"
 	}
 
 	// Analytics beacon/tracking endpoints
