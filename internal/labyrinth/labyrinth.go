@@ -125,7 +125,11 @@ func (l *Labyrinth) serveHTML(w http.ResponseWriter, r *http.Request, rng *rand.
 	breadcrumbs := l.generateBreadcrumbs(r.URL.Path)
 
 	// Pagination (infinite pages)
-	pageHash := hex.EncodeToString([]byte(r.URL.Path))[:8]
+	pathHex := hex.EncodeToString([]byte(r.URL.Path))
+	if len(pathHex) > 8 {
+		pathHex = pathHex[:8]
+	}
+	pageHash := pathHex
 	pagination := fmt.Sprintf(`
     <nav class="pagination">
       <a href="%s/prev-%s">Previous</a>
