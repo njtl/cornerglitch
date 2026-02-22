@@ -743,13 +743,19 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   const API = window.location.protocol + '//' + window.location.hostname + ':' + window.location.port;
   let logData = [];
 
-  // ------ Tabs ------
-  window.showTab = function(name) {
+  // ------ Tabs with hash routing ------
+  window.showTab = function(name, pushHash) {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById('panel-' + name).classList.add('active');
     document.querySelector('.tab[onclick*="' + name + '"]').classList.add('active');
+    if (pushHash !== false) window.location.hash = '#' + name;
   };
+
+  window.addEventListener('hashchange', function() {
+    var tab = window.location.hash.replace('#', '');
+    if (tab && document.getElementById('panel-' + tab)) showTab(tab, false);
+  });
 
   // ------ Toast ------
   function toast(msg) {
@@ -1620,13 +1626,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     else if (id === 'panel-scanner') await refreshScannerHistory();
   }
 
-  // Initial load
+  // Initial load — restore tab from URL hash
   (async function init() {
-    await refreshDashboard();
-    refreshSessions();
-    refreshTraffic();
-    refreshControls();
-    refreshLog();
+    var hash = window.location.hash.replace('#', '');
+    if (hash && document.getElementById('panel-' + hash)) {
+      showTab(hash, false);
+    }
+    await refresh();
   })();
 
   setInterval(refresh, 2000);
