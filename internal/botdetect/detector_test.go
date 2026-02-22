@@ -1416,14 +1416,15 @@ func TestFullHumanScenario(t *testing.T) {
 	// Simulate a real human browser
 	headers := chromeHeaders()
 
-	// Record some page views with assets
+	// Record some page views with assets — use variable delays to look human
 	pages := []string{"/", "/about", "/contact", "/style.css", "/app.js", "/logo.png"}
-	for _, page := range pages {
+	delays := []time.Duration{12, 45, 8, 3, 25, 18} // varied ms, like a real browser
+	for i, page := range pages {
 		r := newRequest("GET", page, headers)
 		r.RemoteAddr = "73.162.45.10:54321" // Residential IP
 		r.AddCookie(&http.Cookie{Name: "session", Value: "abc123"})
 		d.RecordRequest(clientID, r)
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(delays[i] * time.Millisecond)
 	}
 
 	// Final score
