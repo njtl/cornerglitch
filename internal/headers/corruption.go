@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,11 +25,56 @@ const (
 // Engine applies HTTP header corruption techniques to confuse web scrapers
 // while keeping responses mostly functional for real browsers.
 // The engine is stateless per request and safe for concurrent use.
-type Engine struct{}
+type Engine struct {
+	mu    sync.RWMutex
+	level int // 0-4 (none/subtle/moderate/aggressive/chaos)
+}
 
 // NewEngine creates a new header corruption engine.
 func NewEngine() *Engine {
-	return &Engine{}
+	return &Engine{
+		level: 1, // default subtle
+	}
+}
+
+// SetCorruptionLevel sets the corruption level, clamped to [0, 4].
+func (e *Engine) SetCorruptionLevel(level int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if level < 0 {
+		level = 0
+	}
+	if level > 4 {
+		level = 4
+	}
+	e.level = level
+}
+
+// GetCorruptionLevel returns the current corruption level as an int.
+func (e *Engine) GetCorruptionLevel() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.level
+}
+
+// GetLevel returns the current corruption level as a CorruptionLevel constant.
+func (e *Engine) GetLevel() CorruptionLevel {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	switch e.level {
+	case 0:
+		return LevelNone
+	case 1:
+		return LevelSubtle
+	case 2:
+		return LevelModerate
+	case 3:
+		return LevelAggressive
+	case 4:
+		return LevelChaos
+	default:
+		return LevelSubtle
+	}
 }
 
 // ShouldCorrupt returns true if headers should be corrupted for the given

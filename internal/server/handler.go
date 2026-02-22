@@ -177,9 +177,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Step 2.8: Header corruption — apply before body is written
 	if h.headerEng != nil && h.flags.IsHeaderCorruptEnabled() {
 		if h.headerEng.ShouldCorrupt(string(clientClass)) {
-			level := headers.CorruptionLevel([]string{
-				"none", "subtle", "moderate", "aggressive", "chaos",
-			}[h.config.Get()["header_corrupt_level"].(int)])
+			level := h.headerEng.GetLevel()
 			h.headerEng.Apply(w, r, clientID, level)
 		}
 	}
@@ -617,6 +615,37 @@ func (h *Handler) syncConfigToSubsystems() {
 		}
 		if ttlSec, ok := cfg["content_cache_ttl_sec"].(int); ok && ttlSec > 0 {
 			h.content.SetCacheTTL(time.Duration(ttlSec) * time.Second)
+		}
+	}
+
+	// Sync labyrinth settings
+	if h.lab != nil {
+		if depth, ok := cfg["max_labyrinth_depth"].(int); ok {
+			h.lab.SetMaxDepth(depth)
+		}
+		if density, ok := cfg["labyrinth_link_density"].(int); ok {
+			h.lab.SetLinkDensity(density)
+		}
+	}
+
+	// Sync header corruption level
+	if h.headerEng != nil {
+		if level, ok := cfg["header_corrupt_level"].(int); ok {
+			h.headerEng.SetCorruptionLevel(level)
+		}
+	}
+
+	// Sync captcha trigger threshold
+	if h.captcha != nil {
+		if thresh, ok := cfg["captcha_trigger_thresh"].(int); ok {
+			h.captcha.SetTriggerThreshold(thresh)
+		}
+	}
+
+	// Sync bot detection score threshold
+	if h.botDet != nil {
+		if thresh, ok := cfg["bot_score_threshold"].(float64); ok {
+			h.botDet.SetScoreThreshold(thresh)
 		}
 	}
 }
