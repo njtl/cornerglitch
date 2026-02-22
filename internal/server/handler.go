@@ -603,6 +603,13 @@ func (h *Handler) syncConfigToSubsystems() {
 		}
 	}
 
+	// Sync recorder format
+	if h.rec != nil {
+		if fmtStr, ok := cfg["recorder_format"].(string); ok && fmtStr != "" {
+			h.rec.SetFormat(fmtStr)
+		}
+	}
+
 	// Sync content engine theme and cache TTL
 	if h.content != nil {
 		if theme, ok := cfg["content_theme"].(string); ok {
