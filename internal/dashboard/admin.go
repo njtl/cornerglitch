@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/scanner"
 )
 
 // ---------------------------------------------------------------------------
@@ -442,6 +443,10 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 var (
 	globalFlags  = NewFeatureFlags()
 	globalConfig = NewAdminConfig()
+
+	// Scanner runner — uses the real scanner package
+	scanRunner   *scanner.Runner
+	scanRunnerMu sync.Mutex
 )
 
 // GetFeatureFlags returns the global FeatureFlags instance.
@@ -449,6 +454,26 @@ func GetFeatureFlags() *FeatureFlags { return globalFlags }
 
 // GetAdminConfig returns the global AdminConfig instance.
 func GetAdminConfig() *AdminConfig { return globalConfig }
+
+// getScanRunner returns the singleton scanner.Runner, creating it on first call.
+func getScanRunner() *scanner.Runner {
+	scanRunnerMu.Lock()
+	defer scanRunnerMu.Unlock()
+	if scanRunner == nil {
+		scanRunner = scanner.NewRunner(scanner.DefaultRunnerConfig(
+			"http://localhost:8765",
+			"http://localhost:8766",
+		))
+	}
+	return scanRunner
+}
+
+// buildScannerProfile computes an expected profile from current feature flags and config.
+func buildScannerProfile() *scanner.ExpectedProfile {
+	features := globalFlags.Snapshot()
+	config := globalConfig.Get()
+	return scanner.ComputeProfile(features, config, 8765, 8766)
+}
 
 // ---------------------------------------------------------------------------
 // Route registration
@@ -506,6 +531,31 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		} else {
 			adminAPIOverrideGet(w, r, s)
 		}
+	})
+
+	// Scanner profile — returns vulnerability profile for the current config
+	mux.HandleFunc("/admin/api/scanner/profile", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIScannerProfile(w, r, s)
+	})
+
+	// Scanner run — kicks off a scanner asynchronously
+	mux.HandleFunc("/admin/api/scanner/run", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIScannerRun(w, r, s)
+	})
+
+	// Scanner compare — accepts raw scanner output, compares against profile
+	mux.HandleFunc("/admin/api/scanner/compare", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIScannerCompare(w, r, s)
+	})
+
+	// Scanner results — returns stored scan results
+	mux.HandleFunc("/admin/api/scanner/results", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIScannerResults(w, r, s)
+	})
+
+	// Scanner stop — stops a running scanner
+	mux.HandleFunc("/admin/api/scanner/stop", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIScannerStop(w, r, s)
 	})
 }
 
@@ -953,6 +1003,177 @@ func adminAPIOverridePost(w http.ResponseWriter, r *http.Request, s *Server) {
 }
 
 // ---------------------------------------------------------------------------
+// Scanner API handlers (stubs — will be backed by internal/scanner later)
+// ---------------------------------------------------------------------------
+
+func adminAPIScannerProfile(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	profile := buildScannerProfile()
+
+	// Also include scanner availability info
+	runner := getScanRunner()
+	available := runner.AvailableScanners()
+
+	resp := map[string]interface{}{
+		"profile":            profile,
+		"available_scanners": available,
+	}
+
+	json.NewEncoder(w).Encode(resp)
+}
+
+func adminAPIScannerRun(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Scanner string `json:"scanner"`
+		Target  string `json:"target"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	runner := getScanRunner()
+	profile := buildScannerProfile()
+
+	if runner.IsRunning(req.Scanner) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "already_running",
+			"scanner": req.Scanner,
+			"message": "Scanner is already running",
+		})
+		return
+	}
+
+	runID, err := runner.RunScanner(req.Scanner, profile)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"scanner": req.Scanner,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "started",
+		"scanner": req.Scanner,
+		"run_id":  runID,
+		"message": "Scanner started. Poll /admin/api/scanner/results for progress.",
+	})
+}
+
+func adminAPIScannerCompare(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB max
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Scanner string `json:"scanner"`
+		Data    string `json:"data"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	profile := buildScannerProfile()
+	report, err := scanner.ParseAndCompare(req.Scanner, []byte(req.Data), profile)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   err.Error(),
+			"scanner": req.Scanner,
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(report)
+}
+
+func adminAPIScannerResults(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	runner := getScanRunner()
+	completed := runner.GetResults()
+	running := runner.GetRunning()
+
+	// Build running list
+	runningList := make([]map[string]interface{}, 0, len(running))
+	for name, run := range running {
+		runningList = append(runningList, map[string]interface{}{
+			"scanner":    name,
+			"status":     run.Status,
+			"started_at": run.StartedAt.Format(time.RFC3339),
+			"elapsed":    time.Since(run.StartedAt).Round(time.Second).String(),
+		})
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"completed": completed,
+		"running":   runningList,
+		"count":     len(completed),
+	})
+}
+
+func adminAPIScannerStop(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Scanner string `json:"scanner"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	runner := getScanRunner()
+	stopped := runner.StopScanner(req.Scanner)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"scanner": req.Scanner,
+		"stopped": stopped,
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -1299,6 +1520,59 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     pointer-events: none;
   }
   .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* Severity badges */
+  .sev { padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: bold; text-transform: uppercase; }
+  .sev-critical { background: #ff2244; color: #fff; }
+  .sev-high { background: #ff8800; color: #000; }
+  .sev-medium { background: #ffcc00; color: #000; }
+  .sev-low { background: #4488ff; color: #fff; }
+  .sev-info { background: #444; color: #aaa; }
+
+  /* Grade display */
+  .grade { font-size: 4em; font-weight: bold; text-align: center; padding: 20px; }
+  .grade-a { color: #00ff88; }
+  .grade-b { color: #88ff00; }
+  .grade-c { color: #ffcc00; }
+  .grade-d { color: #ff8800; }
+  .grade-f { color: #ff2244; }
+
+  /* Progress bars */
+  .prog-bar { height: 20px; background: #1a1a1a; border-radius: 4px; overflow: hidden; margin: 4px 0; }
+  .prog-fill { height: 100%%; border-radius: 4px; transition: width 0.5s; }
+  .prog-green { background: linear-gradient(90deg, #00aa66, #00ff88); }
+  .prog-red { background: linear-gradient(90deg, #aa2200, #ff4444); }
+  .prog-yellow { background: linear-gradient(90deg, #aa8800, #ffcc00); }
+
+  /* Scanner controls */
+  .scanner-btn { background: #00aa66; color: #000; border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-family: inherit; font-weight: bold; font-size: 0.85em; margin: 4px; }
+  .scanner-btn:hover { background: #00cc77; }
+  .scanner-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+  .scanner-btn.running { background: #ffaa00; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%%,100%% { opacity:1; } 50%% { opacity:0.6; } }
+
+  /* Vuln table */
+  .vuln-status-active { color: #00ff88; }
+  .vuln-status-disabled { color: #666; }
+  .vuln-endpoint { font-size: 0.75em; color: #44aaff; margin: 1px 0; display: block; }
+  .vuln-endpoint:hover { color: #88ccff; }
+
+  /* Scanner panels */
+  .scanner-panel { background: #0d0d0d; border: 1px solid #222; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .scanner-panel h3 { color: #00ccaa; font-size: 0.9em; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+  .scanner-select, .scanner-textarea {
+    background: #111; color: #00ff88; border: 1px solid #333; border-radius: 4px;
+    padding: 8px 12px; font-family: inherit; font-size: 0.85em; width: 100%%;
+  }
+  .scanner-select { width: auto; min-width: 160px; }
+  .scanner-textarea { min-height: 120px; resize: vertical; margin: 8px 0; }
+
+  /* Findings table */
+  .findings-tbl { margin-top: 8px; }
+  .findings-tbl td { font-size: 0.78em; }
+  .findings-tbl .found { color: #00ff88; }
+  .findings-tbl .missed { color: #ff4444; }
+  .findings-tbl .false-pos { color: #ffaa00; }
 </style>
 </head>
 <body>
@@ -1311,6 +1585,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <button class="tab" onclick="showTab('traffic')">Traffic</button>
   <button class="tab" onclick="showTab('controls')">Controls</button>
   <button class="tab" onclick="showTab('log')">Request Log</button>
+  <button class="tab" onclick="showTab('vulns')">Vulnerabilities</button>
+  <button class="tab" onclick="showTab('scanner')">Scanner</button>
 </div>
 
 <!-- ==================== SESSIONS TAB ==================== -->
@@ -1425,6 +1701,112 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <th>User Agent</th>
         </tr></thead>
         <tbody id="log-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== VULNERABILITIES TAB ==================== -->
+<div id="panel-vulns" class="panel">
+  <div class="section">
+    <h2>// Vulnerability Profile Overview</h2>
+    <div class="grid" id="vuln-overview-cards">
+      <div class="card"><div class="label">Loading...</div><div class="value v-info">--</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>// Severity Breakdown</h2>
+    <div id="vuln-severity-badges" style="margin-bottom:12px"></div>
+  </div>
+
+  <div class="section">
+    <h2>// All Vulnerability Endpoints</h2>
+    <input type="text" class="search-box" id="vuln-filter" placeholder="Filter by name, severity, CWE, category..." oninput="filterVulns()">
+    <div class="tbl-scroll" style="max-height: 600px;">
+      <table>
+        <thead><tr>
+          <th>Name</th>
+          <th>Severity</th>
+          <th>CWE</th>
+          <th>Category</th>
+          <th>Endpoints</th>
+          <th>Status</th>
+        </tr></thead>
+        <tbody id="vuln-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SCANNER TAB ==================== -->
+<div id="panel-scanner" class="panel">
+
+  <!-- Expected Profile panel -->
+  <div class="section">
+    <h2>// Expected Profile</h2>
+    <button class="scanner-btn" onclick="generateProfile()">Generate Profile</button>
+    <div id="scanner-profile-summary" style="margin-top:14px">
+      <div style="color:#555">Click "Generate Profile" to load the current vulnerability profile.</div>
+    </div>
+  </div>
+
+  <!-- Scanner Results panel -->
+  <div class="section">
+    <h2>// Scanner Results</h2>
+    <div class="scanner-panel">
+      <h3>Select Scanner</h3>
+      <select id="scanner-type" class="scanner-select">
+        <option value="nuclei">Nuclei</option>
+        <option value="nikto">Nikto</option>
+        <option value="nmap">Nmap</option>
+        <option value="ffuf">ffuf</option>
+        <option value="wapiti">Wapiti</option>
+        <option value="generic">Generic</option>
+      </select>
+    </div>
+
+    <div class="scanner-panel">
+      <h3>Upload / Paste Results</h3>
+      <textarea id="scanner-output" class="scanner-textarea" placeholder="Paste scanner output here..."></textarea>
+      <button class="scanner-btn" onclick="uploadResults()">Upload &amp; Compare</button>
+    </div>
+
+    <div class="scanner-panel">
+      <h3>Run Scanner</h3>
+      <p style="color:#888;font-size:0.82em;margin-bottom:8px">Launch a scanner against this server (requires tool to be installed on host).</p>
+      <div id="scanner-run-btns">
+        <button class="scanner-btn" onclick="runScanner('nuclei')">nuclei</button>
+        <button class="scanner-btn" onclick="runScanner('nikto')">nikto</button>
+        <button class="scanner-btn" onclick="runScanner('nmap')">nmap</button>
+        <button class="scanner-btn" onclick="runScanner('ffuf')">ffuf</button>
+        <button class="scanner-btn" onclick="runScanner('wapiti')">wapiti</button>
+      </div>
+      <div id="scanner-run-status" style="margin-top:8px;color:#555;font-size:0.82em"></div>
+    </div>
+  </div>
+
+  <!-- Comparison Report panel -->
+  <div class="section">
+    <h2>// Comparison Report</h2>
+    <div id="scanner-comparison">
+      <div style="color:#555">No comparison data yet. Upload scanner results or run a scan.</div>
+    </div>
+  </div>
+
+  <!-- History panel -->
+  <div class="section">
+    <h2>// Scan History</h2>
+    <div class="tbl-scroll" style="max-height:300px">
+      <table>
+        <thead><tr>
+          <th>Timestamp</th>
+          <th>Scanner</th>
+          <th>Grade</th>
+          <th>Detection</th>
+          <th>Status</th>
+        </tr></thead>
+        <tbody id="scanner-history-body"></tbody>
       </table>
     </div>
   </div>
@@ -1819,6 +2201,281 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     renderLog(filtered);
   };
 
+  // ------ Vulnerabilities Tab ------
+  let vulnData = [];
+  let vulnProfile = null;
+
+  async function refreshVulns() {
+    try {
+      const profile = await api('/admin/api/scanner/profile');
+      vulnProfile = profile;
+      vulnData = profile.vulns || [];
+
+      // Overview cards
+      const cats = profile.category_counts || {};
+      const sev = profile.severity_counts || {};
+      document.getElementById('vuln-overview-cards').innerHTML =
+        card('OWASP Top 10', cats.owasp || 0, 'v-err') +
+        card('Advanced Vulns', cats.advanced || 0, 'v-warn') +
+        card('Dashboard Vulns', cats.dashboard || 0, 'v-info') +
+        card('Total Vulns', profile.total_vulns || 0, 'v-ok') +
+        card('Total Endpoints', profile.total_endpoints || 0, 'v-info');
+
+      // Severity badges
+      const sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
+      document.getElementById('vuln-severity-badges').innerHTML = sevOrder.map(function(s) {
+        return '<span class="sev sev-' + s + '" style="margin-right:10px">' + s + ': ' + (sev[s] || 0) + '</span>';
+      }).join('');
+
+      // Render table
+      renderVulnTable(vulnData);
+    } catch(e) { console.error('vulns:', e); }
+  }
+
+  function renderVulnTable(vulns) {
+    var mainPort = 8765;
+    var tbody = document.getElementById('vuln-body');
+    tbody.innerHTML = vulns.map(function(v) {
+      var endpoints = (v.endpoints || []).map(function(ep) {
+        return '<a class="vuln-endpoint" href="http://' + window.location.hostname + ':' + mainPort + ep + '" target="_blank" title="' + escapeHtml(ep) + '">' + escapeHtml(ep.length > 60 ? ep.substring(0, 57) + '...' : ep) + '</a>';
+      }).join('');
+      var statusClass = v.active ? 'vuln-status-active' : 'vuln-status-disabled';
+      var statusText = v.active ? 'ACTIVE' : 'DISABLED';
+      return '<tr>' +
+        '<td>' + escapeHtml(v.name) + '</td>' +
+        '<td><span class="sev sev-' + v.severity + '">' + v.severity + '</span></td>' +
+        '<td style="color:#888">' + escapeHtml(v.cwe) + '</td>' +
+        '<td>' + escapeHtml(v.category) + '</td>' +
+        '<td>' + endpoints + '</td>' +
+        '<td class="' + statusClass + '">' + statusText + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  window.filterVulns = function() {
+    var q = document.getElementById('vuln-filter').value.toLowerCase().trim();
+    if (!q) {
+      renderVulnTable(vulnData);
+      return;
+    }
+    var filtered = vulnData.filter(function(v) {
+      var haystack = (v.name + ' ' + v.severity + ' ' + v.cwe + ' ' + v.category + ' ' + (v.endpoints || []).join(' ')).toLowerCase();
+      return haystack.indexOf(q) !== -1;
+    });
+    renderVulnTable(filtered);
+  };
+
+  // ------ Scanner Tab ------
+  let scannerRunning = false;
+  let scanHistory = [];
+
+  window.generateProfile = async function() {
+    try {
+      var profile = await api('/admin/api/scanner/profile');
+      vulnProfile = profile;
+      var sev = profile.severity_counts || {};
+      var metrics = profile.expected_metrics || {};
+
+      var sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
+      var sevHtml = sevOrder.map(function(s) {
+        return '<span class="sev sev-' + s + '" style="margin-right:10px">' + s + ': ' + (sev[s] || 0) + '</span>';
+      }).join('');
+
+      var html = '<div class="grid">' +
+        card('Total Vulns', profile.total_vulns || 0, 'v-ok') +
+        card('Total Endpoints', profile.total_endpoints || 0, 'v-info') +
+        card('OWASP', (profile.category_counts || {}).owasp || 0, 'v-err') +
+        card('Advanced', (profile.category_counts || {}).advanced || 0, 'v-warn') +
+        card('Dashboard', (profile.category_counts || {}).dashboard || 0, 'v-info') +
+        '</div>' +
+        '<div style="margin:12px 0">' + sevHtml + '</div>' +
+        '<div style="margin-top:14px">' +
+        '<h3 style="color:#00ccaa;font-size:0.85em;margin-bottom:8px">EXPECTED BEHAVIOR METRICS</h3>' +
+        metricBar('Error Rate', metrics.error_rate || 0, 'prog-red') +
+        metricBar('Labyrinth Rate', metrics.labyrinth_rate || 0, 'prog-yellow') +
+        metricBar('Block Rate', metrics.block_rate || 0, 'prog-red') +
+        metricBar('CAPTCHA Rate', metrics.captcha_rate || 0, 'prog-yellow') +
+        '</div>';
+
+      document.getElementById('scanner-profile-summary').innerHTML = html;
+      toast('Profile generated');
+    } catch(e) { console.error('generateProfile:', e); toast('Failed to generate profile'); }
+  };
+
+  function metricBar(label, value, cls) {
+    var pct = Math.min(value * 100, 100).toFixed(1);
+    return '<div style="margin:6px 0">' +
+      '<div style="display:flex;justify-content:space-between;font-size:0.82em;color:#aaa"><span>' + label + '</span><span style="color:#00ffcc">' + pct + '%%</span></div>' +
+      '<div class="prog-bar"><div class="prog-fill ' + cls + '" style="width:' + pct + '%%"></div></div>' +
+      '</div>';
+  }
+
+  window.runScanner = async function(name) {
+    if (scannerRunning) { toast('A scan is already running'); return; }
+    scannerRunning = true;
+    var btn = event.target;
+    btn.classList.add('running');
+    btn.disabled = true;
+    document.getElementById('scanner-run-status').innerHTML = '<span style="color:#ffaa00">Running ' + escapeHtml(name) + '...</span>';
+
+    try {
+      var result = await api('/admin/api/scanner/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({scanner: name, target: 'http://' + window.location.hostname + ':8765'})
+      });
+      document.getElementById('scanner-run-status').innerHTML = '<span style="color:#00ff88">Status: ' + escapeHtml(result.status || 'unknown') + '</span>' +
+        (result.message ? '<br><span style="color:#888;font-size:0.9em">' + escapeHtml(result.message) + '</span>' : '');
+
+      scanHistory.push({timestamp: new Date().toISOString(), scanner: name, grade: '-', detection: '-', status: result.status || 'queued'});
+      renderScanHistory();
+      toast(name + ' scan ' + (result.status || 'queued'));
+    } catch(e) {
+      document.getElementById('scanner-run-status').innerHTML = '<span style="color:#ff4444">Error running scanner</span>';
+      console.error('runScanner:', e);
+    } finally {
+      scannerRunning = false;
+      btn.classList.remove('running');
+      btn.disabled = false;
+    }
+  };
+
+  window.uploadResults = async function() {
+    var scanner = document.getElementById('scanner-type').value;
+    var data = document.getElementById('scanner-output').value;
+    if (!data.trim()) { toast('Paste scanner output first'); return; }
+
+    try {
+      var report = await api('/admin/api/scanner/compare', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({scanner: scanner, data: data})
+      });
+      renderComparison(report);
+      scanHistory.push({
+        timestamp: report.timestamp || new Date().toISOString(),
+        scanner: scanner,
+        grade: report.grade || '?',
+        detection: ((report.detection_rate || 0) * 100).toFixed(0) + '%%',
+        status: 'completed'
+      });
+      renderScanHistory();
+      toast('Comparison complete: grade ' + (report.grade || '?'));
+    } catch(e) {
+      console.error('uploadResults:', e);
+      toast('Comparison failed');
+    }
+  };
+
+  function renderComparison(report) {
+    var grade = (report.grade || '?').toUpperCase();
+    var gradeClass = 'grade-' + grade.toLowerCase();
+    var detPct = ((report.detection_rate || 0) * 100).toFixed(1);
+    var fpPct = ((report.false_pos_rate || 0) * 100).toFixed(1);
+    var accPct = ((report.accuracy || 0) * 100).toFixed(1);
+
+    var html = '<div style="display:grid;grid-template-columns:200px 1fr;gap:20px">' +
+      '<div>' +
+        '<div class="grade ' + gradeClass + '">' + escapeHtml(grade) + '</div>' +
+        '<div style="text-align:center;color:#888;font-size:0.85em">Scanner Grade</div>' +
+      '</div>' +
+      '<div>' +
+        '<div style="margin:8px 0"><span style="color:#aaa;font-size:0.85em">Detection Rate</span>' +
+        '<div class="prog-bar"><div class="prog-fill prog-green" style="width:' + detPct + '%%"></div></div>' +
+        '<span style="color:#00ff88;font-size:0.85em">' + detPct + '%%</span></div>' +
+
+        '<div style="margin:8px 0"><span style="color:#aaa;font-size:0.85em">False Positive Rate</span>' +
+        '<div class="prog-bar"><div class="prog-fill prog-red" style="width:' + fpPct + '%%"></div></div>' +
+        '<span style="color:#ff4444;font-size:0.85em">' + fpPct + '%%</span></div>' +
+
+        '<div style="margin:8px 0"><span style="color:#aaa;font-size:0.85em">Accuracy</span>' +
+        '<div class="prog-bar"><div class="prog-fill prog-yellow" style="width:' + accPct + '%%"></div></div>' +
+        '<span style="color:#ffcc00;font-size:0.85em">' + accPct + '%%</span></div>' +
+      '</div></div>';
+
+    // Scanner health
+    var health = report.scanner_health || {};
+    html += '<div style="margin-top:14px;font-size:0.85em;color:#888">' +
+      'Crashed: <span style="color:' + (health.crashed ? '#ff4444' : '#00ff88') + '">' + (health.crashed ? 'YES' : 'no') + '</span> | ' +
+      'Timed out: <span style="color:' + (health.timed_out ? '#ff4444' : '#00ff88') + '">' + (health.timed_out ? 'YES' : 'no') + '</span> | ' +
+      'Errors: <span style="color:' + (health.errors > 0 ? '#ff4444' : '#00ff88') + '">' + (health.errors || 0) + '</span>' +
+      '</div>';
+
+    // True positives table
+    var tp = report.true_positives || [];
+    if (tp.length > 0) {
+      html += '<h3 style="color:#00ff88;font-size:0.85em;margin-top:16px">TRUE POSITIVES (' + tp.length + ')</h3>';
+      html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
+      tp.forEach(function(item) {
+        html += '<tr><td class="found">' + escapeHtml(item.name || '') + '</td><td>' + escapeHtml(item.endpoint || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    // False negatives table
+    var fn = report.false_negatives || [];
+    if (fn.length > 0) {
+      html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:16px">FALSE NEGATIVES - MISSED (' + fn.length + ')</h3>';
+      html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
+      fn.forEach(function(item) {
+        html += '<tr><td class="missed">' + escapeHtml(item.name || '') + '</td><td>' + escapeHtml(item.endpoint || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    // False positives table
+    var fp = report.false_positives || [];
+    if (fp.length > 0) {
+      html += '<h3 style="color:#ffaa00;font-size:0.85em;margin-top:16px">FALSE POSITIVES (' + fp.length + ')</h3>';
+      html += '<table class="findings-tbl"><thead><tr><th>Reported Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
+      fp.forEach(function(item) {
+        html += '<tr><td class="false-pos">' + escapeHtml(item.name || '') + '</td><td>' + escapeHtml(item.endpoint || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    if (report.message) {
+      html += '<div style="margin-top:12px;color:#555;font-size:0.82em">' + escapeHtml(report.message) + '</div>';
+    }
+
+    document.getElementById('scanner-comparison').innerHTML = html;
+  }
+
+  function renderScanHistory() {
+    var tbody = document.getElementById('scanner-history-body');
+    tbody.innerHTML = scanHistory.slice().reverse().map(function(h) {
+      var gradeClass = h.grade && h.grade !== '-' && h.grade !== '?' ? 'grade-' + h.grade.toLowerCase() : '';
+      return '<tr>' +
+        '<td style="color:#888">' + (h.timestamp ? new Date(h.timestamp).toLocaleString() : '-') + '</td>' +
+        '<td>' + escapeHtml(h.scanner || '') + '</td>' +
+        '<td' + (gradeClass ? ' class="' + gradeClass + '"' : '') + ' style="font-weight:bold;font-size:1.2em">' + escapeHtml(h.grade || '-') + '</td>' +
+        '<td>' + escapeHtml(String(h.detection || '-')) + '</td>' +
+        '<td>' + escapeHtml(h.status || '-') + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  async function refreshScannerHistory() {
+    try {
+      var data = await api('/admin/api/scanner/results');
+      var results = data.results || [];
+      // Merge server results into scanHistory if not already present
+      results.forEach(function(r) {
+        var exists = scanHistory.some(function(h) { return h.timestamp === r.timestamp && h.scanner === r.scanner; });
+        if (!exists) {
+          scanHistory.push({
+            timestamp: r.timestamp,
+            scanner: r.scanner || '',
+            grade: r.grade || '-',
+            detection: r.detection_rate ? ((r.detection_rate * 100).toFixed(0) + '%%') : '-',
+            status: r.status || '-'
+          });
+        }
+      });
+      renderScanHistory();
+    } catch(e) { console.error('scannerHistory:', e); }
+  }
+
   // ------ Main loop ------
   async function refresh() {
     const active = document.querySelector('.panel.active');
@@ -1828,6 +2485,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     else if (id === 'panel-traffic') await refreshTraffic();
     else if (id === 'panel-controls') await refreshControls();
     else if (id === 'panel-log') await refreshLog();
+    else if (id === 'panel-vulns') await refreshVulns();
+    else if (id === 'panel-scanner') await refreshScannerHistory();
   }
 
   // Initial load for all panels
