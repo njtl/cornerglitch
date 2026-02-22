@@ -70,6 +70,42 @@ func (g *Generator) PickType() PageType {
 	return allPageTypes[rand.Intn(len(allPageTypes))]
 }
 
+// PickTypeWeighted selects a page type using weighted random selection.
+// The weights map keys should be page type names (e.g. "html", "json").
+// If no weights are provided or all are zero, falls back to uniform random.
+func (g *Generator) PickTypeWeighted(weights map[string]float64) PageType {
+	// Collect types that have weight > 0
+	type entry struct {
+		pt     PageType
+		weight float64
+	}
+	var candidates []entry
+	var total float64
+	for name, w := range weights {
+		if w > 0 {
+			candidates = append(candidates, entry{PageType(name), w})
+			total += w
+		}
+	}
+
+	// Fall back to uniform random if nothing usable
+	if len(candidates) == 0 || total <= 0 {
+		return g.PickType()
+	}
+
+	// Weighted random selection
+	r := rand.Float64() * total
+	for _, c := range candidates {
+		r -= c.weight
+		if r <= 0 {
+			return c.pt
+		}
+	}
+
+	// Shouldn't reach here, but return last candidate as safety
+	return candidates[len(candidates)-1].pt
+}
+
 // Generate writes a full page response of the given type.
 func (g *Generator) Generate(w http.ResponseWriter, r *http.Request, pt PageType) {
 	switch pt {

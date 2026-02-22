@@ -19,6 +19,7 @@ import (
 type Engine struct {
 	mu         sync.RWMutex
 	challenges map[string]challengeRecord // clientID -> expected challenge answer
+	difficulty int                        // 0-5, controls trap intensity
 }
 
 type challengeRecord struct {
@@ -30,7 +31,29 @@ type challengeRecord struct {
 func NewEngine() *Engine {
 	return &Engine{
 		challenges: make(map[string]challengeRecord),
+		difficulty: 2,
 	}
+}
+
+// SetDifficulty sets the JS trap difficulty level (0-5).
+// Thread-safe.
+func (e *Engine) SetDifficulty(level int) {
+	if level < 0 {
+		level = 0
+	}
+	if level > 5 {
+		level = 5
+	}
+	e.mu.Lock()
+	e.difficulty = level
+	e.mu.Unlock()
+}
+
+// GetDifficulty returns the current JS trap difficulty level.
+func (e *Engine) GetDifficulty() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.difficulty
 }
 
 // seedFromClient produces a deterministic int64 seed from a clientID using SHA-256.
@@ -50,19 +73,47 @@ func hashString(s string) string {
 }
 
 // GenerateTraps returns <script> blocks with detection code for the given client.
-// This includes automation detection, timing traps, and canvas fingerprinting.
+// The output varies based on difficulty level (0-5):
+//   0: no traps
+//   1: automation detection only
+//   2: automation detection + timing trap (default)
+//   3: automation + timing + canvas fingerprint
+//   4: all three scripts + invisible honeypot links
+//   5: all of the above + max difficulty marker
 func (e *Engine) GenerateTraps(clientID string) string {
+	e.mu.RLock()
+	diff := e.difficulty
+	e.mu.RUnlock()
+
+	if diff <= 0 {
+		return ""
+	}
+
 	rng := rand.New(rand.NewSource(seedFromClient(clientID)))
 	var sb strings.Builder
 
-	// 1. Automation detection script
+	// difficulty >= 1: automation detection script
 	sb.WriteString(e.automationDetectionScript(clientID))
 
-	// 2. Timing trap
-	sb.WriteString(e.timingTrapScript(clientID))
+	// difficulty >= 2: timing trap
+	if diff >= 2 {
+		sb.WriteString(e.timingTrapScript(clientID))
+	}
 
-	// 3. Canvas fingerprinting
-	sb.WriteString(e.canvasFingerprintScript(clientID, rng))
+	// difficulty >= 3: canvas fingerprinting
+	if diff >= 3 {
+		sb.WriteString(e.canvasFingerprintScript(clientID, rng))
+	}
+
+	// difficulty >= 4: invisible honeypot links
+	if diff >= 4 {
+		sb.WriteString(e.GenerateInvisibleLinks(clientID, "/"))
+	}
+
+	// difficulty >= 5: max difficulty marker
+	if diff >= 5 {
+		sb.WriteString("<!-- glitch-trap: max difficulty active -->\n")
+	}
 
 	return sb.String()
 }

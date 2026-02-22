@@ -160,6 +160,16 @@ func (c *Cache) Stats() CacheStats {
 	}
 }
 
+// SetTTL updates the cache's TTL duration. Thread-safe.
+func (c *Cache) SetTTL(ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	c.ttl = ttl
+}
+
 // Stop terminates the background cleanup goroutine.
 func (c *Cache) Stop() {
 	close(c.done)

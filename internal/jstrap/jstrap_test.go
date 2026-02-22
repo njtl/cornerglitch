@@ -23,6 +23,7 @@ func TestNewEngine(t *testing.T) {
 
 func TestGenerateTraps_ProducesValidHTML(t *testing.T) {
 	e := NewEngine()
+	e.SetDifficulty(3) // automation + timing + canvas
 	result := e.GenerateTraps("test-client-123")
 
 	if result == "" {
@@ -47,6 +48,27 @@ func TestGenerateTraps_ProducesValidHTML(t *testing.T) {
 	// Should contain 3 script blocks (automation, timing, canvas)
 	if openCount < 3 {
 		t.Errorf("expected at least 3 script blocks, got %d", openCount)
+	}
+}
+
+func TestGenerateTraps_DefaultDifficulty(t *testing.T) {
+	e := NewEngine()
+	// Default difficulty is 2: automation + timing only
+	result := e.GenerateTraps("default-client")
+
+	openCount := strings.Count(result, "<script>")
+	if openCount != 2 {
+		t.Errorf("expected 2 script blocks at default difficulty, got %d", openCount)
+	}
+}
+
+func TestGenerateTraps_DifficultyZero(t *testing.T) {
+	e := NewEngine()
+	e.SetDifficulty(0)
+	result := e.GenerateTraps("zero-client")
+
+	if result != "" {
+		t.Error("expected empty string at difficulty 0")
 	}
 }
 
@@ -96,6 +118,7 @@ func TestGenerateTraps_ContainsTimingTrap(t *testing.T) {
 
 func TestGenerateTraps_ContainsCanvasFingerprint(t *testing.T) {
 	e := NewEngine()
+	e.SetDifficulty(3) // canvas fingerprint requires difficulty >= 3
 	result := e.GenerateTraps("canvas-client")
 
 	checks := []string{

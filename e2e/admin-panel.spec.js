@@ -514,4 +514,84 @@ test.describe('Config Wiring', () => {
       data: { key: 'delay_max_ms', value: 0 },
     });
   });
+
+  test('cookie trap frequency config is stored and synced', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'cookie_trap_frequency', value: 2 },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.cookie_trap_frequency).toBe(2);
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'cookie_trap_frequency', value: 6 },
+    });
+  });
+
+  test('js trap difficulty config is stored and synced', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'js_trap_difficulty', value: 4 },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.js_trap_difficulty).toBe(4);
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'js_trap_difficulty', value: 2 },
+    });
+  });
+
+  test('content theme config is stored and affects pages', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'content_theme', value: 'dark' },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.content_theme).toBe('dark');
+
+    // Verify theme is applied to content pages
+    const pageResp = await request.get(SERVER + '/blog/test-theme');
+    const html = await pageResp.text();
+    expect(html).toContain('#0f172a'); // dark theme bg color
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'content_theme', value: 'default' },
+    });
+  });
+
+  test('honeypot response style config is stored', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'honeypot_response_style', value: 'aggressive' },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.honeypot_response_style).toBe('aggressive');
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'honeypot_response_style', value: 'realistic' },
+    });
+  });
+
+  test('content cache TTL config is stored', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'content_cache_ttl_sec', value: 120 },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.content_cache_ttl_sec).toBe(120);
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'content_cache_ttl_sec', value: 60 },
+    });
+  });
 });

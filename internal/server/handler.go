@@ -478,8 +478,11 @@ func (h *Handler) selectPageType(r *http.Request, behavior *adaptive.ClientBehav
 		return pages.PageMarkdown
 	}
 
-	// If high page variety, pick randomly
+	// If high page variety, pick randomly (weighted if configured)
 	if rand.Float64() < behavior.PageVariety {
+		if weights := h.config.GetPageTypeWeights(); len(weights) > 0 {
+			return h.pageGen.PickTypeWeighted(weights)
+		}
 		return h.pageGen.PickType()
 	}
 
@@ -577,6 +580,37 @@ func (h *Handler) syncConfigToSubsystems() {
 	}
 	if bd, ok := cfg["block_duration_sec"].(int); ok {
 		h.adapt.SetBlockDuration(time.Duration(bd) * time.Second)
+	}
+
+	// Sync JS trap difficulty
+	if h.jsEng != nil {
+		if diff, ok := cfg["js_trap_difficulty"].(int); ok {
+			h.jsEng.SetDifficulty(diff)
+		}
+	}
+
+	// Sync cookie trap frequency
+	if h.cookieT != nil {
+		if freq, ok := cfg["cookie_trap_frequency"].(int); ok {
+			h.cookieT.SetFrequency(freq)
+		}
+	}
+
+	// Sync honeypot response style
+	if h.honey != nil {
+		if style, ok := cfg["honeypot_response_style"].(string); ok {
+			h.honey.SetResponseStyle(style)
+		}
+	}
+
+	// Sync content engine theme and cache TTL
+	if h.content != nil {
+		if theme, ok := cfg["content_theme"].(string); ok {
+			h.content.SetTheme(theme)
+		}
+		if ttlSec, ok := cfg["content_cache_ttl_sec"].(int); ok && ttlSec > 0 {
+			h.content.SetCacheTTL(time.Duration(ttlSec) * time.Second)
+		}
 	}
 }
 
