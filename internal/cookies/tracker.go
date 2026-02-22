@@ -37,15 +37,39 @@ type clientState struct {
 // Tracker sets tracking cookies and uses cookie behavior to detect bots.
 // Real browsers handle cookies correctly; scrapers often do not.
 type Tracker struct {
-	mu      sync.RWMutex
-	clients map[string]*clientState
+	mu        sync.RWMutex
+	clients   map[string]*clientState
+	frequency int // how many of the 6 cookie types to set (0-6)
 }
 
 // NewTracker creates a new cookie Tracker.
 func NewTracker() *Tracker {
 	return &Tracker{
-		clients: make(map[string]*clientState),
+		clients:   make(map[string]*clientState),
+		frequency: 6, // default: all 6 cookie types
 	}
+}
+
+// SetFrequency sets how many of the 6 cookie types to include in SetTraps.
+// 0 = none, 1 = session only, 2 = session + fingerprint,
+// 3 = + trap, 4 = + domain mismatch, 5 = + secure-on-HTTP, 6 = all.
+func (t *Tracker) SetFrequency(freq int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if freq < 0 {
+		freq = 0
+	}
+	if freq > 6 {
+		freq = 6
+	}
+	t.frequency = freq
+}
+
+// GetFrequency returns the current cookie trap frequency setting.
+func (t *Tracker) GetFrequency() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.frequency
 }
 
 // cookieNames used throughout the tracker.
@@ -93,7 +117,17 @@ func (t *Tracker) getState(clientID string) *clientState {
 
 // SetTraps sets various tracking and trap cookies on the response.
 // It must be called before writing the response body.
+// The number of cookies set is controlled by the frequency setting (0-6).
 func (t *Tracker) SetTraps(w http.ResponseWriter, r *http.Request, clientID string) {
+	t.mu.RLock()
+	freq := t.frequency
+	t.mu.RUnlock()
+
+	// freq 0: don't set any cookies
+	if freq <= 0 {
+		return
+	}
+
 	cs := t.getOrCreateState(clientID)
 
 	sessionVal := deterministicValue(clientID, "session")
@@ -114,54 +148,64 @@ func (t *Tracker) SetTraps(w http.ResponseWriter, r *http.Request, clientID stri
 	})
 
 	// 2. Fingerprint cookie: verifies cookie jar works.
-	http.SetCookie(w, &http.Cookie{
-		Name:   cookieFP,
-		Value:  fpVal,
-		Path:   "/",
-		MaxAge: 86400,
-	})
+	if freq >= 2 {
+		http.SetCookie(w, &http.Cookie{
+			Name:   cookieFP,
+			Value:  fpVal,
+			Path:   "/",
+			MaxAge: 86400,
+		})
+	}
 
 	// 3. Honeypot cookie: Max-Age=0 tells the browser to delete it immediately,
 	//    but Expires is set far in the future. Compliant browsers honour Max-Age
 	//    over Expires and discard the cookie. Naive scrapers that only look at
 	//    Expires (or accept everything) will send it back.
-	http.SetCookie(w, &http.Cookie{
-		Name:    cookieTrap,
-		Value:   trapVal,
-		Path:    "/",
-		MaxAge:  0,                                   // delete immediately
-		Expires: time.Now().Add(365 * 24 * time.Hour), // far-future (ignored by spec-compliant clients)
-	})
+	if freq >= 3 {
+		http.SetCookie(w, &http.Cookie{
+			Name:    cookieTrap,
+			Value:   trapVal,
+			Path:    "/",
+			MaxAge:  0,                                   // delete immediately
+			Expires: time.Now().Add(365 * 24 * time.Hour), // far-future (ignored by spec-compliant clients)
+		})
+	}
 
 	// 4. Domain mismatch cookie: browsers reject cookies whose Domain attribute
 	//    does not match the current host. Scrapers that blindly store all
 	//    Set-Cookie values will send it back.
-	http.SetCookie(w, &http.Cookie{
-		Name:   cookieDomain,
-		Value:  domainVal,
-		Domain: ".invalid-domain.test",
-		Path:   "/",
-		MaxAge: 86400,
-	})
+	if freq >= 4 {
+		http.SetCookie(w, &http.Cookie{
+			Name:   cookieDomain,
+			Value:  domainVal,
+			Domain: ".invalid-domain.test",
+			Path:   "/",
+			MaxAge: 86400,
+		})
+	}
 
 	// 5. Secure-on-HTTP cookie: the Secure flag means the cookie must only be
 	//    sent over HTTPS. On a plain HTTP connection browsers reject it.
-	http.SetCookie(w, &http.Cookie{
-		Name:   cookieSecure,
-		Value:  secureVal,
-		Path:   "/",
-		Secure: true,
-		MaxAge: 86400,
-	})
+	if freq >= 5 {
+		http.SetCookie(w, &http.Cookie{
+			Name:   cookieSecure,
+			Value:  secureVal,
+			Path:   "/",
+			Secure: true,
+			MaxAge: 86400,
+		})
+	}
 
 	// 6. SameSite=Strict cookie on a path typically accessed cross-origin.
-	http.SetCookie(w, &http.Cookie{
-		Name:     cookieSameSite,
-		Value:    samesiteVal,
-		Path:     "/external/callback",
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   86400,
-	})
+	if freq >= 6 {
+		http.SetCookie(w, &http.Cookie{
+			Name:     cookieSameSite,
+			Value:    samesiteVal,
+			Path:     "/external/callback",
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   86400,
+		})
+	}
 
 	// Record the values we set so Analyze can check them later.
 	t.mu.Lock()

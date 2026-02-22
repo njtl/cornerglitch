@@ -2,10 +2,12 @@ package honeypot
 
 import (
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // LureType classifies the kind of fake content to serve when a scanner probes a path.
@@ -29,20 +31,38 @@ const (
 // Honeypot detects scanner and hacker tools probing known paths, serves realistic
 // lure responses, and generates a robots.txt that advertises enticing honeypot paths.
 type Honeypot struct {
-	paths      map[string]LureType
-	scannerUAs []string
-	lures      *LureGenerator
-	Hits       int64 // atomic counter for metrics
-	initOnce   sync.Once
+	paths         map[string]LureType
+	scannerUAs    []string
+	lures         *LureGenerator
+	Hits          int64 // atomic counter for metrics
+	initOnce      sync.Once
+	mu            sync.RWMutex
+	responseStyle string
 }
 
 // NewHoneypot creates a Honeypot with all known scanner paths and UA patterns registered.
 func NewHoneypot() *Honeypot {
 	h := &Honeypot{
-		lures: NewLureGenerator(),
+		lures:         NewLureGenerator(),
+		responseStyle: "realistic",
 	}
 	h.initOnce.Do(h.init)
 	return h
+}
+
+// SetResponseStyle sets the honeypot response style in a thread-safe manner.
+// Valid styles: "realistic", "minimal", "aggressive", "tarpit".
+func (h *Honeypot) SetResponseStyle(style string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.responseStyle = style
+}
+
+// GetResponseStyle returns the current honeypot response style.
+func (h *Honeypot) GetResponseStyle() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.responseStyle
 }
 
 func (h *Honeypot) init() {
@@ -656,7 +676,27 @@ func (h *Honeypot) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
 		return http.StatusNotFound
 	}
 
-	return h.lures.Serve(w, r, lureType)
+	style := h.GetResponseStyle()
+
+	switch style {
+	case "minimal":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(200)
+		w.Write([]byte("<!DOCTYPE html><html><body><h1>Page</h1></body></html>"))
+		return 200
+
+	case "aggressive":
+		w.Header().Set("X-Powered-By", "PHP/7.4.3")
+		w.Header().Set("Server", "Apache/2.4.41 (Ubuntu)")
+		return h.lures.Serve(w, r, lureType)
+
+	case "tarpit":
+		time.Sleep(time.Duration(1+rand.Intn(4)) * time.Second)
+		return h.lures.Serve(w, r, lureType)
+
+	default: // "realistic"
+		return h.lures.Serve(w, r, lureType)
+	}
 }
 
 // ServeRobotsTxt returns a robots.txt that advertises honeypot paths as disallowed

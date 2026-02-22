@@ -6,15 +6,18 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Engine generates realistic web pages from URL paths.
 // Pages are deterministic (same path = same content) and cached for 24h.
 type Engine struct {
+	mu    sync.RWMutex
 	cache *Cache
 	words *WordBank
 	elems *Elements
+	theme string
 }
 
 // NewEngine creates a content engine with default cache settings.
@@ -24,6 +27,7 @@ func NewEngine() *Engine {
 		cache: NewCache(10000, 24*time.Hour),
 		words: words,
 		elems: NewElements(words),
+		theme: "default",
 	}
 }
 
@@ -35,6 +39,45 @@ func (e *Engine) Stop() {
 // CacheStats returns the current cache statistics.
 func (e *Engine) CacheStats() CacheStats {
 	return e.cache.Stats()
+}
+
+// SetTheme sets the content engine's CSS theme. Thread-safe.
+func (e *Engine) SetTheme(theme string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.theme = theme
+}
+
+// GetTheme returns the current CSS theme. Thread-safe.
+func (e *Engine) GetTheme() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.theme
+}
+
+// SetCacheTTL updates the cache's TTL duration.
+func (e *Engine) SetCacheTTL(ttl time.Duration) {
+	e.cache.SetTTL(ttl)
+}
+
+// themeCSS returns the CSS :root variables block for the current theme.
+func (e *Engine) themeCSS() string {
+	e.mu.RLock()
+	theme := e.theme
+	e.mu.RUnlock()
+
+	switch theme {
+	case "dark":
+		return ":root { --primary: #60a5fa; --bg: #0f172a; --text: #e2e8f0; --border: #334155; --accent: #a78bfa; }"
+	case "corporate":
+		return ":root { --primary: #1e40af; --bg: #ffffff; --text: #111827; --border: #d1d5db; --accent: #059669; }"
+	case "minimal":
+		return ":root { --primary: #374151; --bg: #ffffff; --text: #1f2937; --border: #e5e7eb; --accent: #6b7280; }"
+	case "vibrant":
+		return ":root { --primary: #dc2626; --bg: #fffbeb; --text: #1c1917; --border: #fde68a; --accent: #7c3aed; }"
+	default:
+		return ":root { --primary: #2563eb; --bg: #f8fafc; --text: #1e293b; --border: #e2e8f0; --accent: #7c3aed; }"
+	}
 }
 
 // ShouldHandle returns true if this path should be handled by the content engine.
@@ -231,7 +274,7 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
   <meta property="og:url" content="http://%s%s">
   <meta name="twitter:card" content="summary_large_image">
   <style>
-    :root { --primary: #2563eb; --bg: #f8fafc; --text: #1e293b; --border: #e2e8f0; --accent: #7c3aed; }
+    %s
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
     a { color: var(--primary); text-decoration: none; } a:hover { text-decoration: underline; }
@@ -290,6 +333,7 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
 		escHTML(title),
 		escHTML(metaDesc),
 		host, path,
+		e.themeCSS(),
 		e.elems.NavHeader(rng, navItems),
 		breadcrumbs,
 		heroSVG,
