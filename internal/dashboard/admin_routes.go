@@ -118,6 +118,15 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		}
 	})
 
+	// Page type weight controls
+	mux.HandleFunc("/admin/api/page-type-weights", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			adminAPIPageTypeWeightsPost(w, r)
+		} else {
+			adminAPIPageTypeWeightsGet(w, r)
+		}
+	})
+
 	// Config export/import
 	mux.HandleFunc("/admin/api/config/export", func(w http.ResponseWriter, r *http.Request) {
 		adminAPIConfigExport(w, r, s)
@@ -861,6 +870,56 @@ func adminAPIErrorWeightsPost(w http.ResponseWriter, r *http.Request) {
 		"ok":         true,
 		"error_type": req.ErrorType,
 		"weight":     req.Weight,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Page type weight handlers
+// ---------------------------------------------------------------------------
+
+func adminAPIPageTypeWeightsGet(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"weights": globalConfig.GetPageTypeWeights(),
+	})
+}
+
+func adminAPIPageTypeWeightsPost(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		PageType string  `json:"page_type"`
+		Weight   float64 `json:"weight"`
+		Reset    bool    `json:"reset"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Reset {
+		globalConfig.ResetPageTypeWeights()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":      true,
+			"reset":   true,
+			"weights": globalConfig.GetPageTypeWeights(),
+		})
+		return
+	}
+
+	globalConfig.SetPageTypeWeight(req.PageType, req.Weight)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":        true,
+		"page_type": req.PageType,
+		"weight":    req.Weight,
 	})
 }
 

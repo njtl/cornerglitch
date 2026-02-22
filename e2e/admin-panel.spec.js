@@ -161,6 +161,16 @@ test.describe('Controls Tab', () => {
     await expect(highBtn).toHaveClass(/active/);
   });
 
+  test('shows page type weight grid', async ({ page }) => {
+    await page.goto(ADMIN + '#controls');
+    await page.waitForTimeout(1500);
+    const grid = page.locator('#page-type-grid');
+    await expect(grid).toBeVisible();
+    const rows = grid.locator('.ew-row');
+    const count = await rows.count();
+    expect(count).toBeGreaterThanOrEqual(8);
+  });
+
   test('shows dropdown controls', async ({ page }) => {
     await page.goto(ADMIN + '#controls');
     await page.waitForTimeout(1500);
@@ -422,5 +432,86 @@ test.describe('Error Weights API', () => {
     const resetResult = await resetResp.json();
     expect(resetResult.ok).toBe(true);
     expect(Object.keys(resetResult.weights)).toHaveLength(0);
+  });
+});
+
+test.describe('Page Type Weights API', () => {
+  test('set and reset page type weights', async ({ request }) => {
+    // Set a weight
+    const setResp = await request.post(API + '/admin/api/page-type-weights', {
+      data: { page_type: 'json', weight: 0.3 },
+    });
+    const setResult = await setResp.json();
+    expect(setResult.ok).toBe(true);
+
+    // Verify
+    const getResp = await request.get(API + '/admin/api/page-type-weights');
+    const weights = await getResp.json();
+    expect(weights.weights['json']).toBe(0.3);
+
+    // Reset
+    const resetResp = await request.post(API + '/admin/api/page-type-weights', {
+      data: { reset: true },
+    });
+    const resetResult = await resetResp.json();
+    expect(resetResult.ok).toBe(true);
+    expect(Object.keys(resetResult.weights)).toHaveLength(0);
+  });
+});
+
+test.describe('Config Wiring', () => {
+  test('active framework config affects server headers', async ({ request }) => {
+    // Set framework to Django
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'active_framework', value: 'django' },
+    });
+
+    // Verify config was saved
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.active_framework).toBe('django');
+
+    // Reset to auto
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'active_framework', value: 'auto' },
+    });
+  });
+
+  test('error rate multiplier config is stored', async ({ request }) => {
+    // Set multiplier
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'error_rate_multiplier', value: 2.5 },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.error_rate_multiplier).toBe(2.5);
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'error_rate_multiplier', value: 1.0 },
+    });
+  });
+
+  test('delay config is stored', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'delay_min_ms', value: 50 },
+    });
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'delay_max_ms', value: 200 },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.delay_min_ms).toBe(50);
+    expect(cfg.delay_max_ms).toBe(200);
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'delay_min_ms', value: 0 },
+    });
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'delay_max_ms', value: 0 },
+    });
   });
 });

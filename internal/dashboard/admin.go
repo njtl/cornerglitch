@@ -552,6 +552,37 @@ func (c *AdminConfig) ResetErrorWeights() {
 	c.ErrorWeights = make(map[string]float64)
 }
 
+// GetPageTypeWeights returns a copy of the current page type weights map.
+func (c *AdminConfig) GetPageTypeWeights() map[string]float64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make(map[string]float64, len(c.PageTypeWeights))
+	for k, v := range c.PageTypeWeights {
+		result[k] = v
+	}
+	return result
+}
+
+// SetPageTypeWeight sets a single page type weight.
+func (c *AdminConfig) SetPageTypeWeight(pageType string, weight float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if weight < 0 {
+		weight = 0
+	}
+	if weight > 1 {
+		weight = 1
+	}
+	c.PageTypeWeights[pageType] = weight
+}
+
+// ResetPageTypeWeights clears all custom page type weights.
+func (c *AdminConfig) ResetPageTypeWeights() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.PageTypeWeights = make(map[string]float64)
+}
+
 // ---------------------------------------------------------------------------
 // Vulnerability Config — controls which vuln groups/categories are active
 // ---------------------------------------------------------------------------

@@ -53,6 +53,10 @@ type Engine struct {
 
 	// Manual overrides (set via admin panel)
 	overrides map[string]BehaviorMode
+
+	// Configurable thresholds
+	aggressiveRPSThreshold  float64 // RPS above which bots get aggressive treatment (default 10.0)
+	labyrinthPathsThreshold int     // unique paths above which clients get labyrinth mode (default 50)
 }
 
 func NewEngine(collector *metrics.Collector, fp *fingerprint.Engine) *Engine {
@@ -60,10 +64,12 @@ func NewEngine(collector *metrics.Collector, fp *fingerprint.Engine) *Engine {
 		behaviors:     make(map[string]*ClientBehavior),
 		collector:     collector,
 		fp:            fp,
-		blockChance:   0.02,
-		blockDuration: 30 * time.Second,
-		blockEnabled:  true,
-		overrides:     make(map[string]BehaviorMode),
+		blockChance:             0.02,
+		blockDuration:           30 * time.Second,
+		blockEnabled:            true,
+		overrides:               make(map[string]BehaviorMode),
+		aggressiveRPSThreshold:  10.0,
+		labyrinthPathsThreshold: 50,
 	}
 }
 
@@ -99,6 +105,32 @@ func (e *Engine) GetBlockConfig() (chance float64, duration time.Duration, enabl
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.blockChance, e.blockDuration, e.blockEnabled
+}
+
+// SetAggressiveRPSThreshold sets the RPS threshold above which bots get aggressive treatment.
+func (e *Engine) SetAggressiveRPSThreshold(rps float64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if rps < 1 {
+		rps = 1
+	}
+	if rps > 100 {
+		rps = 100
+	}
+	e.aggressiveRPSThreshold = rps
+}
+
+// SetLabyrinthPathsThreshold sets the unique-paths threshold above which clients get labyrinth mode.
+func (e *Engine) SetLabyrinthPathsThreshold(paths int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if paths < 1 {
+		paths = 1
+	}
+	if paths > 1000 {
+		paths = 1000
+	}
+	e.labyrinthPathsThreshold = paths
 }
 
 // SetOverride forces a specific mode for a client (used by admin panel).
@@ -277,7 +309,7 @@ func (e *Engine) loadTesterBehavior(p *metrics.ClientProfile, rps float64) *Clie
 }
 
 func (e *Engine) scriptBotBehavior(p *metrics.ClientProfile, rps float64) *ClientBehavior {
-	if rps > 10 {
+	if rps > e.aggressiveRPSThreshold {
 		// High-rate script bots get aggressive treatment
 		return &ClientBehavior{
 			Mode:            ModeAggressive,
@@ -346,7 +378,7 @@ func (e *Engine) apiTesterBehavior(p *metrics.ClientProfile) *ClientBehavior {
 
 func (e *Engine) unknownBehavior(p *metrics.ClientProfile, rps float64) *ClientBehavior {
 	// Heuristic: high request rate + few user agents = bot
-	if rps > 20 && len(p.UserAgents) <= 1 {
+	if rps > e.aggressiveRPSThreshold*2 && len(p.UserAgents) <= 1 {
 		return &ClientBehavior{
 			Mode:            ModeAggressive,
 			ErrorProfile:    errors.AggressiveProfile(),
@@ -358,7 +390,7 @@ func (e *Engine) unknownBehavior(p *metrics.ClientProfile, rps float64) *ClientB
 	}
 
 	// Many unique paths = likely exploration/scanning
-	if len(p.PathsVisited) > 50 {
+	if len(p.PathsVisited) > e.labyrinthPathsThreshold {
 		return &ClientBehavior{
 			Mode:            ModeLabyrinth,
 			ErrorProfile:    errors.DefaultProfile(),
