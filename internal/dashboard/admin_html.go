@@ -1330,16 +1330,23 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         api('/admin/api/vulns')
       ]);
       vulnProfile = profile;
-      vulnData = profile.vulns || [];
+      var p = profile.profile || profile;
+      vulnData = p.vulnerabilities || p.vulns || [];
 
-      const cats = profile.category_counts || {};
-      const sev = profile.severity_counts || {};
+      var ebt = p.endpoints_by_type || {};
+      var cats = {owasp: 0, advanced: 0, dashboard: 0};
+      vulnData.forEach(function(v) {
+        if (v.owasp) cats.owasp++;
+        else if (v.id && v.id.startsWith('dashboard')) cats.dashboard++;
+        else cats.advanced++;
+      });
+      const sev = p.by_severity || p.severity_counts || {};
       document.getElementById('vuln-overview-cards').innerHTML =
         card('OWASP Top 10', cats.owasp || 0, 'v-err') +
         card('Advanced Vulns', cats.advanced || 0, 'v-warn') +
         card('Dashboard Vulns', cats.dashboard || 0, 'v-info') +
-        card('Total Vulns', profile.total_vulns || 0, 'v-ok') +
-        card('Total Endpoints', profile.total_endpoints || 0, 'v-info');
+        card('Total Vulns', p.total_vulns || 0, 'v-ok') +
+        card('Total Endpoints', p.total_endpoints || 0, 'v-info');
 
       // Group toggles
       var groups = vc.groups || {};
@@ -1372,8 +1379,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         return '<a class="vuln-endpoint" href="http://' + window.location.hostname + ':' + mainPort + ep + '" target="_blank" title="' + escapeHtml(ep) + '">' + escapeHtml(ep.length > 60 ? ep.substring(0, 57) + '...' : ep) + '</a>';
       }).join('');
       var catEnabled = catState[v.id] !== false;
-      var statusClass = (v.active && catEnabled) ? 'vuln-status-active' : 'vuln-status-disabled';
-      var statusText = (v.active && catEnabled) ? 'ACTIVE' : 'DISABLED';
+      var isActive = v.active !== false && v.detectable !== false;
+      var statusClass = (isActive && catEnabled) ? 'vuln-status-active' : 'vuln-status-disabled';
+      var statusText = (isActive && catEnabled) ? 'ACTIVE' : 'DISABLED';
       var toggleBtn = '<label class="toggle-sw" style="display:inline-block;vertical-align:middle;margin-left:8px">' +
         '<input type="checkbox" ' + (catEnabled ? 'checked' : '') + ' onchange="toggleVulnCat(\'' + escapeHtml(v.id || v.name) + '\', this.checked)">' +
         '<div class="toggle-track"></div>' +
@@ -1382,8 +1390,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       return '<tr>' +
         '<td>' + escapeHtml(v.name) + '</td>' +
         '<td><span class="sev sev-' + v.severity + '">' + v.severity + '</span></td>' +
-        '<td style="color:#888">' + escapeHtml(v.cwe) + '</td>' +
-        '<td>' + escapeHtml(v.category) + '</td>' +
+        '<td style="color:#888">' + escapeHtml(v.cwe || '') + '</td>' +
+        '<td>' + escapeHtml(v.owasp || v.category || v.id || '') + '</td>' +
         '<td>' + endpoints + '</td>' +
         '<td><span class="' + statusClass + '">' + statusText + '</span>' + toggleBtn + '</td>' +
         '</tr>';
