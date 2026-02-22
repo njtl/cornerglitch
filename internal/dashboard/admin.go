@@ -676,25 +676,27 @@ func (vc *VulnConfig) Snapshot() map[string]interface{} {
 
 // ConfigExport represents a full configuration snapshot for export/import.
 type ConfigExport struct {
-	Version      string                 `json:"version"`
-	ExportedAt   string                 `json:"exported_at"`
-	Description  string                 `json:"description,omitempty"`
-	Features     map[string]bool        `json:"features"`
-	Config       map[string]interface{} `json:"config"`
-	VulnConfig   map[string]interface{} `json:"vuln_config"`
-	ErrorWeights map[string]float64     `json:"error_weights,omitempty"`
-	Blocking     map[string]interface{} `json:"blocking,omitempty"`
+	Version         string                 `json:"version"`
+	ExportedAt      string                 `json:"exported_at"`
+	Description     string                 `json:"description,omitempty"`
+	Features        map[string]bool        `json:"features"`
+	Config          map[string]interface{} `json:"config"`
+	VulnConfig      map[string]interface{} `json:"vuln_config"`
+	ErrorWeights    map[string]float64     `json:"error_weights,omitempty"`
+	PageTypeWeights map[string]float64     `json:"page_type_weights,omitempty"`
+	Blocking        map[string]interface{} `json:"blocking,omitempty"`
 }
 
 // ExportConfig builds a ConfigExport from the current global state.
 func ExportConfig() *ConfigExport {
 	return &ConfigExport{
-		Version:      "1.0",
-		ExportedAt:   time.Now().UTC().Format(time.RFC3339),
-		Features:     globalFlags.Snapshot(),
-		Config:       globalConfig.Get(),
-		VulnConfig:   globalVulnConfig.Snapshot(),
-		ErrorWeights: globalConfig.GetErrorWeights(),
+		Version:         "1.0",
+		ExportedAt:      time.Now().UTC().Format(time.RFC3339),
+		Features:        globalFlags.Snapshot(),
+		Config:          globalConfig.Get(),
+		VulnConfig:      globalVulnConfig.Snapshot(),
+		ErrorWeights:    globalConfig.GetErrorWeights(),
+		PageTypeWeights: globalConfig.GetPageTypeWeights(),
 	}
 }
 
@@ -746,6 +748,14 @@ func ImportConfig(export *ConfigExport) {
 		globalConfig.ResetErrorWeights()
 		for errType, weight := range export.ErrorWeights {
 			globalConfig.SetErrorWeight(errType, weight)
+		}
+	}
+
+	// Import page type weights
+	if export.PageTypeWeights != nil {
+		globalConfig.ResetPageTypeWeights()
+		for pageType, weight := range export.PageTypeWeights {
+			globalConfig.SetPageTypeWeight(pageType, weight)
 		}
 	}
 }
