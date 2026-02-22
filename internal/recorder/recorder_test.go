@@ -1152,3 +1152,396 @@ func TestMaybeRotate_NilFileOpensNew(t *testing.T) {
 	rec.RecordFull("GET", "/recover", "c1", nil, nil, 200, http.Header{}, 0, 0)
 	rec.Stop()
 }
+
+// =============================================================================
+// PCAP format tests
+// =============================================================================
+
+func TestPCAPWriter_CreatesValidFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.pcap")
+
+	pw, err := NewPCAPWriter(path)
+	if err != nil {
+		t.Fatalf("failed to create PCAPWriter: %v", err)
+	}
+
+	// Write a simple packet
+	err = pw.WritePacket("10.0.0.1", "10.0.0.2", 12345, 80, []byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))
+	if err != nil {
+		t.Fatalf("failed to write packet: %v", err)
+	}
+
+	err = pw.Close()
+	if err != nil {
+		t.Fatalf("failed to close PCAPWriter: %v", err)
+	}
+
+	// Read the file and verify magic bytes
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read pcap file: %v", err)
+	}
+
+	if len(data) < 24 {
+		t.Fatalf("pcap file too small: %d bytes", len(data))
+	}
+
+	// Verify magic number (little-endian 0xa1b2c3d4)
+	magic := uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16 | uint32(data[3])<<24
+	if magic != 0xa1b2c3d4 {
+		t.Errorf("expected magic 0xa1b2c3d4, got 0x%08x", magic)
+	}
+
+	// Verify version major = 2
+	versionMaj := uint16(data[4]) | uint16(data[5])<<8
+	if versionMaj != 2 {
+		t.Errorf("expected version major 2, got %d", versionMaj)
+	}
+
+	// Verify version minor = 4
+	versionMin := uint16(data[6]) | uint16(data[7])<<8
+	if versionMin != 4 {
+		t.Errorf("expected version minor 4, got %d", versionMin)
+	}
+
+	// Verify snaplen = 65535
+	snaplen := uint32(data[16]) | uint32(data[17])<<8 | uint32(data[18])<<16 | uint32(data[19])<<24
+	if snaplen != 65535 {
+		t.Errorf("expected snaplen 65535, got %d", snaplen)
+	}
+
+	// Verify network = 1 (LINKTYPE_ETHERNET)
+	network := uint32(data[20]) | uint32(data[21])<<8 | uint32(data[22])<<16 | uint32(data[23])<<24
+	if network != 1 {
+		t.Errorf("expected network 1, got %d", network)
+	}
+
+	// File should be larger than just the global header (24 bytes)
+	if len(data) <= 24 {
+		t.Errorf("expected file to contain packet data beyond global header, got %d bytes", len(data))
+	}
+}
+
+func TestPCAPWriter_WriteHTTPRequest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test_req.pcap")
+
+	pw, err := NewPCAPWriter(path)
+	if err != nil {
+		t.Fatalf("failed to create PCAPWriter: %v", err)
+	}
+
+	sizeBefore := pw.Size()
+
+	err = pw.WriteHTTPRequest("GET", "/api/data", "example.com",
+		map[string]string{"Accept": "application/json"}, "")
+	if err != nil {
+		t.Fatalf("failed to write HTTP request: %v", err)
+	}
+
+	sizeAfter := pw.Size()
+	if sizeAfter <= sizeBefore {
+		t.Errorf("expected file to grow after WriteHTTPRequest, before=%d after=%d", sizeBefore, sizeAfter)
+	}
+
+	pw.Close()
+}
+
+func TestPCAPWriter_WriteHTTPResponse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test_resp.pcap")
+
+	pw, err := NewPCAPWriter(path)
+	if err != nil {
+		t.Fatalf("failed to create PCAPWriter: %v", err)
+	}
+
+	sizeBefore := pw.Size()
+
+	err = pw.WriteHTTPResponse(200, map[string]string{"Content-Type": "text/html"}, 1024)
+	if err != nil {
+		t.Fatalf("failed to write HTTP response: %v", err)
+	}
+
+	sizeAfter := pw.Size()
+	if sizeAfter <= sizeBefore {
+		t.Errorf("expected file to grow after WriteHTTPResponse, before=%d after=%d", sizeBefore, sizeAfter)
+	}
+
+	pw.Close()
+}
+
+func TestRecorder_PCAPFormat_StartStop(t *testing.T) {
+	rec := newTestRecorder(t)
+	rec.SetFormat("pcap")
+
+	rec.Start()
+	if !rec.IsRecording() {
+		t.Fatal("expected recording to be true after Start")
+	}
+
+	rec.Stop()
+	if rec.IsRecording() {
+		t.Fatal("expected recording to be false after Stop")
+	}
+
+	// Verify a .pcap file was created
+	captures := rec.GetCaptures()
+	if len(captures) != 1 {
+		t.Fatalf("expected 1 capture file, got %d", len(captures))
+	}
+	if !strings.HasSuffix(captures[0].Filename, ".pcap") {
+		t.Errorf("expected .pcap extension, got %q", captures[0].Filename)
+	}
+	if captures[0].SizeBytes < 24 {
+		t.Errorf("expected pcap file to be at least 24 bytes (global header), got %d", captures[0].SizeBytes)
+	}
+}
+
+func TestRecorder_PCAPFormat_RecordFull(t *testing.T) {
+	rec := newTestRecorder(t)
+	rec.SetFormat("pcap")
+	rec.Start()
+
+	respHeaders := http.Header{"Content-Type": []string{"text/html"}}
+	rec.RecordFull("GET", "/test", "client1",
+		map[string]string{"User-Agent": "test-agent", "Host": "example.com"},
+		[]byte("request body"),
+		200, respHeaders, 42, 1.5)
+
+	rec.Stop()
+
+	captures := rec.GetCaptures()
+	if len(captures) != 1 {
+		t.Fatalf("expected 1 capture file, got %d", len(captures))
+	}
+
+	// The file should have content beyond the 24-byte global header
+	if captures[0].SizeBytes <= 24 {
+		t.Errorf("expected pcap file to have packet data, got %d bytes", captures[0].SizeBytes)
+	}
+
+	// Verify the file has valid pcap magic bytes
+	data, err := os.ReadFile(filepath.Join(rec.capturesDir, captures[0].Filename))
+	if err != nil {
+		t.Fatalf("failed to read capture file: %v", err)
+	}
+	magic := uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16 | uint32(data[3])<<24
+	if magic != 0xa1b2c3d4 {
+		t.Errorf("expected magic 0xa1b2c3d4, got 0x%08x", magic)
+	}
+}
+
+func TestRecorder_FormatSelection(t *testing.T) {
+	// Test JSONL format creates .jsonl
+	rec1 := newTestRecorder(t)
+	rec1.SetFormat("jsonl")
+	rec1.Start()
+	rec1.RecordFull("GET", "/", "c1", nil, nil, 200, http.Header{}, 0, 0)
+	rec1.Stop()
+
+	captures1 := rec1.GetCaptures()
+	if len(captures1) != 1 {
+		t.Fatalf("jsonl: expected 1 capture, got %d", len(captures1))
+	}
+	if !strings.HasSuffix(captures1[0].Filename, ".jsonl") {
+		t.Errorf("jsonl: expected .jsonl extension, got %q", captures1[0].Filename)
+	}
+
+	// Test PCAP format creates .pcap
+	rec2 := newTestRecorder(t)
+	rec2.SetFormat("pcap")
+	rec2.Start()
+	rec2.RecordFull("GET", "/", "c1", nil, nil, 200, http.Header{}, 0, 0)
+	rec2.Stop()
+
+	captures2 := rec2.GetCaptures()
+	if len(captures2) != 1 {
+		t.Fatalf("pcap: expected 1 capture, got %d", len(captures2))
+	}
+	if !strings.HasSuffix(captures2[0].Filename, ".pcap") {
+		t.Errorf("pcap: expected .pcap extension, got %q", captures2[0].Filename)
+	}
+}
+
+func TestRecorder_PCAPDownload_ContentType(t *testing.T) {
+	rec := newTestRecorder(t)
+	rec.SetFormat("pcap")
+	rec.Start()
+	rec.RecordFull("GET", "/page", "c1", nil, nil, 200, http.Header{}, 10, 1.0)
+	rec.Stop()
+
+	captures := rec.GetCaptures()
+	if len(captures) == 0 {
+		t.Fatal("no captures available")
+	}
+	filename := captures[0].Filename
+
+	req := httptest.NewRequest(http.MethodGet, "/captures/"+filename, nil)
+	w := httptest.NewRecorder()
+	status := rec.ServeHTTP(w, req)
+
+	if status != http.StatusOK {
+		t.Errorf("expected 200, got %d", status)
+	}
+	expectedCT := "application/vnd.tcpdump.pcap"
+	if w.Header().Get("Content-Type") != expectedCT {
+		t.Errorf("expected Content-Type %q, got %q", expectedCT, w.Header().Get("Content-Type"))
+	}
+	if w.Header().Get("Content-Disposition") == "" {
+		t.Error("expected Content-Disposition header")
+	}
+	if w.Body.Len() == 0 {
+		t.Error("expected non-empty body")
+	}
+}
+
+func TestRecorder_PCAPFormat_HandleStartWithFormat(t *testing.T) {
+	rec := newTestRecorder(t)
+
+	// Start recording via HTTP API with format=pcap
+	body := strings.NewReader(`{"format":"pcap"}`)
+	req := httptest.NewRequest(http.MethodPost, "/captures/start", body)
+	w := httptest.NewRecorder()
+	status := rec.ServeHTTP(w, req)
+
+	if status != http.StatusOK {
+		t.Errorf("expected 200, got %d", status)
+	}
+	if !rec.IsRecording() {
+		t.Error("expected recording to be true after /captures/start")
+	}
+
+	var resp map[string]string
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["format"] != "pcap" {
+		t.Errorf("expected format=pcap in response, got %q", resp["format"])
+	}
+	if !strings.HasSuffix(resp["file"], ".pcap") {
+		t.Errorf("expected .pcap filename, got %q", resp["file"])
+	}
+
+	// Stop and verify file exists
+	rec.Stop()
+	captures := rec.GetCaptures()
+	if len(captures) != 1 {
+		t.Fatalf("expected 1 capture, got %d", len(captures))
+	}
+	if !strings.HasSuffix(captures[0].Filename, ".pcap") {
+		t.Errorf("expected .pcap file, got %q", captures[0].Filename)
+	}
+}
+
+func TestRecorder_PCAPFormat_ValidCaptureFilename(t *testing.T) {
+	// .pcap files should be valid capture filenames
+	tests := []struct {
+		name  string
+		valid bool
+	}{
+		{"capture_20250101_120000.pcap", true},
+		{"capture_20250612_235959.pcap", true},
+		{"capture_20250101_120000.jsonl", true},
+		{"capture_20250101_120000.txt", false},
+		{"notcapture_20250101_120000.pcap", false},
+		{"../capture_20250101_120000.pcap", false},
+	}
+
+	for _, tc := range tests {
+		got := isValidCaptureFilename(tc.name)
+		if got != tc.valid {
+			t.Errorf("isValidCaptureFilename(%q) = %v, want %v", tc.name, got, tc.valid)
+		}
+	}
+}
+
+func TestRecorder_PCAPFormat_ParseFilenameTime(t *testing.T) {
+	// .pcap extension should be handled by parseFilenameTime
+	ts := parseFilenameTime("capture_20250612_143059.pcap")
+	if ts.IsZero() {
+		t.Fatal("expected non-zero time for .pcap filename")
+	}
+	if ts.Year() != 2025 || ts.Month() != 6 || ts.Day() != 12 {
+		t.Errorf("unexpected date: %v", ts)
+	}
+	if ts.Hour() != 14 || ts.Minute() != 30 || ts.Second() != 59 {
+		t.Errorf("unexpected time: %v", ts)
+	}
+}
+
+func TestRecorder_PCAPFormat_GetFormat(t *testing.T) {
+	rec := newTestRecorder(t)
+
+	// Default format should be jsonl
+	if rec.GetFormat() != "jsonl" {
+		t.Errorf("expected default format jsonl, got %q", rec.GetFormat())
+	}
+
+	rec.SetFormat("pcap")
+	if rec.GetFormat() != "pcap" {
+		t.Errorf("expected format pcap, got %q", rec.GetFormat())
+	}
+
+	rec.SetFormat("jsonl")
+	if rec.GetFormat() != "jsonl" {
+		t.Errorf("expected format jsonl, got %q", rec.GetFormat())
+	}
+
+	// Invalid format should be ignored
+	rec.SetFormat("xml")
+	if rec.GetFormat() != "jsonl" {
+		t.Errorf("expected format to remain jsonl after invalid set, got %q", rec.GetFormat())
+	}
+}
+
+func TestPCAPWriter_CloseIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.pcap")
+
+	pw, err := NewPCAPWriter(path)
+	if err != nil {
+		t.Fatalf("failed to create PCAPWriter: %v", err)
+	}
+
+	// Close twice should not panic
+	pw.Close()
+	err = pw.Close()
+	if err != nil {
+		t.Errorf("second Close should return nil, got %v", err)
+	}
+}
+
+func TestPCAPWriter_SizeAfterClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.pcap")
+
+	pw, err := NewPCAPWriter(path)
+	if err != nil {
+		t.Fatalf("failed to create PCAPWriter: %v", err)
+	}
+
+	pw.Close()
+
+	// Size after close should return 0
+	if pw.Size() != 0 {
+		t.Errorf("expected Size() == 0 after close, got %d", pw.Size())
+	}
+}
+
+func TestPCAPWriter_WriteAfterClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.pcap")
+
+	pw, err := NewPCAPWriter(path)
+	if err != nil {
+		t.Fatalf("failed to create PCAPWriter: %v", err)
+	}
+
+	pw.Close()
+
+	// Write after close should return error
+	err = pw.WritePacket("10.0.0.1", "10.0.0.2", 12345, 80, []byte("data"))
+	if err == nil {
+		t.Error("expected error when writing to closed PCAPWriter")
+	}
+}

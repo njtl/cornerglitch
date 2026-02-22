@@ -41,13 +41,15 @@ type captureRecord struct {
 	LatencyMs       float64           `json:"latency_ms"`
 }
 
-// Recorder handles HTTP traffic capture to JSONL files.
+// Recorder handles HTTP traffic capture to JSONL or PCAP files.
 type Recorder struct {
 	capturesDir string
 
 	mu          sync.Mutex
 	recording   bool
+	format      string // "jsonl" (default) or "pcap"
 	file        *os.File
+	pcapWriter  *PCAPWriter
 	fileName    string
 	fileStart   time.Time
 	fileSize    int64
@@ -60,7 +62,25 @@ func NewRecorder(capturesDir string) *Recorder {
 	_ = os.MkdirAll(capturesDir, 0o755)
 	return &Recorder{
 		capturesDir: capturesDir,
+		format:      "jsonl",
 	}
+}
+
+// SetFormat sets the capture format ("jsonl" or "pcap"). Must not be called
+// while recording is active — the format takes effect on the next Start.
+func (rec *Recorder) SetFormat(format string) {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if format == "pcap" || format == "jsonl" {
+		rec.format = format
+	}
+}
+
+// GetFormat returns the current capture format.
+func (rec *Recorder) GetFormat() string {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return rec.format
 }
 
 // IsRecording returns whether the recorder is currently capturing traffic.
@@ -118,6 +138,18 @@ func (rec *Recorder) RecordResponse(statusCode int, headers http.Header, body []
 
 	rec.maybeRotate()
 
+	// PCAP format: write response as a packet.
+	if rec.format == "pcap" && rec.pcapWriter != nil {
+		respHeaders := make(map[string]string, len(headers))
+		for k := range headers {
+			respHeaders[k] = headers.Get(k)
+		}
+		_ = rec.pcapWriter.WriteHTTPResponse(statusCode, respHeaders, int64(len(body)))
+		rec.fileSize = rec.pcapWriter.Size()
+		rec.recordCount.Add(1)
+		return
+	}
+
 	if rec.file == nil {
 		return
 	}
@@ -166,6 +198,35 @@ func (rec *Recorder) RecordFull(method, path, clientID string, reqHeaders map[st
 
 	rec.maybeRotate()
 
+	// PCAP format: write request and response as separate packets.
+	if rec.format == "pcap" && rec.pcapWriter != nil {
+		host := ""
+		if reqHeaders != nil {
+			host = reqHeaders["Host"]
+		}
+		if host == "" {
+			host = "localhost"
+		}
+
+		var bodyStr string
+		if len(reqBody) > 0 {
+			bodyStr = string(reqBody)
+		}
+
+		rh := make(map[string]string, len(respHeaders))
+		for k := range respHeaders {
+			rh[k] = respHeaders.Get(k)
+		}
+
+		_ = rec.pcapWriter.WriteHTTPRequest(method, path, host, reqHeaders, bodyStr)
+		_ = rec.pcapWriter.WriteHTTPResponse(statusCode, rh, respBodySize)
+
+		rec.fileSize = rec.pcapWriter.Size()
+		rec.recordCount.Add(1)
+		return
+	}
+
+	// JSONL format (default).
 	if rec.file == nil {
 		return
 	}
@@ -219,7 +280,7 @@ func (rec *Recorder) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
 
 	// POST /captures/start
 	if path == "/captures/start" && r.Method == http.MethodPost {
-		return rec.handleStart(w)
+		return rec.handleStart(w, r)
 	}
 
 	// POST /captures/stop
@@ -281,7 +342,8 @@ func (rec *Recorder) GetCaptures() []CaptureInfo {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasPrefix(name, "capture_") || !strings.HasSuffix(name, ".jsonl") {
+		if !strings.HasPrefix(name, "capture_") ||
+			(!strings.HasSuffix(name, ".jsonl") && !strings.HasSuffix(name, ".pcap")) {
 			continue
 		}
 
@@ -307,9 +369,27 @@ func (rec *Recorder) GetCaptures() []CaptureInfo {
 
 // --- internal methods ---
 
-// openNewFile creates a new capture JSONL file. Must be called with mu held.
+// openNewFile creates a new capture file (JSONL or PCAP). Must be called with mu held.
 func (rec *Recorder) openNewFile() {
 	now := time.Now()
+
+	if rec.format == "pcap" {
+		name := fmt.Sprintf("capture_%s.pcap", now.Format("20060102_150405"))
+		path := filepath.Join(rec.capturesDir, name)
+		pw, err := NewPCAPWriter(path)
+		if err != nil {
+			return
+		}
+		rec.pcapWriter = pw
+		rec.file = nil
+		rec.fileName = name
+		rec.fileStart = now
+		rec.fileSize = 24 // global header size
+		rec.recordCount.Store(0)
+		return
+	}
+
+	// Default: JSONL
 	name := fmt.Sprintf("capture_%s.jsonl", now.Format("20060102_150405"))
 	path := filepath.Join(rec.capturesDir, name)
 
@@ -319,6 +399,7 @@ func (rec *Recorder) openNewFile() {
 	}
 
 	rec.file = f
+	rec.pcapWriter = nil
 	rec.fileName = name
 	rec.fileStart = now
 	rec.fileSize = 0
@@ -327,17 +408,21 @@ func (rec *Recorder) openNewFile() {
 
 // closeFile closes the current capture file. Must be called with mu held.
 func (rec *Recorder) closeFile() {
+	if rec.pcapWriter != nil {
+		_ = rec.pcapWriter.Close()
+		rec.pcapWriter = nil
+	}
 	if rec.file != nil {
 		_ = rec.file.Close()
 		rec.file = nil
-		rec.fileName = ""
 	}
+	rec.fileName = ""
 }
 
 // maybeRotate checks size and duration limits and rotates the file if needed.
 // Must be called with mu held.
 func (rec *Recorder) maybeRotate() {
-	if rec.file == nil {
+	if rec.file == nil && rec.pcapWriter == nil {
 		rec.openNewFile()
 		return
 	}
@@ -350,14 +435,29 @@ func (rec *Recorder) maybeRotate() {
 }
 
 // handleStart begins recording and returns the response.
-func (rec *Recorder) handleStart(w http.ResponseWriter) int {
+// Accepts optional JSON body: {"format":"pcap"} or {"format":"jsonl"}.
+func (rec *Recorder) handleStart(w http.ResponseWriter, r *http.Request) int {
+	// Try to read format from request body.
+	var reqBody struct {
+		Format string `json:"format"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+	}
+
 	rec.mu.Lock()
 	alreadyRecording := rec.recording
 	if !alreadyRecording {
+		if reqBody.Format == "pcap" {
+			rec.format = "pcap"
+		} else if reqBody.Format == "jsonl" || reqBody.Format == "" {
+			rec.format = "jsonl"
+		}
 		rec.openNewFile()
 		rec.recording = true
 	}
 	filename := rec.fileName
+	format := rec.format
 	rec.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -365,6 +465,7 @@ func (rec *Recorder) handleStart(w http.ResponseWriter) int {
 	resp := map[string]string{
 		"status": "recording",
 		"file":   filename,
+		"format": format,
 	}
 	data, _ := json.Marshal(resp)
 	_, _ = w.Write(data)
@@ -432,7 +533,11 @@ func (rec *Recorder) handleDownload(w http.ResponseWriter, filename string) int 
 	}
 	defer f.Close()
 
-	w.Header().Set("Content-Type", "application/x-ndjson")
+	contentType := "application/x-ndjson"
+	if strings.HasSuffix(filename, ".pcap") {
+		contentType = "application/vnd.tcpdump.pcap"
+	}
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 	w.WriteHeader(http.StatusOK)
@@ -494,14 +599,16 @@ func isValidCaptureFilename(name string) bool {
 	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
 		return false
 	}
-	return strings.HasPrefix(name, "capture_") && strings.HasSuffix(name, ".jsonl")
+	return strings.HasPrefix(name, "capture_") &&
+		(strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, ".pcap"))
 }
 
 // parseFilenameTime extracts the timestamp from a capture filename.
 func parseFilenameTime(name string) time.Time {
-	// capture_20060102_150405.jsonl
+	// capture_20060102_150405.jsonl or capture_20060102_150405.pcap
 	name = strings.TrimPrefix(name, "capture_")
 	name = strings.TrimSuffix(name, ".jsonl")
+	name = strings.TrimSuffix(name, ".pcap")
 	t, err := time.Parse("20060102_150405", name)
 	if err != nil {
 		return time.Time{}
