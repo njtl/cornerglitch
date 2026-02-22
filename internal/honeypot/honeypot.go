@@ -631,6 +631,32 @@ func (h *Honeypot) init() {
 	for _, p := range envPaths {
 		h.paths[p] = LureEnvFile
 	}
+
+	// ---------------------------------------------------------------
+	// 15. Firecrawl-targeted paths (JS configs and API endpoints)
+	// ---------------------------------------------------------------
+	firecrawlPaths := []string{
+		"/assets/config.js", "/assets/app.config.js",
+		"/api/internal/config", "/api/internal/keys",
+		"/_next/data/config.json", "/api/v1/internal/status",
+		"/api/internal/health", "/api/private/tokens",
+	}
+	for _, p := range firecrawlPaths {
+		h.paths[p] = LureConfigFile
+	}
+
+	// ---------------------------------------------------------------
+	// 16. Oxylabs-targeted paths (data APIs and scraping endpoints)
+	// ---------------------------------------------------------------
+	oxylabsPaths := []string{
+		"/api/data/export", "/api/scrape/results",
+		"/api/v2/data/bulk", "/api/crawl/queue",
+		"/data/feed.json", "/api/search/results.json",
+		"/api/products/all.json", "/api/listings/feed",
+	}
+	for _, p := range oxylabsPaths {
+		h.paths[p] = LureAPIKey
+	}
 }
 
 // ShouldHandle returns true if the request path matches a known scanner probe path
