@@ -44,6 +44,8 @@ internal/
 ```bash
 go build ./cmd/glitch/           # compile check
 go vet ./...                     # static analysis
+go test ./... -count=1           # unit tests
+npx playwright test              # E2E tests (49+ tests)
 ```
 
 Quick smoke test:
@@ -53,6 +55,28 @@ curl http://localhost:8765/
 curl http://localhost:8765/articles/some-topic/deep-path  # triggers labyrinth
 curl http://localhost:8766/api/metrics                     # dashboard API
 ```
+
+### PM Acceptance Testing
+
+Uses Stagehand (natural language browser automation) for product-manager-style acceptance testing. A PM agent navigates the running app via natural language commands and verifies features work as a user would experience them.
+
+```bash
+# Install deps (one-time)
+npm install @browserbasehq/stagehand @anthropic-ai/sdk
+
+# Run all acceptance tests
+node e2e/pm-acceptance.js all
+
+# Run a specific suite
+node e2e/pm-acceptance.js pcap
+node e2e/pm-acceptance.js firecrawl-traps
+node e2e/pm-acceptance.js proxy-integration
+node e2e/pm-acceptance.js scanner-compare
+```
+
+**How it works:** The PM agent uses Stagehand to control a headless browser. It navigates to pages, clicks buttons, fills forms, and reads content using natural language actions like `"click the Controls tab"` or `"find the recorder section"`. Each check verifies the feature works from a user's perspective, not just at the API level.
+
+**Adding new acceptance tests:** Add a new method to `PMAcceptance` in `e2e/pm-acceptance.js`. Use `sh.act({ action: "..." })` for browser actions and `sh.extract({ instruction: "..." })` to read page content.
 
 ## Architecture Notes
 
