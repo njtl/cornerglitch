@@ -636,6 +636,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         </select>
       </div>
       <div>
+        <div class="slider-label"><span>Recording Format</span></div>
+        <select id="ctrl-recorder-format" class="ctrl-select" onchange="setConfigKey('recorder_format', this.value)">
+          <option value="jsonl">JSONL</option>
+          <option value="pcap">PCAP</option>
+        </select>
+      </div>
+      <div>
         <div id="advanced-sliders"></div>
       </div>
     </div>
@@ -1188,6 +1195,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       if (cfg.content_theme) {
         var sel3 = document.getElementById('ctrl-theme');
         if (sel3) sel3.value = cfg.content_theme;
+      }
+      if (cfg.recorder_format) {
+        var sel4 = document.getElementById('ctrl-recorder-format');
+        if (sel4) sel4.value = cfg.recorder_format;
       }
 
       // Error weights

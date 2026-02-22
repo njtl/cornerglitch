@@ -96,6 +96,21 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		adminAPIScannerStop(w, r, s)
 	})
 
+	// Scanner comparison history
+	mux.HandleFunc("/admin/api/scanner/history", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIScannerHistory(w, r, s)
+	})
+
+	// Multi-scanner compare
+	mux.HandleFunc("/admin/api/scanner/multi-compare", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIScannerMultiCompare(w, r, s)
+	})
+
+	// Scanner baseline
+	mux.HandleFunc("/admin/api/scanner/baseline", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIScannerBaseline(w, r, s)
+	})
+
 	// Vulnerability controls
 	mux.HandleFunc("/admin/api/vulns", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -694,6 +709,9 @@ func adminAPIScannerCompare(w http.ResponseWriter, r *http.Request, s *Server) {
 		return
 	}
 
+	// Record in comparison history
+	comparisonHistory.Add(report)
+
 	json.NewEncoder(w).Encode(report)
 }
 
@@ -968,5 +986,97 @@ func adminAPIConfigImport(w http.ResponseWriter, r *http.Request, s *Server) {
 		"ok":      true,
 		"message": "Configuration imported successfully",
 		"version": export.Version,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Scanner comparison history & multi-compare handlers
+// ---------------------------------------------------------------------------
+
+func adminAPIScannerHistory(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	scannerFilter := r.URL.Query().Get("scanner")
+	var entries []scanner.HistoryEntry
+	if scannerFilter != "" {
+		entries = comparisonHistory.GetByScanner(scannerFilter)
+	} else {
+		entries = comparisonHistory.GetAll()
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"entries": entries,
+		"count":   len(entries),
+	})
+}
+
+func adminAPIScannerMultiCompare(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Reports map[string]string `json:"reports"` // scanner name -> raw output
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	profile := buildScannerProfile()
+	reports := make(map[string]*scanner.ComparisonReport, len(req.Reports))
+
+	for scannerName, rawOutput := range req.Reports {
+		report, err := scanner.ParseAndCompare(scannerName, []byte(rawOutput), profile)
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":   err.Error(),
+				"scanner": scannerName,
+			})
+			return
+		}
+		reports[scannerName] = report
+		// Also record each individual report in history
+		comparisonHistory.Add(report)
+	}
+
+	mc := scanner.CompareMultiple(reports, profile)
+	json.NewEncoder(w).Encode(mc)
+}
+
+func adminAPIScannerBaseline(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	scannerName := r.URL.Query().Get("scanner")
+	if scannerName == "" {
+		http.Error(w, `{"error":"scanner parameter required"}`, http.StatusBadRequest)
+		return
+	}
+
+	baseline := comparisonHistory.GetBaseline(scannerName)
+	if baseline == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"scanner":  scannerName,
+			"baseline": nil,
+			"message":  "no baseline found for this scanner",
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"scanner":  scannerName,
+		"baseline": baseline,
 	})
 }

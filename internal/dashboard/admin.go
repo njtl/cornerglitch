@@ -306,6 +306,7 @@ type AdminConfig struct {
 	ContentCacheTTLSec     int
 	AdaptiveAggressiveRPS  float64
 	AdaptiveLabyrinthPaths int
+	RecorderFormat         string // "jsonl" or "pcap"
 }
 
 // NewAdminConfig returns an AdminConfig with sensible defaults.
@@ -332,6 +333,7 @@ func NewAdminConfig() *AdminConfig {
 		ContentCacheTTLSec:     60,
 		AdaptiveAggressiveRPS:  10,
 		AdaptiveLabyrinthPaths: 5,
+		RecorderFormat:         "jsonl",
 	}
 }
 
@@ -359,6 +361,7 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"content_cache_ttl_sec":    c.ContentCacheTTLSec,
 		"adaptive_aggressive_rps":  c.AdaptiveAggressiveRPS,
 		"adaptive_labyrinth_paths": c.AdaptiveLabyrinthPaths,
+		"recorder_format":          c.RecorderFormat,
 	}
 }
 
@@ -515,6 +518,10 @@ func (c *AdminConfig) SetString(key, value string) bool {
 		c.ActiveFramework = value
 	case "content_theme":
 		c.ContentTheme = value
+	case "recorder_format":
+		if value == "jsonl" || value == "pcap" {
+			c.RecorderFormat = value
+		}
 	default:
 		return false
 	}
@@ -772,6 +779,9 @@ var (
 	// Scanner runner — uses the real scanner package
 	scanRunner   *scanner.Runner
 	scanRunnerMu sync.Mutex
+
+	// Comparison history for scanner trend tracking
+	comparisonHistory = scanner.NewComparisonHistory(100)
 )
 
 // GetFeatureFlags returns the global FeatureFlags instance.
