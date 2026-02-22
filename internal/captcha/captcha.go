@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // ChallengeType defines the kind of CAPTCHA or anti-bot challenge to serve.
@@ -28,7 +29,9 @@ const (
 // Certain paths or request patterns trigger challenge pages. "Solving" the
 // challenge either passes through or escalates into another challenge.
 type Engine struct {
-	challenges []ChallengeType
+	mu               sync.RWMutex
+	challenges       []ChallengeType
+	triggerThreshold int // request count before captcha triggers
 }
 
 // NewEngine creates a captcha engine with all challenge types enabled.
@@ -38,8 +41,26 @@ func NewEngine() *Engine {
 		challenges[i] = ChallengeType(i)
 	}
 	return &Engine{
-		challenges: challenges,
+		challenges:       challenges,
+		triggerThreshold: 100,
 	}
+}
+
+// SetTriggerThreshold sets the request count threshold for captcha triggers.
+func (e *Engine) SetTriggerThreshold(thresh int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if thresh < 0 {
+		thresh = 0
+	}
+	e.triggerThreshold = thresh
+}
+
+// GetTriggerThreshold returns the current trigger threshold.
+func (e *Engine) GetTriggerThreshold() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.triggerThreshold
 }
 
 // ShouldChallenge returns true when the request should be interrupted with a
@@ -63,7 +84,7 @@ func (e *Engine) ShouldChallenge(path string, clientClass string, requestCount i
 	}
 
 	// High request count clients: 10% chance for anyone
-	if requestCount > 100 {
+	if requestCount > e.GetTriggerThreshold() {
 		return rand.Float64() < 0.10
 	}
 

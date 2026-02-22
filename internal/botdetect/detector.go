@@ -66,8 +66,9 @@ type ClientProfile struct {
 
 // Detector uses multiple signals to score how likely a client is to be a bot.
 type Detector struct {
-	mu       sync.RWMutex
-	profiles map[string]*ClientProfile
+	mu             sync.RWMutex
+	profiles       map[string]*ClientProfile
+	scoreThreshold float64 // configurable threshold for classification
 
 	// Pre-compiled patterns
 	botUAPatterns       []*regexp.Regexp
@@ -90,8 +91,9 @@ type crawlerProductRule struct {
 // NewDetector creates a Detector and starts background profile cleanup.
 func NewDetector() *Detector {
 	d := &Detector{
-		profiles: make(map[string]*ClientProfile),
-		done:     make(chan struct{}),
+		profiles:       make(map[string]*ClientProfile),
+		scoreThreshold: 60,
+		done:           make(chan struct{}),
 	}
 	d.initBotUAPatterns()
 	d.initCrawlerProductRules()
@@ -102,6 +104,26 @@ func NewDetector() *Detector {
 	go d.cleanupLoop()
 
 	return d
+}
+
+// SetScoreThreshold sets the bot score threshold, clamped to [0, 100].
+func (d *Detector) SetScoreThreshold(threshold float64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if threshold < 0 {
+		threshold = 0
+	}
+	if threshold > 100 {
+		threshold = 100
+	}
+	d.scoreThreshold = threshold
+}
+
+// GetScoreThreshold returns the current bot score threshold.
+func (d *Detector) GetScoreThreshold() float64 {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.scoreThreshold
 }
 
 // Stop shuts down the background cleanup goroutine.

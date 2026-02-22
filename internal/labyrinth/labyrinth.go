@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,14 +17,19 @@ import (
 // but the link structure creates an astronomically large graph.
 
 type Labyrinth struct {
-	segments   []string
-	adjectives []string
-	nouns      []string
-	topics     []string
+	mu          sync.RWMutex
+	maxDepth    int
+	linkDensity int
+	segments    []string
+	adjectives  []string
+	nouns       []string
+	topics      []string
 }
 
 func NewLabyrinth() *Labyrinth {
 	return &Labyrinth{
+		maxDepth:    50,
+		linkDensity: 8,
 		segments: []string{
 			"articles", "posts", "docs", "wiki", "help", "guides",
 			"resources", "learn", "explore", "discover", "archive",
@@ -52,6 +58,46 @@ func NewLabyrinth() *Labyrinth {
 			"container-orchestration", "service-mesh", "zero-trust-security",
 		},
 	}
+}
+
+// SetMaxDepth sets the maximum labyrinth depth, clamped to [1, 100].
+func (l *Labyrinth) SetMaxDepth(depth int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if depth < 1 {
+		depth = 1
+	}
+	if depth > 100 {
+		depth = 100
+	}
+	l.maxDepth = depth
+}
+
+// GetMaxDepth returns the current maximum labyrinth depth.
+func (l *Labyrinth) GetMaxDepth() int {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.maxDepth
+}
+
+// SetLinkDensity sets the link density, clamped to [1, 20].
+func (l *Labyrinth) SetLinkDensity(density int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if density < 1 {
+		density = 1
+	}
+	if density > 20 {
+		density = 20
+	}
+	l.linkDensity = density
+}
+
+// GetLinkDensity returns the current link density.
+func (l *Labyrinth) GetLinkDensity() int {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.linkDensity
 }
 
 // IsLabyrinthPath returns true if the request should enter the labyrinth.
@@ -95,7 +141,8 @@ func (l *Labyrinth) serveHTML(w http.ResponseWriter, r *http.Request, rng *rand.
 	depth := strings.Count(r.URL.Path, "/")
 
 	// Generate self-referencing and outgoing links
-	numLinks := rng.Intn(20) + 10
+	density := l.GetLinkDensity()
+	numLinks := rng.Intn(density*2) + density
 	links := l.generateLinks(r.URL.Path, rng, numLinks)
 
 	// Generate substantial content to look like a real page
@@ -112,7 +159,7 @@ func (l *Labyrinth) serveHTML(w http.ResponseWriter, r *http.Request, rng *rand.
 	}
 
 	// Related articles sidebar (more links to crawl)
-	numRelated := rng.Intn(15) + 5
+	numRelated := rng.Intn(density*2) + density
 	relatedLinks := l.generateLinks(r.URL.Path, rng, numRelated)
 	var sidebar strings.Builder
 	sidebar.WriteString("<aside><h3>Related Articles</h3><ul>\n")
