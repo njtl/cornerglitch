@@ -594,4 +594,159 @@ test.describe('Config Wiring', () => {
       data: { key: 'content_cache_ttl_sec', value: 60 },
     });
   });
+
+  test('recorder format config is stored and synced', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'recorder_format', value: 'pcap' },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.recorder_format).toBe('pcap');
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'recorder_format', value: 'jsonl' },
+    });
+  });
+
+  test('labyrinth max depth config is stored and synced', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'max_labyrinth_depth', value: 25 },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.max_labyrinth_depth).toBe(25);
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'max_labyrinth_depth', value: 50 },
+    });
+  });
+
+  test('header corruption level config is stored and synced', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'header_corrupt_level', value: 3 },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.header_corrupt_level).toBe(3);
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'header_corrupt_level', value: 1 },
+    });
+  });
+
+  test('captcha trigger threshold config is stored and synced', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'captcha_trigger_thresh', value: 50 },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.captcha_trigger_thresh).toBe(50);
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'captcha_trigger_thresh', value: 100 },
+    });
+  });
+
+  test('bot score threshold config is stored and synced', async ({ request }) => {
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'bot_score_threshold', value: 80 },
+    });
+
+    const cfgResp = await request.get(API + '/admin/api/config');
+    const cfg = await cfgResp.json();
+    expect(cfg.bot_score_threshold).toBe(80);
+
+    // Reset
+    await request.post(API + '/admin/api/config', {
+      data: { key: 'bot_score_threshold', value: 60 },
+    });
+  });
+});
+
+test.describe('Scanner Comparison API', () => {
+  test('comparison history endpoint returns array', async ({ request }) => {
+    const resp = await request.get(API + '/admin/api/scanner/history');
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    expect(data.entries).toBeDefined();
+    expect(Array.isArray(data.entries)).toBeTruthy();
+  });
+
+  test('scanner baseline endpoint works', async ({ request }) => {
+    const resp = await request.get(API + '/admin/api/scanner/baseline?scanner=nuclei');
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    // May be null if no baseline exists
+    expect(data).toBeDefined();
+  });
+
+  test('multi-compare endpoint accepts multiple scanners', async ({ request }) => {
+    const resp = await request.post(API + '/admin/api/scanner/multi-compare', {
+      data: {
+        reports: {
+          nuclei: '{"info":{"severity":"high"},"matched-at":"http://localhost:8765/vuln/a01/","template-id":"sql-injection"}',
+          ffuf: '{"results":[{"input":{"FUZZ":"admin"},"url":"http://localhost:8765/admin","status":200,"length":1234}]}',
+        },
+      },
+    });
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    expect(data.reports).toBeDefined();
+    expect(data.coverage_matrix).toBeDefined();
+  });
+
+  test('single compare adds to history', async ({ request }) => {
+    // Get history count before
+    const beforeResp = await request.get(API + '/admin/api/scanner/history');
+    const before = await beforeResp.json();
+    const countBefore = before.entries.length;
+
+    // Run a comparison
+    await request.post(API + '/admin/api/scanner/compare', {
+      data: {
+        scanner: 'nuclei',
+        data: '{"info":{"severity":"high"},"matched-at":"http://localhost:8765/vuln/a01/","template-id":"sql-injection"}',
+      },
+    });
+
+    // Check history count increased
+    const afterResp = await request.get(API + '/admin/api/scanner/history');
+    const after = await afterResp.json();
+    expect(after.entries.length).toBeGreaterThan(countBefore);
+  });
+});
+
+test.describe('PCAP Recording API', () => {
+  test('can start recording in PCAP format', async ({ request }) => {
+    const resp = await request.post(SERVER + '/captures/start', {
+      data: { format: 'pcap' },
+    });
+    const data = await resp.json();
+    expect(data.status).toBe('recording');
+    if (data.file) {
+      expect(data.file).toContain('.pcap');
+    }
+
+    // Stop recording
+    await request.post(SERVER + '/captures/stop');
+  });
+
+  test('can start recording in JSONL format', async ({ request }) => {
+    const resp = await request.post(SERVER + '/captures/start', {
+      data: { format: 'jsonl' },
+    });
+    const data = await resp.json();
+    expect(data.status).toBe('recording');
+
+    // Stop recording
+    await request.post(SERVER + '/captures/stop');
+  });
 });
