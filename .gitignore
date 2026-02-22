@@ -16,6 +16,12 @@
 *.swo
 *~
 
+# Node (Playwright tests)
+node_modules/
+package-lock.json
+test-results/
+playwright-report/
+
 # OS
 .DS_Store
 Thumbs.db
