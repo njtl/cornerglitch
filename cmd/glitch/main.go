@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -44,7 +45,22 @@ import (
 func main() {
 	port := flag.Int("port", 8765, "Server port")
 	dashPort := flag.Int("dash-port", 8766, "Dashboard/metrics port")
+	configFile := flag.String("config", "", "Path to config JSON file to import on startup")
 	flag.Parse()
+
+	// Import config file if specified
+	if *configFile != "" {
+		data, err := os.ReadFile(*configFile)
+		if err != nil {
+			log.Fatalf("Failed to read config file %s: %v", *configFile, err)
+		}
+		var export dashboard.ConfigExport
+		if err := json.Unmarshal(data, &export); err != nil {
+			log.Fatalf("Failed to parse config file %s: %v", *configFile, err)
+		}
+		dashboard.ImportConfig(&export)
+		log.Printf("\033[36m[glitch]\033[0m Imported config from %s (version: %s)", *configFile, export.Version)
+	}
 
 	collector := metrics.NewCollector()
 	fp := fingerprint.NewEngine()

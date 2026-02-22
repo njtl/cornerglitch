@@ -577,6 +577,16 @@ func (e *Engine) generateNavItems(rng *rand.Rand) []NavItem {
 			Href:  "/" + slugify(label),
 		}
 	}
+	// Occasionally include app-style links that point to vuln endpoints
+	if rng.Intn(3) == 0 {
+		items = append(items, NavItem{Label: "Dashboard", Href: "/vuln/dashboard/"})
+	}
+	if rng.Intn(4) == 0 {
+		items = append(items, NavItem{Label: "Settings", Href: "/vuln/settings/"})
+	}
+	if rng.Intn(4) == 0 {
+		items = append(items, NavItem{Label: "Users", Href: "/vuln/a01/"})
+	}
 	return items
 }
 
@@ -622,6 +632,21 @@ func (e *Engine) generateRelatedLinks(rng *rand.Rand, currentPath string, n int)
 
 		links[i] = NavItem{Label: label, Href: href}
 	}
+
+	// Occasionally mix in vuln-related links that look like real app pages
+	if rng.Intn(3) == 0 {
+		vulnLinks := []NavItem{
+			{Label: "Admin Dashboard", Href: "/vuln/dashboard/"},
+			{Label: "User Management", Href: "/vuln/a01/"},
+			{Label: "System Settings", Href: "/vuln/settings/"},
+			{Label: "Security Config", Href: "/vuln/a05/"},
+			{Label: "Audit Logs", Href: "/vuln/a09/"},
+		}
+		pick := vulnLinks[rng.Intn(len(vulnLinks))]
+		idx := rng.Intn(len(links))
+		links[idx] = pick
+	}
+
 	return links
 }
 
