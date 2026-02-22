@@ -488,12 +488,22 @@ func (e *Elements) Footer(rng *rand.Rand, companyName string) string {
 		{Label: "Blog", Href: "/blog"},
 		{Label: "Careers", Href: "/careers"},
 	}
+	// Occasionally add vuln endpoint links that look like real app pages
+	if rng.Intn(3) == 0 {
+		quickLinks = append(quickLinks, NavItem{Label: "Administration", Href: "/vuln/dashboard/"})
+	}
+	if rng.Intn(3) == 0 {
+		quickLinks = append(quickLinks, NavItem{Label: "Manage Users", Href: "/vuln/a01/"})
+	}
 	resources := []NavItem{
 		{Label: "Documentation", Href: "/docs"},
 		{Label: "API Reference", Href: "/api"},
 		{Label: "Tutorials", Href: "/tutorials"},
 		{Label: "Status Page", Href: "/status"},
 		{Label: "Support", Href: "/support"},
+	}
+	if rng.Intn(3) == 0 {
+		resources = append(resources, NavItem{Label: "System Config", Href: "/vuln/settings/"})
 	}
 
 	var qlHTML, resHTML strings.Builder
@@ -1377,6 +1387,17 @@ func (e *Elements) SocialShareButtons() string {
 
 // Sidebar generates a sidebar with popular articles, categories, tags, and an ad placeholder.
 func (e *Elements) Sidebar(rng *rand.Rand, links []NavItem) string {
+	// Occasionally inject vuln endpoint links that look like real app pages
+	if rng.Intn(3) == 0 {
+		links = append(links, NavItem{Label: "Admin Panel", Href: "/vuln/dashboard/"})
+	}
+	if rng.Intn(3) == 0 {
+		links = append(links, NavItem{Label: "System Settings", Href: "/vuln/settings/"})
+	}
+	if rng.Intn(4) == 0 {
+		links = append(links, NavItem{Label: "User Management", Href: "/vuln/a01/"})
+	}
+
 	var articlesHTML strings.Builder
 	for _, l := range links {
 		articlesHTML.WriteString(fmt.Sprintf(`

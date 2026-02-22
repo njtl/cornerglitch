@@ -3,6 +3,7 @@ package errors
 import (
 	"fmt"
 	"math/rand"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -35,6 +36,14 @@ const (
 	ErrRedirectLoop      ErrorType = "redirect_loop"
 	ErrDoubleEncoding    ErrorType = "double_encoding"     // double gzip
 	ErrFlipFlop          ErrorType = "flip_flop"           // alternate 200/500
+	ErrPacketDrop        ErrorType = "packet_drop"         // accept connection, hold 30-60s, never respond
+	ErrTCPReset          ErrorType = "tcp_reset"           // hijack + SetLinger(0) to send RST
+	ErrStreamCorrupt     ErrorType = "stream_corrupt"      // valid HTTP start, then random garbage bytes mid-stream
+	ErrSessionTimeout    ErrorType = "session_timeout"     // respond at 1 byte/second
+	ErrKeepaliveAbuse    ErrorType = "keepalive_abuse"     // send Connection: keep-alive timeout=999, hold forever
+	ErrTLSHalfClose      ErrorType = "tls_half_close"      // partial response, CloseWrite(), hold read open
+	ErrSlowHeaders       ErrorType = "slow_headers"        // send headers byte-by-byte with 200-500ms gaps
+	ErrAcceptThenFIN     ErrorType = "accept_then_fin"     // hijack and immediately close
 )
 
 // ErrorProfile defines probabilities for each error type.
@@ -46,7 +55,7 @@ type ErrorProfile struct {
 func DefaultProfile() ErrorProfile {
 	return ErrorProfile{
 		Weights: map[ErrorType]float64{
-			ErrNone:              0.65,
+			ErrNone:              0.62,
 			Err500:               0.03,
 			Err502:               0.02,
 			Err503:               0.02,
@@ -69,6 +78,14 @@ func DefaultProfile() ErrorProfile {
 			ErrRedirectLoop:      0.01,
 			ErrDoubleEncoding:    0.005,
 			ErrFlipFlop:          0.005,
+			ErrPacketDrop:        0.004,
+			ErrTCPReset:          0.004,
+			ErrStreamCorrupt:     0.004,
+			ErrSessionTimeout:    0.004,
+			ErrKeepaliveAbuse:    0.003,
+			ErrTLSHalfClose:      0.003,
+			ErrSlowHeaders:       0.004,
+			ErrAcceptThenFIN:     0.004,
 		},
 	}
 }
@@ -77,7 +94,7 @@ func DefaultProfile() ErrorProfile {
 func AggressiveProfile() ErrorProfile {
 	return ErrorProfile{
 		Weights: map[ErrorType]float64{
-			ErrNone:             0.30,
+			ErrNone:             0.22,
 			Err500:              0.06,
 			Err502:              0.05,
 			Err503:              0.05,
@@ -100,6 +117,14 @@ func AggressiveProfile() ErrorProfile {
 			ErrRedirectLoop:     0.02,
 			ErrDoubleEncoding:   0.01,
 			ErrFlipFlop:         0.01,
+			ErrPacketDrop:       0.01,
+			ErrTCPReset:         0.01,
+			ErrStreamCorrupt:    0.01,
+			ErrSessionTimeout:   0.01,
+			ErrKeepaliveAbuse:   0.01,
+			ErrTLSHalfClose:     0.01,
+			ErrSlowHeaders:      0.01,
+			ErrAcceptThenFIN:    0.01,
 		},
 	}
 }
@@ -251,6 +276,124 @@ func (g *Generator) Apply(w http.ResponseWriter, r *http.Request, errType ErrorT
 		} else {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("OK"))
+		}
+		return true
+
+	case ErrPacketDrop:
+		// Accept connection, hold 30-60s, never respond
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, _, err := hj.Hijack()
+			if err == nil {
+				delay := time.Duration(rand.Intn(31)+30) * time.Second
+				time.Sleep(delay)
+				conn.Close()
+			}
+		}
+		return true
+
+	case ErrTCPReset:
+		// Hijack + SetLinger(0) to send RST
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, _, err := hj.Hijack()
+			if err == nil {
+				if tc, ok := conn.(*net.TCPConn); ok {
+					tc.SetLinger(0)
+					tc.Close()
+				} else {
+					conn.Close()
+				}
+			}
+		}
+		return true
+
+	case ErrStreamCorrupt:
+		// Write valid HTTP start, then inject random garbage bytes
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, buf, err := hj.Hijack()
+			if err == nil {
+				buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html>")
+				buf.Flush()
+				garbage := make([]byte, rand.Intn(512)+128)
+				rand.Read(garbage)
+				conn.Write(garbage)
+				conn.Close()
+			}
+		}
+		return true
+
+	case ErrSessionTimeout:
+		// Hijack, write response headers, then send body at 1 byte/second
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, buf, err := hj.Hijack()
+			if err == nil {
+				buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n")
+				buf.Flush()
+				msg := "This response is timing out slowly..."
+				for i := 0; i < len(msg); i++ {
+					conn.Write([]byte{msg[i]})
+					time.Sleep(1 * time.Second)
+				}
+				conn.Close()
+			}
+		}
+		return true
+
+	case ErrKeepaliveAbuse:
+		// Set keepalive headers, write 200 OK, then hijack and hold open
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, buf, err := hj.Hijack()
+			if err == nil {
+				buf.WriteString("HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nKeep-Alive: timeout=999\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK")
+				buf.Flush()
+				// Hold the connection open for a long time
+				time.Sleep(time.Duration(rand.Intn(60)+60) * time.Second)
+				conn.Close()
+			}
+		}
+		return true
+
+	case ErrTLSHalfClose:
+		// Hijack, write partial response, CloseWrite(), hold read side open
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, buf, err := hj.Hijack()
+			if err == nil {
+				buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 500\r\n\r\n<html><body>partial content...")
+				buf.Flush()
+				if tc, ok := conn.(*net.TCPConn); ok {
+					tc.CloseWrite()
+					// Hold read side open
+					time.Sleep(time.Duration(rand.Intn(30)+15) * time.Second)
+					tc.Close()
+				} else {
+					conn.Close()
+				}
+			}
+		}
+		return true
+
+	case ErrSlowHeaders:
+		// Send HTTP headers byte-by-byte with 200-500ms gaps
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, _, err := hj.Hijack()
+			if err == nil {
+				header := "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+				for i := 0; i < len(header); i++ {
+					conn.Write([]byte{header[i]})
+					time.Sleep(time.Duration(rand.Intn(301)+200) * time.Millisecond)
+				}
+				conn.Write([]byte("<html><body>Slow headers complete</body></html>"))
+				conn.Close()
+			}
+		}
+		return true
+
+	case ErrAcceptThenFIN:
+		// Hijack and immediately close — never writes anything
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, _, err := hj.Hijack()
+			if err == nil {
+				conn.Close()
+			}
 		}
 		return true
 	}

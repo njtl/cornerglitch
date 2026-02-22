@@ -372,7 +372,16 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 
 	// Roll for error injection
 	if h.flags.IsErrorInjectEnabled() {
-		errType := h.errGen.Pick(behavior.ErrorProfile)
+		profile := behavior.ErrorProfile
+		// Check for custom error weights from admin config
+		customWeights := h.config.GetErrorWeights()
+		if len(customWeights) > 0 {
+			profile = errors.ErrorProfile{Weights: make(map[errors.ErrorType]float64)}
+			for k, v := range customWeights {
+				profile.Weights[errors.ErrorType(k)] = v
+			}
+		}
+		errType := h.errGen.Pick(profile)
 
 		// Apply error — if it fully handled the response, we're done
 		if h.errGen.Apply(w, r, errType) {
@@ -460,6 +469,10 @@ func (h *Handler) errTypeToStatus(errType errors.ErrorType) int {
 		return 408
 	case errors.ErrRedirectLoop:
 		return 307
+	case errors.ErrPacketDrop, errors.ErrTCPReset, errors.ErrStreamCorrupt,
+		errors.ErrSessionTimeout, errors.ErrKeepaliveAbuse, errors.ErrTLSHalfClose,
+		errors.ErrSlowHeaders, errors.ErrAcceptThenFIN:
+		return 0
 	default:
 		return 200
 	}

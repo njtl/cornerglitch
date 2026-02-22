@@ -1907,35 +1907,101 @@ func (h *Handler) wrapHTML(title, body string) string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>%s - Glitch OWASP Demo</title>
+  <title>%s - Acme Corp</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
-    h1, h2, h3 { color: #e94560; }
-    a { color: #0f3460; }
-    a:hover { color: #e94560; }
-    table { border-collapse: collapse; margin: 10px 0; background: #16213e; }
-    td, th { border: 1px solid #0f3460; padding: 6px 10px; text-align: left; }
-    th { background: #0f3460; color: #e0e0e0; }
-    pre, code { background: #16213e; padding: 2px 6px; border-radius: 3px; font-size: 13px; overflow-x: auto; }
-    pre { padding: 12px; display: block; }
-    .warning { background: #533; border-left: 4px solid #e94560; padding: 10px 15px; margin: 10px 0; }
-    .admin-bar { background: #16213e; padding: 10px; margin: 10px 0; border: 1px solid #0f3460; }
-    .error-detail { background: #16213e; padding: 15px; border: 1px solid #533; }
-    .stacktrace { color: #ff6b6b; font-size: 12px; white-space: pre-wrap; }
-    .result { border-bottom: 1px solid #0f3460; padding: 10px 0; }
-    ul { line-height: 1.8; }
-    nav { margin-bottom: 20px; }
-    nav a { color: #e94560; margin-right: 15px; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f6fa; color: #2d3436; line-height: 1.6; }
+    .topnav { background: #2d3436; color: #fff; padding: 0 24px; display: flex; align-items: center; height: 56px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .topnav .brand { font-weight: 700; font-size: 18px; margin-right: 32px; color: #00b894; }
+    .topnav a { color: #b2bec3; text-decoration: none; padding: 16px 12px; font-size: 14px; transition: color 0.2s; }
+    .topnav a:hover, .topnav a.active { color: #fff; border-bottom: 2px solid #00b894; }
+    .topnav .nav-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+    .topnav .nav-right .user-badge { background: #636e72; padding: 4px 12px; border-radius: 20px; font-size: 13px; }
+    .layout { display: flex; min-height: calc(100vh - 56px); }
+    .sidebar { width: 220px; background: #fff; border-right: 1px solid #dfe6e9; padding: 20px 0; flex-shrink: 0; }
+    .sidebar a { display: block; padding: 10px 24px; color: #636e72; text-decoration: none; font-size: 14px; transition: all 0.2s; border-left: 3px solid transparent; }
+    .sidebar a:hover { background: #f5f6fa; color: #2d3436; border-left-color: #00b894; }
+    .sidebar a.active { background: #f0fff4; color: #00b894; border-left-color: #00b894; font-weight: 500; }
+    .sidebar .section-label { padding: 20px 24px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #b2bec3; font-weight: 600; }
+    .main-content { flex: 1; padding: 24px 32px; max-width: 1200px; }
+    .breadcrumbs { font-size: 13px; color: #b2bec3; margin-bottom: 20px; }
+    .breadcrumbs a { color: #0984e3; text-decoration: none; }
+    .breadcrumbs a:hover { text-decoration: underline; }
+    h1, h2, h3 { color: #2d3436; }
+    h1 { font-size: 24px; margin-bottom: 16px; }
+    h2 { font-size: 18px; margin: 24px 0 12px; }
+    h3 { font-size: 15px; margin: 16px 0 8px; }
+    a { color: #0984e3; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    table { width: 100%%; border-collapse: collapse; margin: 12px 0; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    td, th { border: none; border-bottom: 1px solid #f1f2f6; padding: 10px 14px; text-align: left; font-size: 14px; }
+    th { background: #f5f6fa; color: #636e72; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    tr:hover { background: #f8f9fa; }
+    pre, code { background: #f5f6fa; padding: 2px 6px; border-radius: 4px; font-size: 13px; overflow-x: auto; font-family: 'SF Mono', 'Fira Code', monospace; }
+    pre { padding: 16px; display: block; border: 1px solid #dfe6e9; border-radius: 8px; }
+    .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 16px; margin: 12px 0; border-radius: 0 6px 6px 0; color: #856404; }
+    .admin-bar { background: #fff; padding: 12px 16px; margin: 12px 0; border: 1px solid #dfe6e9; border-radius: 8px; }
+    .error-detail { background: #fff; padding: 16px; border: 1px solid #dfe6e9; border-radius: 8px; }
+    .stacktrace { color: #d63031; font-size: 12px; white-space: pre-wrap; }
+    .result { border-bottom: 1px solid #f1f2f6; padding: 12px 0; }
+    ul { line-height: 1.8; padding-left: 20px; }
+    .card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px; }
+    .footer { background: #2d3436; color: #b2bec3; padding: 24px 32px; font-size: 13px; margin-top: 40px; }
+    .footer a { color: #74b9ff; }
+    .footer .footer-links { display: flex; gap: 24px; margin-bottom: 12px; }
   </style>
 </head>
 <body>
-  <nav><a href="/vuln/">OWASP Top 10 Index</a> | <a href="/">Home</a></nav>
-  <h1>%s</h1>
-  %s
-  <hr style="border-color:#0f3460; margin-top:30px;">
-  <p style="color:#666; font-size:12px;">Glitch Web Server - OWASP Vulnerability Demo (all data is synthetic)</p>
+  <div class="topnav">
+    <span class="brand">Acme Corp</span>
+    <a href="/">Home</a>
+    <a href="/vuln/dashboard/">Dashboard</a>
+    <a href="/vuln/a01/">Users</a>
+    <a href="/vuln/settings/">Settings</a>
+    <a href="/search">Search</a>
+    <a href="/vuln/">All Modules</a>
+    <div class="nav-right">
+      <a href="/vuln/settings/audit">Audit Log</a>
+      <span class="user-badge">admin@acme</span>
+    </div>
+  </div>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="section-label">Main</div>
+      <a href="/vuln/dashboard/">Dashboard</a>
+      <a href="/vuln/a01/">User Management</a>
+      <a href="/vuln/a03/">Data Browser</a>
+      <a href="/vuln/a04/">System Design</a>
+      <div class="section-label">Security</div>
+      <a href="/vuln/a02/">Credentials</a>
+      <a href="/vuln/a05/">Configuration</a>
+      <a href="/vuln/a07/">Authentication</a>
+      <a href="/vuln/a09/">Audit Logs</a>
+      <div class="section-label">Settings</div>
+      <a href="/vuln/settings/">General</a>
+      <a href="/vuln/settings/database">Database</a>
+      <a href="/vuln/settings/email">Email</a>
+      <a href="/vuln/settings/integrations">Integrations</a>
+    </div>
+    <div class="main-content">
+      <div class="breadcrumbs"><a href="/">Home</a> / <a href="/vuln/">Modules</a> / %s</div>
+      <h1>%s</h1>
+      %s
+    </div>
+  </div>
+  <div class="footer">
+    <div class="footer-links">
+      <a href="/vuln/">Module Index</a>
+      <a href="/vuln/dashboard/">Dashboard</a>
+      <a href="/vuln/settings/">Settings</a>
+      <a href="/vuln/dashboard/debug">Debug</a>
+      <a href="/help">Help Center</a>
+      <a href="/about">About</a>
+    </div>
+    <div>&copy; 2026 Acme Corporation. Internal use only. Build v3.14.159</div>
+  </div>
 </body>
-</html>`, title, title, body)
+</html>`, title, title, title, body)
 }
 
 // ---------------------------------------------------------------------------
