@@ -239,6 +239,45 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     margin-bottom: 4px;
   }
   .slider-label .val { color: #00ffcc; font-weight: bold; }
+
+  /* Error weight radio grid */
+  .ew-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 4px;
+  }
+  .ew-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #0d0d0d;
+    border: 1px solid #1a1a1a;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 0.78em;
+  }
+  .ew-name {
+    width: 110px;
+    color: #aaa;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ew-opts { display: flex; gap: 2px; flex: 1; }
+  .ew-opt {
+    padding: 2px 7px;
+    border-radius: 3px;
+    cursor: pointer;
+    color: #555;
+    border: 1px solid #222;
+    font-size: 0.9em;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .ew-opt:hover { color: #aaa; border-color: #444; }
+  .ew-opt input { display: none; }
+  .ew-opt.active { color: #00ff88; background: #0a2a1a; border-color: #00ff8844; }
+
   input[type="range"] {
     -webkit-appearance: none;
     width: 100%%;
@@ -543,9 +582,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   <div class="section">
     <h2>// Error Weight Distribution</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:12px">Adjust probabilities for each error type (0 = never, 1 = always). Weights are normalized automatically.</p>
-    <div id="error-weight-sliders"></div>
-    <button class="cfg-btn" onclick="resetErrorWeights()" style="margin-top:8px">Reset to Default</button>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Select preset level for each error type. Weights are normalized automatically.</p>
+    <div class="ew-grid" id="error-weight-grid"></div>
+    <button class="cfg-btn" onclick="resetErrorWeights()" style="margin-top:8px">Reset All to Default</button>
   </div>
 
   <div class="section">
@@ -1144,42 +1183,52 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) { console.error('controls:', e); }
   }
 
+  const EW_PRESETS = [
+    {label:'OFF', value:0},
+    {label:'LOW', value:0.01},
+    {label:'MED', value:0.05},
+    {label:'HIGH', value:0.15},
+    {label:'MAX', value:0.5}
+  ];
+
   async function refreshErrorWeights() {
     try {
       const data = await api('/admin/api/error-weights');
       const weights = data.weights || {};
-      const el = document.getElementById('error-weight-sliders');
+      const el = document.getElementById('error-weight-grid');
       el.innerHTML = ERROR_TYPES.map(t => {
         var val = weights[t] !== undefined ? weights[t] : 0;
-        return errWeightSlider(t, val);
+        return ewRow(t, val);
       }).join('');
     } catch(e) { console.error('error-weights:', e); }
   }
 
-  function errWeightSlider(name, value) {
-    var display = parseFloat(value).toFixed(3);
-    return '<div class="slider-group">' +
-      '<div class="slider-label"><span>' + name + '</span><span class="val" id="ew-' + name + '">' + display + '</span></div>' +
-      '<input type="range" min="0" max="1" step="0.001" value="' + value + '" ' +
-      'oninput="ewChange(\'' + name + '\', this.value)" ' +
-      'onchange="ewCommit(\'' + name + '\', this.value)">' +
-      '</div>';
+  function ewRow(name, value) {
+    var closest = 0;
+    var minDist = 999;
+    EW_PRESETS.forEach(function(p, i) {
+      var d = Math.abs(p.value - value);
+      if (d < minDist) { minDist = d; closest = i; }
+    });
+    var opts = EW_PRESETS.map(function(p, i) {
+      var active = i === closest ? ' active' : '';
+      return '<label class="ew-opt' + active + '" onclick="ewSelect(\'' + name + '\',' + p.value + ',this)">' +
+        '<input type="radio" name="ew-' + name + '"' + (i === closest ? ' checked' : '') + '>' +
+        p.label + '</label>';
+    }).join('');
+    var displayName = name.replace(/_/g, ' ');
+    return '<div class="ew-row"><span class="ew-name" title="' + name + '">' + displayName + '</span><div class="ew-opts">' + opts + '</div></div>';
   }
 
-  window.ewChange = function(name, val) {
-    document.getElementById('ew-' + name).textContent = parseFloat(val).toFixed(3);
-  };
-
-  let ewTimer = {};
-  window.ewCommit = function(name, val) {
-    clearTimeout(ewTimer[name]);
-    ewTimer[name] = setTimeout(() => {
-      api('/admin/api/error-weights', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({error_type: name, weight: parseFloat(val)})
-      }).then(() => toast(name + ' weight updated'));
-    }, 300);
+  window.ewSelect = function(name, val, el) {
+    var row = el.closest('.ew-row');
+    row.querySelectorAll('.ew-opt').forEach(function(o) { o.classList.remove('active'); });
+    el.classList.add('active');
+    api('/admin/api/error-weights', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({error_type: name, weight: val})
+    }).then(() => toast(name + ': ' + (val === 0 ? 'off' : val)));
   };
 
   window.resetErrorWeights = function() {
