@@ -610,13 +610,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         <div class="slider-label"><span>Active Framework</span></div>
         <select id="ctrl-framework" class="ctrl-select" onchange="setConfigKey('active_framework', this.value)">
           <option value="auto">Auto (rotate)</option>
-          <option value="wordpress">WordPress</option>
-          <option value="drupal">Drupal</option>
+          <option value="express">Express.js</option>
           <option value="django">Django</option>
-          <option value="rails">Rails</option>
-          <option value="express">Express</option>
+          <option value="rails">Ruby on Rails</option>
           <option value="laravel">Laravel</option>
-          <option value="spring">Spring</option>
+          <option value="spring">Spring Boot</option>
+          <option value="aspnet">ASP.NET</option>
+          <option value="flask">Flask</option>
+          <option value="fastapi">FastAPI</option>
+          <option value="next">Next.js</option>
+          <option value="nginx">nginx</option>
+          <option value="apache">Apache</option>
+          <option value="caddy">Caddy</option>
         </select>
       </div>
       <div>
