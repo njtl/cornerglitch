@@ -1413,14 +1413,22 @@ func TestFullHumanScenario(t *testing.T) {
 
 	clientID := "full-human"
 
-	// Simulate a real human browser
-	headers := chromeHeaders()
-
-	// Record some page views with assets — use variable delays to look human
+	// Simulate a real human browser with realistic Accept header variations
+	// Real browsers send different Accept headers for different resource types
 	pages := []string{"/", "/about", "/contact", "/style.css", "/app.js", "/logo.png"}
+	accepts := []string{
+		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+		"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"text/css,*/*;q=0.1",
+		"application/javascript,*/*;q=0.1",
+		"image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+	}
 	delays := []time.Duration{12, 45, 8, 3, 25, 18} // varied ms, like a real browser
 	for i, page := range pages {
-		r := newRequest("GET", page, headers)
+		h := chromeHeaders()
+		h["Accept"] = accepts[i]
+		r := newRequest("GET", page, h)
 		r.RemoteAddr = "73.162.45.10:54321" // Residential IP
 		r.AddCookie(&http.Cookie{Name: "session", Value: "abc123"})
 		d.RecordRequest(clientID, r)
@@ -1428,6 +1436,7 @@ func TestFullHumanScenario(t *testing.T) {
 	}
 
 	// Final score
+	headers := chromeHeaders()
 	r := newRequest("GET", "/products", headers)
 	r.RemoteAddr = "73.162.45.10:54321"
 	r.AddCookie(&http.Cookie{Name: "session", Value: "abc123"})
@@ -1441,5 +1450,361 @@ func TestFullHumanScenario(t *testing.T) {
 	}
 	if result.Recommendation != "allow" {
 		t.Errorf("Full human scenario should recommend 'allow', got %q", result.Recommendation)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 21. HeadlessChrome pattern detection
+// ---------------------------------------------------------------------------
+
+func TestHeadlessChromeDetection(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	clientID := "headless-chrome-client"
+
+	// Chrome-looking UA with HeadlessChrome in sec-ch-ua
+	r := newRequest("GET", "/", map[string]string{
+		"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+		"Sec-Ch-Ua":          `"HeadlessChrome";v="131", "Not-A.Brand";v="99"`,
+		"Sec-Ch-Ua-Platform": `"Windows"`,
+		"Sec-Fetch-Site":     "none",
+		"Sec-Fetch-Mode":     "navigate",
+		"Sec-Fetch-Dest":     "document",
+	})
+	d.RecordRequest(clientID, r)
+
+	profile := d.GetProfile(clientID)
+	result := d.Score(r, clientID, profile)
+
+	found := false
+	for _, sig := range result.Signals {
+		if sig.Name == "headless_chrome_pattern" {
+			found = true
+			if sig.Score != 35 {
+				t.Errorf("Expected headless_chrome_pattern score 35, got %f", sig.Score)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected headless_chrome_pattern signal, got signals: %+v", result.Signals)
+	}
+}
+
+func TestHeadlessChromeDetection_NoSignalForNormalChrome(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	headers := chromeHeaders()
+	r := newRequest("GET", "/", headers)
+	result := d.Score(r, "normal-chrome", nil)
+
+	for _, sig := range result.Signals {
+		if sig.Name == "headless_chrome_pattern" {
+			t.Error("Normal Chrome should not trigger headless_chrome_pattern signal")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 22. Platform mismatch persistence (Oxylabs detection)
+// ---------------------------------------------------------------------------
+
+func TestPlatformMismatchPersistence(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	clientID := "platform-mismatch-client"
+
+	// Simulate 4 requests with Windows UA but Linux platform (>50% mismatch across 3+ requests)
+	for i := 0; i < 4; i++ {
+		r := newRequest("GET", "/page/"+strconv.Itoa(i), map[string]string{
+			"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+			"Sec-Ch-Ua":          `"Chromium";v="131", "Google Chrome";v="131"`,
+			"Sec-Ch-Ua-Platform": `"Linux"`,
+			"Sec-Fetch-Site":     "none",
+			"Sec-Fetch-Mode":     "navigate",
+			"Sec-Fetch-Dest":     "document",
+		})
+		d.RecordRequest(clientID, r)
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	profile := d.GetProfile(clientID)
+	r := newRequest("GET", "/page/4", map[string]string{
+		"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+		"Sec-Ch-Ua":          `"Chromium";v="131", "Google Chrome";v="131"`,
+		"Sec-Ch-Ua-Platform": `"Linux"`,
+		"Sec-Fetch-Site":     "none",
+		"Sec-Fetch-Mode":     "navigate",
+		"Sec-Fetch-Dest":     "document",
+	})
+	result := d.Score(r, clientID, profile)
+
+	found := false
+	for _, sig := range result.Signals {
+		if sig.Name == "platform_mismatch_persistence" {
+			found = true
+			if sig.Score != 45 {
+				t.Errorf("Expected platform_mismatch_persistence score 45, got %f", sig.Score)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected platform_mismatch_persistence signal for Windows UA + Linux platform across 4 requests, got signals: %+v", result.Signals)
+	}
+}
+
+func TestPlatformMismatchPersistence_NoSignalWhenMatching(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	clientID := "platform-match-client"
+
+	// Windows UA + Windows platform = no mismatch
+	for i := 0; i < 4; i++ {
+		r := newRequest("GET", "/page/"+strconv.Itoa(i), map[string]string{
+			"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+			"Sec-Ch-Ua":          `"Chromium";v="131", "Google Chrome";v="131"`,
+			"Sec-Ch-Ua-Platform": `"Windows"`,
+			"Sec-Fetch-Site":     "none",
+			"Sec-Fetch-Mode":     "navigate",
+			"Sec-Fetch-Dest":     "document",
+		})
+		d.RecordRequest(clientID, r)
+	}
+
+	profile := d.GetProfile(clientID)
+	r := newRequest("GET", "/", chromeHeaders())
+	result := d.Score(r, clientID, profile)
+
+	for _, sig := range result.Signals {
+		if sig.Name == "platform_mismatch_persistence" {
+			t.Error("Should not trigger platform_mismatch_persistence when platform matches UA")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 23. Accept header consistency detection
+// ---------------------------------------------------------------------------
+
+func TestAcceptHeaderConsistency(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	clientID := "accept-consistency-client"
+
+	// 6 requests all with identical Accept-* headers
+	for i := 0; i < 6; i++ {
+		r := newRequest("GET", "/page/"+strconv.Itoa(i), map[string]string{
+			"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+			"Accept":          "text/html,application/xhtml+xml",
+			"Accept-Encoding": "gzip, deflate",
+			"Accept-Language": "en-US",
+		})
+		d.RecordRequest(clientID, r)
+	}
+
+	profile := d.GetProfile(clientID)
+	r := newRequest("GET", "/", map[string]string{
+		"User-Agent": "Mozilla/5.0",
+	})
+	result := d.Score(r, clientID, profile)
+
+	found := false
+	for _, sig := range result.Signals {
+		if sig.Name == "accept_header_consistency" {
+			found = true
+			if sig.Score != 25 {
+				t.Errorf("Expected accept_header_consistency score 25, got %f", sig.Score)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected accept_header_consistency signal for 6 identical Accept headers, got signals: %+v", result.Signals)
+	}
+}
+
+func TestAcceptHeaderConsistency_NoSignalForVariedHeaders(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	clientID := "accept-varied-client"
+
+	// Requests with varying Accept headers (like a real browser)
+	accepts := []string{
+		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+		"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"text/css,*/*;q=0.1",
+		"image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+		"*/*",
+	}
+	for i, accept := range accepts {
+		r := newRequest("GET", "/page/"+strconv.Itoa(i), map[string]string{
+			"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+			"Accept":          accept,
+			"Accept-Encoding": "gzip, deflate, br",
+			"Accept-Language": "en-US,en;q=0.9",
+		})
+		d.RecordRequest(clientID, r)
+	}
+
+	profile := d.GetProfile(clientID)
+	r := newRequest("GET", "/", map[string]string{
+		"User-Agent": "Mozilla/5.0",
+	})
+	result := d.Score(r, clientID, profile)
+
+	for _, sig := range result.Signals {
+		if sig.Name == "accept_header_consistency" {
+			t.Error("Should not trigger accept_header_consistency for varied Accept headers")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 24. Asset request absence (Firecrawl detection)
+// ---------------------------------------------------------------------------
+
+func TestAssetRequestAbsence(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	clientID := "no-asset-requests"
+
+	// 12 page requests, zero asset requests
+	for i := 0; i < 12; i++ {
+		r := newRequest("GET", "/articles/topic-"+strconv.Itoa(i), map[string]string{
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+			"Accept":     "text/html",
+		})
+		d.RecordRequest(clientID, r)
+	}
+
+	profile := d.GetProfile(clientID)
+	r := newRequest("GET", "/", map[string]string{
+		"User-Agent": "Mozilla/5.0",
+	})
+	result := d.Score(r, clientID, profile)
+
+	found := false
+	for _, sig := range result.Signals {
+		if sig.Name == "asset_request_absence" {
+			found = true
+			if sig.Score != 30 {
+				t.Errorf("Expected asset_request_absence score 30, got %f", sig.Score)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected asset_request_absence signal for 12 page requests with zero assets, got signals: %+v", result.Signals)
+	}
+}
+
+func TestAssetRequestAbsence_NoSignalWhenAssetsLoaded(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	clientID := "with-asset-requests"
+
+	// Mix of page and asset requests
+	for i := 0; i < 10; i++ {
+		r := newRequest("GET", "/articles/topic-"+strconv.Itoa(i), map[string]string{
+			"User-Agent": "Mozilla/5.0",
+			"Accept":     "text/html",
+		})
+		d.RecordRequest(clientID, r)
+	}
+	// Add asset requests
+	assetR := newRequest("GET", "/style.css", map[string]string{
+		"User-Agent": "Mozilla/5.0",
+		"Accept":     "text/css",
+	})
+	d.RecordRequest(clientID, assetR)
+
+	profile := d.GetProfile(clientID)
+	r := newRequest("GET", "/", map[string]string{
+		"User-Agent": "Mozilla/5.0",
+	})
+	result := d.Score(r, clientID, profile)
+
+	for _, sig := range result.Signals {
+		if sig.Name == "asset_request_absence" {
+			t.Error("Should not trigger asset_request_absence when assets are loaded")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 25. IP rotation pattern (Oxylabs detection)
+// ---------------------------------------------------------------------------
+
+func TestIPRotationPattern(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	clientID := "ip-rotation-client"
+
+	// Same fingerprint from 4 different IPs
+	ips := []string{"1.2.3.4", "5.6.7.8", "9.10.11.12", "13.14.15.16"}
+	for i, ip := range ips {
+		r := newRequest("GET", "/page/"+strconv.Itoa(i), map[string]string{
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+		})
+		r.RemoteAddr = ip + ":12345"
+		d.RecordRequest(clientID, r)
+	}
+
+	profile := d.GetProfile(clientID)
+	r := newRequest("GET", "/", map[string]string{
+		"User-Agent": "Mozilla/5.0",
+	})
+	result := d.Score(r, clientID, profile)
+
+	found := false
+	for _, sig := range result.Signals {
+		if sig.Name == "ip_rotation_pattern" {
+			found = true
+			if sig.Score != 40 {
+				t.Errorf("Expected ip_rotation_pattern score 40, got %f", sig.Score)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected ip_rotation_pattern signal for 4 distinct IPs, got signals: %+v", result.Signals)
+	}
+}
+
+func TestIPRotationPattern_NoSignalForSingleIP(t *testing.T) {
+	d := NewDetector()
+	defer d.Stop()
+
+	clientID := "single-ip-client"
+
+	// All requests from same IP
+	for i := 0; i < 5; i++ {
+		r := newRequest("GET", "/page/"+strconv.Itoa(i), map[string]string{
+			"User-Agent": "Mozilla/5.0",
+		})
+		r.RemoteAddr = "73.162.45.10:12345"
+		d.RecordRequest(clientID, r)
+	}
+
+	profile := d.GetProfile(clientID)
+	r := newRequest("GET", "/", map[string]string{
+		"User-Agent": "Mozilla/5.0",
+	})
+	result := d.Score(r, clientID, profile)
+
+	for _, sig := range result.Signals {
+		if sig.Name == "ip_rotation_pattern" {
+			t.Error("Should not trigger ip_rotation_pattern for single IP")
+		}
 	}
 }

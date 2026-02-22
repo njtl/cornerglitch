@@ -604,3 +604,107 @@ func TestServeHTTP_EnvFileDatabaseURL(t *testing.T) {
 		t.Error("env file response missing DATABASE_URL")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Firecrawl honeypot path tests
+// ---------------------------------------------------------------------------
+
+func TestFirecrawlHoneypotPaths(t *testing.T) {
+	h := NewHoneypot()
+
+	firecrawlPaths := []string{
+		"/assets/config.js",
+		"/assets/app.config.js",
+		"/api/internal/config",
+		"/api/internal/keys",
+		"/_next/data/config.json",
+		"/api/v1/internal/status",
+		"/api/internal/health",
+		"/api/private/tokens",
+	}
+
+	for _, p := range firecrawlPaths {
+		if !h.ShouldHandle(p) {
+			t.Errorf("ShouldHandle(%q) = false, want true (Firecrawl-targeted path)", p)
+		}
+	}
+
+	// Verify they are mapped to LureConfigFile
+	for _, p := range firecrawlPaths {
+		lureType, ok := h.paths[p]
+		if !ok {
+			t.Errorf("path %q not registered in honeypot", p)
+			continue
+		}
+		if lureType != LureConfigFile {
+			t.Errorf("path %q lure type = %d, want LureConfigFile (%d)", p, lureType, LureConfigFile)
+		}
+	}
+
+	// Verify they serve content
+	for _, p := range firecrawlPaths {
+		req := httptest.NewRequest("GET", p, nil)
+		w := httptest.NewRecorder()
+		status := h.ServeHTTP(w, req)
+		if status != http.StatusOK {
+			t.Errorf("path %q status = %d, want %d", p, status, http.StatusOK)
+		}
+		if w.Body.Len() == 0 {
+			t.Errorf("path %q returned empty body", p)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Oxylabs honeypot path tests
+// ---------------------------------------------------------------------------
+
+func TestOxylabsHoneypotPaths(t *testing.T) {
+	h := NewHoneypot()
+
+	oxylabsPaths := []string{
+		"/api/data/export",
+		"/api/scrape/results",
+		"/api/v2/data/bulk",
+		"/api/crawl/queue",
+		"/data/feed.json",
+		"/api/search/results.json",
+		"/api/products/all.json",
+		"/api/listings/feed",
+	}
+
+	for _, p := range oxylabsPaths {
+		if !h.ShouldHandle(p) {
+			t.Errorf("ShouldHandle(%q) = false, want true (Oxylabs-targeted path)", p)
+		}
+	}
+
+	// Verify they are mapped to LureAPIKey
+	for _, p := range oxylabsPaths {
+		lureType, ok := h.paths[p]
+		if !ok {
+			t.Errorf("path %q not registered in honeypot", p)
+			continue
+		}
+		if lureType != LureAPIKey {
+			t.Errorf("path %q lure type = %d, want LureAPIKey (%d)", p, lureType, LureAPIKey)
+		}
+	}
+
+	// Verify they serve content with correct content type
+	for _, p := range oxylabsPaths {
+		req := httptest.NewRequest("GET", p, nil)
+		w := httptest.NewRecorder()
+		status := h.ServeHTTP(w, req)
+		if status != http.StatusOK {
+			t.Errorf("path %q status = %d, want %d", p, status, http.StatusOK)
+		}
+		if w.Body.Len() == 0 {
+			t.Errorf("path %q returned empty body", p)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, "api_key") {
+			t.Errorf("path %q response missing 'api_key'", p)
+		}
+	}
+}

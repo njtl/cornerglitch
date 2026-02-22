@@ -49,6 +49,15 @@ type ClientProfile struct {
 	LastSeen         time.Time
 	UserAgents       map[string]int // multiple UAs = rotating proxy
 	CrawlerProduct   string         // identified product (firecrawl, oxylabs, etc.)
+
+	// Firecrawl/Oxylabs detection fields
+	platformMismatches int             // count of requests with platform mismatch
+	totalChecked       int             // total requests checked for platform
+	distinctIPs        map[string]bool // set of distinct remote IPs
+	acceptHeaders      map[string]int  // track Accept header variations
+	pageRequests       int             // count of non-asset page requests
+	assetRequests      int             // count of asset requests (css/js/img/font)
+	headlessChromeHit  bool            // whether HeadlessChrome was seen in sec-ch-ua
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +192,31 @@ func (d *Detector) Score(r *http.Request, clientID string, profile *ClientProfil
 		signals = append(signals, sigs...)
 	}
 
+	// 15. HeadlessChrome pattern in sec-ch-ua
+	if sig := d.checkHeadlessChromePattern(r, profile); sig != nil {
+		signals = append(signals, *sig)
+	}
+
+	// 16. Platform mismatch persistence (Oxylabs)
+	if sig := d.checkPlatformMismatchPersistence(profile); sig != nil {
+		signals = append(signals, *sig)
+	}
+
+	// 17. Accept header consistency (proxy templates)
+	if sig := d.checkAcceptHeaderConsistency(profile); sig != nil {
+		signals = append(signals, *sig)
+	}
+
+	// 18. Asset request absence (Firecrawl)
+	if sig := d.checkAssetRequestAbsence(profile); sig != nil {
+		signals = append(signals, *sig)
+	}
+
+	// 19. IP rotation pattern (Oxylabs)
+	if sig := d.checkIPRotationPattern(profile); sig != nil {
+		signals = append(signals, *sig)
+	}
+
 	// Calculate total score (capped at 100)
 	totalScore := 0.0
 	for _, s := range signals {
@@ -306,6 +340,60 @@ func (d *Detector) RecordRequest(clientID string, r *http.Request) {
 	// Track asset loading (CSS, JS, images, fonts)
 	if isAssetRequest(r) {
 		profile.AssetLoading = true
+		profile.assetRequests++
+	} else {
+		profile.pageRequests++
+	}
+
+	// Track distinct IPs for IP rotation detection
+	ipStr := extractIP(r)
+	if ipStr != "" {
+		if profile.distinctIPs == nil {
+			profile.distinctIPs = make(map[string]bool)
+		}
+		profile.distinctIPs[ipStr] = true
+	}
+
+	// Track Accept header variations
+	acceptKey := r.Header.Get("Accept") + "|" + r.Header.Get("Accept-Encoding") + "|" + r.Header.Get("Accept-Language")
+	if profile.acceptHeaders == nil {
+		profile.acceptHeaders = make(map[string]int)
+	}
+	profile.acceptHeaders[acceptKey]++
+
+	// Track platform mismatches (UA platform vs Sec-Ch-Ua-Platform)
+	secPlatform := strings.ToLower(strings.Trim(r.Header.Get("Sec-Ch-Ua-Platform"), `"`))
+	if secPlatform != "" {
+		profile.totalChecked++
+		uaLower := strings.ToLower(ua)
+		uaIsWindows := strings.Contains(uaLower, "windows")
+		uaIsLinux := strings.Contains(uaLower, "linux")
+		uaIsMac := strings.Contains(uaLower, "macintosh") || strings.Contains(uaLower, "mac os")
+
+		platformIsWindows := strings.Contains(secPlatform, "windows")
+		platformIsLinux := strings.Contains(secPlatform, "linux")
+		platformIsMac := strings.Contains(secPlatform, "macos") || strings.Contains(secPlatform, "mac")
+
+		mismatch := false
+		if uaIsWindows && !platformIsWindows {
+			mismatch = true
+		} else if uaIsLinux && !platformIsLinux && !uaIsWindows && !uaIsMac {
+			mismatch = true
+		} else if uaIsMac && !platformIsMac {
+			mismatch = true
+		}
+		if mismatch {
+			profile.platformMismatches++
+		}
+	}
+
+	// Track HeadlessChrome in sec-ch-ua
+	secChUA := strings.ToLower(r.Header.Get("Sec-Ch-Ua"))
+	if secChUA == "" {
+		secChUA = strings.ToLower(r.Header.Get("sec-ch-ua"))
+	}
+	if strings.Contains(secChUA, "headlesschrome") {
+		profile.headlessChromeHit = true
 	}
 }
 
@@ -328,10 +416,12 @@ func (d *Detector) getOrCreateProfile(clientID string) *ClientProfile {
 		return p
 	}
 	p = &ClientProfile{
-		paths:      make(map[string]bool),
-		UserAgents: make(map[string]int),
-		BeaconData: make(map[string]interface{}),
-		FirstSeen:  time.Now(),
+		paths:         make(map[string]bool),
+		UserAgents:    make(map[string]int),
+		BeaconData:    make(map[string]interface{}),
+		FirstSeen:     time.Now(),
+		distinctIPs:   make(map[string]bool),
+		acceptHeaders: make(map[string]int),
 	}
 	d.profiles[clientID] = p
 	return p
@@ -720,6 +810,119 @@ func (d *Detector) checkJSExecution(profile *ClientProfile) []Signal {
 	}
 
 	return signals
+}
+
+// 15. HeadlessChrome pattern in sec-ch-ua
+func (d *Detector) checkHeadlessChromePattern(r *http.Request, profile *ClientProfile) *Signal {
+	secChUA := r.Header.Get("Sec-Ch-Ua")
+	if secChUA == "" {
+		secChUA = r.Header.Get("sec-ch-ua")
+	}
+	if secChUA == "" {
+		return nil
+	}
+
+	secChUALower := strings.ToLower(secChUA)
+	if !strings.Contains(secChUALower, "headlesschrome") {
+		// Also check profile-level tracking
+		profile.mu.RLock()
+		hit := profile.headlessChromeHit
+		profile.mu.RUnlock()
+		if !hit {
+			return nil
+		}
+	}
+
+	// Check if UA looks like a normal Chrome browser
+	ua := r.UserAgent()
+	uaLower := strings.ToLower(ua)
+	if strings.Contains(uaLower, "chrome") || strings.Contains(uaLower, "chromium") {
+		return &Signal{
+			Name:    "headless_chrome_pattern",
+			Score:   35,
+			Details: "Sec-Ch-Ua contains HeadlessChrome while UA presents as normal Chrome browser",
+		}
+	}
+
+	return nil
+}
+
+// 16. Platform mismatch persistence (catches Oxylabs residential proxy rotation)
+func (d *Detector) checkPlatformMismatchPersistence(profile *ClientProfile) *Signal {
+	profile.mu.RLock()
+	defer profile.mu.RUnlock()
+
+	if profile.totalChecked < 3 {
+		return nil // Need at least 3 requests with platform data
+	}
+
+	mismatchRatio := float64(profile.platformMismatches) / float64(profile.totalChecked)
+	if mismatchRatio > 0.5 {
+		return &Signal{
+			Name:  "platform_mismatch_persistence",
+			Score: 45,
+			Details: "Platform mismatch in " + strconv.Itoa(profile.platformMismatches) + "/" +
+				strconv.Itoa(profile.totalChecked) + " requests (UA platform vs Sec-Ch-Ua-Platform)",
+		}
+	}
+	return nil
+}
+
+// 17. Accept header consistency (proxy templates use identical headers)
+func (d *Detector) checkAcceptHeaderConsistency(profile *ClientProfile) *Signal {
+	profile.mu.RLock()
+	defer profile.mu.RUnlock()
+
+	if profile.RequestCount < 5 {
+		return nil // Need enough data
+	}
+
+	if len(profile.acceptHeaders) != 1 {
+		return nil // Multiple distinct Accept header combinations = likely real browser
+	}
+
+	// All requests had identical Accept-* headers
+	return &Signal{
+		Name:    "accept_header_consistency",
+		Score:   25,
+		Details: "All " + strconv.Itoa(profile.RequestCount) + " requests have identical Accept-* headers (proxy template pattern)",
+	}
+}
+
+// 18. Asset request absence (Firecrawl focuses on HTML, skips assets)
+func (d *Detector) checkAssetRequestAbsence(profile *ClientProfile) *Signal {
+	profile.mu.RLock()
+	defer profile.mu.RUnlock()
+
+	if profile.pageRequests < 10 {
+		return nil // Need enough page requests
+	}
+
+	if profile.assetRequests > 0 {
+		return nil // Client loads at least some assets
+	}
+
+	return &Signal{
+		Name:    "asset_request_absence",
+		Score:   30,
+		Details: strconv.Itoa(profile.pageRequests) + " page requests but zero asset requests (CSS/JS/images/fonts)",
+	}
+}
+
+// 19. IP rotation pattern (catches Oxylabs IP rotation)
+func (d *Detector) checkIPRotationPattern(profile *ClientProfile) *Signal {
+	profile.mu.RLock()
+	defer profile.mu.RUnlock()
+
+	if len(profile.distinctIPs) < 3 {
+		return nil // Need 3+ distinct IPs
+	}
+
+	return &Signal{
+		Name:    "ip_rotation_pattern",
+		Score:   40,
+		Details: "Same fingerprint seen from " + strconv.Itoa(len(profile.distinctIPs)) + " distinct IPs (proxy rotation)",
+	}
 }
 
 // ---------------------------------------------------------------------------
