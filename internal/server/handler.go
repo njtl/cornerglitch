@@ -143,6 +143,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.collector.ActiveConns.Add(1)
 	defer h.collector.ActiveConns.Add(-1)
 
+	// Step 0: Apply configured delay (delay_min_ms / delay_max_ms)
+	h.applyConfiguredDelay()
+
+	// Step 0.5: Sync admin config to subsystems (lightweight reads)
+	h.syncConfigToSubsystems()
+
 	// Step 1: Fingerprint the client
 	clientID := h.fp.Identify(r)
 	clientClass := h.fp.ClassifyClient(r)
@@ -390,6 +396,28 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 				profile.Weights[errors.ErrorType(k)] = v
 			}
 		}
+		// Apply error rate multiplier from admin config
+		cfg := h.config.Get()
+		if mult, ok := cfg["error_rate_multiplier"].(float64); ok && mult != 1.0 {
+			scaled := errors.ErrorProfile{Weights: make(map[errors.ErrorType]float64)}
+			var totalNonNone float64
+			for k, v := range profile.Weights {
+				if k == errors.ErrNone {
+					continue
+				}
+				w := v * mult
+				if w > 1 {
+					w = 1
+				}
+				scaled.Weights[k] = w
+				totalNonNone += w
+			}
+			if totalNonNone > 0.99 {
+				totalNonNone = 0.99
+			}
+			scaled.Weights[errors.ErrNone] = 1.0 - totalNonNone
+			profile = scaled
+		}
 		errType := h.errGen.Pick(profile)
 
 		// Apply error — if it fully handled the response, we're done
@@ -498,6 +526,58 @@ func containsStr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// applyConfiguredDelay adds an artificial delay based on delay_min_ms / delay_max_ms config.
+func (h *Handler) applyConfiguredDelay() {
+	cfg := h.config.Get()
+	minMs, _ := cfg["delay_min_ms"].(int)
+	maxMs, _ := cfg["delay_max_ms"].(int)
+	if maxMs <= 0 {
+		return
+	}
+	if minMs > maxMs {
+		minMs = maxMs
+	}
+	delay := minMs
+	if maxMs > minMs {
+		delay = minMs + rand.Intn(maxMs-minMs)
+	}
+	if delay > 0 {
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+	}
+}
+
+// syncConfigToSubsystems pushes admin config values to subsystems that need them.
+// This is called on every request but only performs lightweight reads and
+// conditional writes (subsystems ignore no-op updates internally).
+func (h *Handler) syncConfigToSubsystems() {
+	cfg := h.config.Get()
+
+	// Sync active framework to framework emulator
+	if h.fw != nil {
+		if af, ok := cfg["active_framework"].(string); ok {
+			if h.fw.GetActiveFramework() != af {
+				h.fw.SetActiveFramework(af)
+			}
+		}
+	}
+
+	// Sync adaptive engine thresholds
+	if agRPS, ok := cfg["adaptive_aggressive_rps"].(float64); ok {
+		h.adapt.SetAggressiveRPSThreshold(agRPS)
+	}
+	if labPaths, ok := cfg["adaptive_labyrinth_paths"].(int); ok {
+		h.adapt.SetLabyrinthPathsThreshold(labPaths)
+	}
+
+	// Sync block config
+	if bc, ok := cfg["block_chance"].(float64); ok {
+		h.adapt.SetBlockChance(bc)
+	}
+	if bd, ok := cfg["block_duration_sec"].(int); ok {
+		h.adapt.SetBlockDuration(time.Duration(bd) * time.Second)
+	}
 }
 
 // isVulnDisabled checks if a vuln path is disabled via VulnConfig group/category toggles.

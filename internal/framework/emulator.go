@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // Emulator makes the glitch server appear to run on different web frameworks
@@ -13,7 +14,9 @@ import (
 // signatures. The assigned framework is deterministic per-client, derived
 // from the client fingerprint hash.
 type Emulator struct {
-	frameworks []Framework
+	mu              sync.RWMutex
+	frameworks      []Framework
+	activeFramework string // "auto" or specific framework name
 }
 
 // Framework describes the HTTP surface of a particular web stack.
@@ -40,6 +43,7 @@ type Cookie struct {
 // NewEmulator builds an Emulator pre-loaded with 12 framework profiles.
 func NewEmulator() *Emulator {
 	return &Emulator{
+		activeFramework: "auto",
 		frameworks: []Framework{
 			expressFramework(),
 			djangoFramework(),
@@ -68,11 +72,60 @@ func (e *Emulator) ForClient(clientID string) *Framework {
 
 // ForRequest deterministically selects a framework based on both clientID
 // and request path, providing variety across different pages for the same client.
+// If an active framework has been set (not "auto"), that framework is always returned.
 func (e *Emulator) ForRequest(clientID, path string) *Framework {
+	e.mu.RLock()
+	af := e.activeFramework
+	e.mu.RUnlock()
+
+	if af != "" && af != "auto" {
+		if fw := e.findByName(af); fw != nil {
+			return fw
+		}
+	}
+	// Original logic
 	h := sha256.Sum256([]byte(clientID + "::" + path))
 	idx := (int(h[0])<<8 | int(h[1])) % len(e.frameworks)
 	fw := e.frameworks[idx]
 	return &fw
+}
+
+// SetActiveFramework sets the active framework by name.
+// Use "auto" to revert to the default deterministic selection.
+func (e *Emulator) SetActiveFramework(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.activeFramework = name
+}
+
+// GetActiveFramework returns the current active framework setting.
+func (e *Emulator) GetActiveFramework() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.activeFramework
+}
+
+// findByName returns a pointer to a copy of the framework matching the given
+// name (case-insensitive, substring match). Returns nil if no match is found.
+func (e *Emulator) findByName(name string) *Framework {
+	lower := strings.ToLower(name)
+	for i := range e.frameworks {
+		if strings.ToLower(e.frameworks[i].Name) == lower ||
+			strings.Contains(strings.ToLower(e.frameworks[i].Name), lower) {
+			fw := e.frameworks[i]
+			return &fw
+		}
+	}
+	return nil
+}
+
+// FrameworkNames returns the names of all available frameworks.
+func (e *Emulator) FrameworkNames() []string {
+	names := make([]string, len(e.frameworks))
+	for i, fw := range e.frameworks {
+		names[i] = fw.Name
+	}
+	return names
 }
 
 // Apply sets framework-specific response headers and cookies on w.

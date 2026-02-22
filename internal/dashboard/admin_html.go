@@ -588,6 +588,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   </div>
 
   <div class="section">
+    <h2>// Page Type Distribution</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each response page type. Set to 0 to disable.</p>
+    <div class="ew-grid" id="page-type-grid"></div>
+    <button class="cfg-btn" onclick="resetPageTypeWeights()" style="margin-top:8px">Reset to Default</button>
+  </div>
+
+  <div class="section">
     <h2>// Advanced Controls</h2>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
       <div>
@@ -1180,6 +1187,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
       // Error weights
       refreshErrorWeights();
+      // Page type weights
+      refreshPageTypeWeights();
     } catch(e) { console.error('controls:', e); }
   }
 
@@ -1237,6 +1246,63 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({reset: true})
     }).then(() => { toast('Error weights reset'); refreshErrorWeights(); });
+  };
+
+  // Page type weight controls
+  const PAGE_TYPES = ['html','json','xml','csv','markdown','sse','websocket','graphql'];
+  const PT_PRESETS = [
+    {label:'OFF', value:0},
+    {label:'LOW', value:0.05},
+    {label:'MED', value:0.15},
+    {label:'HIGH', value:0.3},
+    {label:'MAX', value:0.5}
+  ];
+
+  async function refreshPageTypeWeights() {
+    try {
+      const data = await api('/admin/api/page-type-weights');
+      const weights = data.weights || {};
+      const el = document.getElementById('page-type-grid');
+      el.innerHTML = PAGE_TYPES.map(function(t) {
+        var val = weights[t] !== undefined ? weights[t] : 0;
+        return ptRow(t, val);
+      }).join('');
+    } catch(e) { console.error('page-type-weights:', e); }
+  }
+
+  function ptRow(name, value) {
+    var closest = 0;
+    var minDist = 999;
+    PT_PRESETS.forEach(function(p, i) {
+      var d = Math.abs(p.value - value);
+      if (d < minDist) { minDist = d; closest = i; }
+    });
+    var opts = PT_PRESETS.map(function(p, i) {
+      var active = i === closest ? ' active' : '';
+      return '<label class="ew-opt' + active + '" onclick="ptSelect(\'' + name + '\',' + p.value + ',this)">' +
+        '<input type="radio" name="pt-' + name + '"' + (i === closest ? ' checked' : '') + '>' +
+        p.label + '</label>';
+    }).join('');
+    return '<div class="ew-row"><span class="ew-name" title="' + name + '">' + name.toUpperCase() + '</span><div class="ew-opts">' + opts + '</div></div>';
+  }
+
+  window.ptSelect = function(name, val, el) {
+    var row = el.closest('.ew-row');
+    row.querySelectorAll('.ew-opt').forEach(function(o) { o.classList.remove('active'); });
+    el.classList.add('active');
+    api('/admin/api/page-type-weights', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({page_type: name, weight: val})
+    }).then(() => toast(name + ': ' + (val === 0 ? 'off' : val)));
+  };
+
+  window.resetPageTypeWeights = function() {
+    api('/admin/api/page-type-weights', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reset: true})
+    }).then(() => { toast('Page type weights reset'); refreshPageTypeWeights(); });
   };
 
   window.setConfigKey = function(key, val) {
