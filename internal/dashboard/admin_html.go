@@ -1456,8 +1456,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   };
 
   // ------ Scanner Tab ------
-  let scannerRunning = false;
-  let scanHistory = [];
+  let scanPollTimer = null;
 
   window.generateProfile = async function() {
     try {
@@ -1501,33 +1500,89 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   }
 
   window.runScanner = async function(name) {
-    if (scannerRunning) { toast('A scan is already running'); return; }
-    scannerRunning = true;
-    var btn = event.target;
-    btn.classList.add('running');
-    btn.disabled = true;
-    document.getElementById('scanner-run-status').innerHTML = '<span style="color:#ffaa00">Running ' + escapeHtml(name) + '...</span>';
-
+    document.getElementById('scanner-run-status').innerHTML = '<span style="color:#ffaa00">Starting ' + escapeHtml(name) + '...</span>';
     try {
       var result = await api('/admin/api/scanner/run', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({scanner: name, target: 'http://' + window.location.hostname + ':8765'})
       });
-      document.getElementById('scanner-run-status').innerHTML = '<span style="color:#00ff88">Status: ' + escapeHtml(result.status || 'unknown') + '</span>' +
-        (result.message ? '<br><span style="color:#888;font-size:0.9em">' + escapeHtml(result.message) + '</span>' : '');
-
-      scanHistory.push({timestamp: new Date().toISOString(), scanner: name, grade: '-', detection: '-', status: result.status || 'queued'});
-      renderScanHistory();
-      toast(name + ' scan ' + (result.status || 'queued'));
+      if (result.status === 'error') {
+        document.getElementById('scanner-run-status').innerHTML = '<span style="color:#ff4444">' + escapeHtml(result.error || result.message || 'Scanner not found') + '</span>';
+        return;
+      }
+      if (result.status === 'already_running') {
+        document.getElementById('scanner-run-status').innerHTML = '<span style="color:#ffaa00">' + escapeHtml(name) + ' is already running</span>';
+        return;
+      }
+      toast(name + ' scan started');
+      startScanPolling();
     } catch(e) {
-      document.getElementById('scanner-run-status').innerHTML = '<span style="color:#ff4444">Error running scanner</span>';
-      console.error('runScanner:', e);
-    } finally {
-      scannerRunning = false;
-      btn.classList.remove('running');
-      btn.disabled = false;
+      document.getElementById('scanner-run-status').innerHTML = '<span style="color:#ff4444">Error: ' + escapeHtml(e.message) + '</span>';
     }
+  };
+
+  function startScanPolling() {
+    if (scanPollTimer) return;
+    scanPollTimer = setInterval(pollScannerStatus, 1500);
+    pollScannerStatus();
+  }
+
+  async function pollScannerStatus() {
+    try {
+      var data = await api('/admin/api/scanner/results');
+      var running = data.running || [];
+      var completed = data.completed || [];
+
+      // Update running status
+      var statusEl = document.getElementById('scanner-run-status');
+      if (running.length > 0) {
+        statusEl.innerHTML = running.map(function(r) {
+          return '<div style="margin:4px 0"><span style="color:#ffaa00">&#9654; ' + escapeHtml(r.scanner) + '</span> ' +
+            '<span style="color:#888">' + escapeHtml(r.status) + ' (' + escapeHtml(r.elapsed) + ')</span> ' +
+            '<button class="scanner-btn" style="padding:2px 10px;font-size:0.75em" onclick="stopScanner(\'' + escapeHtml(r.scanner) + '\')">Stop</button></div>';
+        }).join('');
+
+        // Disable run buttons while scan is active
+        document.querySelectorAll('#scanner-run-btns .scanner-btn').forEach(function(btn) {
+          var name = btn.textContent.trim();
+          var isRunning = running.some(function(r) { return r.scanner === name; });
+          if (isRunning) { btn.classList.add('running'); btn.disabled = true; }
+          else { btn.classList.remove('running'); btn.disabled = false; }
+        });
+      } else {
+        if (scanPollTimer) {
+          clearInterval(scanPollTimer);
+          scanPollTimer = null;
+          statusEl.innerHTML = '<span style="color:#00ff88">No scans running</span>';
+          document.querySelectorAll('#scanner-run-btns .scanner-btn').forEach(function(btn) {
+            btn.classList.remove('running'); btn.disabled = false;
+          });
+        }
+      }
+
+      // Update history from server
+      renderServerHistory(completed, running);
+
+      // Show latest completed comparison report
+      if (completed.length > 0) {
+        var latest = completed[completed.length - 1];
+        if (latest.Comparison) renderComparison(latest.Comparison);
+        else if (latest.Result) renderScanResult(latest);
+      }
+    } catch(e) { console.error('pollScanner:', e); }
+  }
+
+  window.stopScanner = async function(name) {
+    try {
+      await api('/admin/api/scanner/stop', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({scanner: name})
+      });
+      toast(name + ' stopped');
+      pollScannerStatus();
+    } catch(e) { toast('Failed to stop scanner'); }
   };
 
   window.uploadResults = async function() {
@@ -1542,27 +1597,48 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         body: JSON.stringify({scanner: scanner, data: data})
       });
       renderComparison(report);
-      scanHistory.push({
-        timestamp: report.timestamp || new Date().toISOString(),
-        scanner: scanner,
-        grade: report.grade || '?',
-        detection: ((report.detection_rate || 0) * 100).toFixed(0) + '%%',
-        status: 'completed'
-      });
-      renderScanHistory();
       toast('Comparison complete: grade ' + (report.grade || '?'));
+      pollScannerStatus();
     } catch(e) {
       console.error('uploadResults:', e);
       toast('Comparison failed');
     }
   };
 
+  function renderScanResult(run) {
+    var r = run.Result || {};
+    var html = '<div class="grid">' +
+      card('Scanner', escapeHtml(run.Scanner || ''), 'v-info') +
+      card('Status', escapeHtml(run.Status || ''), run.Status === 'completed' ? 'v-ok' : 'v-err') +
+      card('Duration', escapeHtml(run.Duration || '-'), 'v-info') +
+      card('Findings', (r.Findings || []).length, 'v-warn') +
+      card('Exit Code', run.ExitCode || 0, run.ExitCode === 0 ? 'v-ok' : 'v-err') +
+      '</div>';
+
+    var findings = r.Findings || [];
+    if (findings.length > 0) {
+      html += '<h3 style="color:#00ccaa;font-size:0.85em;margin-top:14px">FINDINGS (' + findings.length + ')</h3>';
+      html += '<table class="findings-tbl"><thead><tr><th>Name</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
+      findings.forEach(function(f) {
+        html += '<tr><td>' + escapeHtml(f.name || f.Name || '') + '</td><td>' + escapeHtml(f.endpoint || f.Endpoint || '') + '</td><td>' + escapeHtml(f.severity || f.Severity || '') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    if (run.ErrorOutput) {
+      html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:14px">SCANNER ERRORS</h3>';
+      html += '<pre style="background:#1a0a0a;border:1px solid #330000;border-radius:4px;padding:10px;color:#ff6666;font-size:0.8em;max-height:200px;overflow:auto">' + escapeHtml(run.ErrorOutput) + '</pre>';
+    }
+
+    document.getElementById('scanner-comparison').innerHTML = html;
+  }
+
   function renderComparison(report) {
-    var grade = (report.grade || '?').toUpperCase();
+    var grade = (report.grade || report.Grade || '?').toUpperCase();
     var gradeClass = 'grade-' + grade.toLowerCase();
-    var detPct = ((report.detection_rate || 0) * 100).toFixed(1);
-    var fpPct = ((report.false_pos_rate || 0) * 100).toFixed(1);
-    var accPct = ((report.accuracy || 0) * 100).toFixed(1);
+    var detPct = ((report.detection_rate || report.DetectionRate || 0) * 100).toFixed(1);
+    var fpPct = ((report.false_pos_rate || report.FalsePositiveRate || 0) * 100).toFixed(1);
+    var accPct = ((report.accuracy || report.Accuracy || 0) * 100).toFixed(1);
 
     var html = '<div style="display:grid;grid-template-columns:200px 1fr;gap:20px">' +
       '<div>' +
@@ -1583,82 +1659,117 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         '<span style="color:#ffcc00;font-size:0.85em">' + accPct + '%%</span></div>' +
       '</div></div>';
 
-    var health = report.scanner_health || {};
+    var health = report.scanner_health || report.ScannerHealth || {};
     html += '<div style="margin-top:14px;font-size:0.85em;color:#888">' +
-      'Crashed: <span style="color:' + (health.crashed ? '#ff4444' : '#00ff88') + '">' + (health.crashed ? 'YES' : 'no') + '</span> | ' +
-      'Timed out: <span style="color:' + (health.timed_out ? '#ff4444' : '#00ff88') + '">' + (health.timed_out ? 'YES' : 'no') + '</span> | ' +
-      'Errors: <span style="color:' + (health.errors > 0 ? '#ff4444' : '#00ff88') + '">' + (health.errors || 0) + '</span>' +
+      'Crashed: <span style="color:' + (health.crashed || health.Crashed ? '#ff4444' : '#00ff88') + '">' + (health.crashed || health.Crashed ? 'YES' : 'no') + '</span> | ' +
+      'Timed out: <span style="color:' + (health.timed_out || health.TimedOut ? '#ff4444' : '#00ff88') + '">' + (health.timed_out || health.TimedOut ? 'YES' : 'no') + '</span> | ' +
+      'Errors: <span style="color:' + ((health.errors || health.Errors || 0) > 0 ? '#ff4444' : '#00ff88') + '">' + (health.errors || health.Errors || 0) + '</span>' +
       '</div>';
 
-    var tp = report.true_positives || [];
+    var tp = report.true_positives || report.TruePositives || [];
     if (tp.length > 0) {
       html += '<h3 style="color:#00ff88;font-size:0.85em;margin-top:16px">TRUE POSITIVES (' + tp.length + ')</h3>';
       html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
       tp.forEach(function(item) {
-        html += '<tr><td class="found">' + escapeHtml(item.name || '') + '</td><td>' + escapeHtml(item.endpoint || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
+        html += '<tr><td class="found">' + escapeHtml(item.name || item.Name || '') + '</td><td>' + escapeHtml(item.endpoint || item.Endpoint || '') + '</td><td>' + escapeHtml(item.severity || item.Severity || '') + '</td></tr>';
       });
       html += '</tbody></table>';
     }
 
-    var fn = report.false_negatives || [];
+    var fn = report.false_negatives || report.FalseNegatives || [];
     if (fn.length > 0) {
       html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:16px">FALSE NEGATIVES - MISSED (' + fn.length + ')</h3>';
       html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
       fn.forEach(function(item) {
-        html += '<tr><td class="missed">' + escapeHtml(item.name || '') + '</td><td>' + escapeHtml(item.endpoint || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
+        html += '<tr><td class="missed">' + escapeHtml(item.name || item.Name || '') + '</td><td>' + escapeHtml(item.endpoint || item.Endpoint || '') + '</td><td>' + escapeHtml(item.severity || item.Severity || '') + '</td></tr>';
       });
       html += '</tbody></table>';
     }
 
-    var fpList = report.false_positives || [];
+    var fpList = report.false_positives || report.FalsePositives || [];
     if (fpList.length > 0) {
       html += '<h3 style="color:#ffaa00;font-size:0.85em;margin-top:16px">FALSE POSITIVES (' + fpList.length + ')</h3>';
       html += '<table class="findings-tbl"><thead><tr><th>Reported Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
       fpList.forEach(function(item) {
-        html += '<tr><td class="false-pos">' + escapeHtml(item.name || '') + '</td><td>' + escapeHtml(item.endpoint || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
+        html += '<tr><td class="false-pos">' + escapeHtml(item.name || item.Name || '') + '</td><td>' + escapeHtml(item.endpoint || item.Endpoint || '') + '</td><td>' + escapeHtml(item.severity || item.Severity || '') + '</td></tr>';
       });
       html += '</tbody></table>';
     }
 
-    if (report.message) {
-      html += '<div style="margin-top:12px;color:#555;font-size:0.82em">' + escapeHtml(report.message) + '</div>';
+    if (report.message || report.Message) {
+      html += '<div style="margin-top:12px;color:#555;font-size:0.82em">' + escapeHtml(report.message || report.Message) + '</div>';
     }
 
     document.getElementById('scanner-comparison').innerHTML = html;
   }
 
-  function renderScanHistory() {
+  function renderServerHistory(completed, running) {
     var tbody = document.getElementById('scanner-history-body');
-    tbody.innerHTML = scanHistory.slice().reverse().map(function(h) {
-      var gradeClass = h.grade && h.grade !== '-' && h.grade !== '?' ? 'grade-' + h.grade.toLowerCase() : '';
-      return '<tr>' +
-        '<td style="color:#888">' + (h.timestamp ? new Date(h.timestamp).toLocaleString() : '-') + '</td>' +
-        '<td>' + escapeHtml(h.scanner || '') + '</td>' +
-        '<td' + (gradeClass ? ' class="' + gradeClass + '"' : '') + ' style="font-weight:bold;font-size:1.2em">' + escapeHtml(h.grade || '-') + '</td>' +
-        '<td>' + escapeHtml(String(h.detection || '-')) + '</td>' +
-        '<td>' + escapeHtml(h.status || '-') + '</td>' +
-        '</tr>';
-    }).join('');
+    var rows = [];
+
+    // Running scans first
+    (running || []).forEach(function(r) {
+      rows.push('<tr style="background:#1a1a00">' +
+        '<td style="color:#ffaa00">' + (r.started_at ? new Date(r.started_at).toLocaleString() : '-') + '</td>' +
+        '<td>' + escapeHtml(r.scanner || '') + '</td>' +
+        '<td style="font-weight:bold;color:#ffaa00">...</td>' +
+        '<td style="color:#888">' + escapeHtml(r.elapsed || '-') + '</td>' +
+        '<td><span style="color:#ffaa00">RUNNING</span></td>' +
+        '</tr>');
+    });
+
+    // Completed scans (newest first)
+    (completed || []).slice().reverse().forEach(function(r) {
+      var comp = r.Comparison || {};
+      var grade = comp.Grade || comp.grade || '-';
+      var det = comp.DetectionRate || comp.detection_rate;
+      var detStr = det !== undefined ? (det * 100).toFixed(0) + '%%' : '-';
+      var gradeClass = grade !== '-' && grade !== '?' ? 'grade-' + grade.toLowerCase() : '';
+      var statusColor = r.Status === 'completed' ? '#00ff88' : '#ff4444';
+      rows.push('<tr onclick="viewScanRun(' + (completed.indexOf(r)) + ')" style="cursor:pointer">' +
+        '<td style="color:#888">' + (r.CompletedAt ? new Date(r.CompletedAt).toLocaleString() : r.StartedAt ? new Date(r.StartedAt).toLocaleString() : '-') + '</td>' +
+        '<td>' + escapeHtml(r.Scanner || '') + '</td>' +
+        '<td' + (gradeClass ? ' class="' + gradeClass + '"' : '') + ' style="font-weight:bold;font-size:1.2em">' + escapeHtml(grade) + '</td>' +
+        '<td>' + detStr + '</td>' +
+        '<td style="color:' + statusColor + '">' + escapeHtml(r.Status || '-') + '</td>' +
+        '</tr>');
+    });
+
+    tbody.innerHTML = rows.join('') || '<tr><td colspan="5" style="color:#555;text-align:center">No scans yet</td></tr>';
+
+    // Store for click-to-view
+    window._completedRuns = completed || [];
   }
 
-  async function refreshScannerHistory() {
+  window.viewScanRun = function(idx) {
+    var runs = window._completedRuns || [];
+    if (idx >= 0 && idx < runs.length) {
+      var run = runs[idx];
+      if (run.Comparison) renderComparison(run.Comparison);
+      else renderScanResult(run);
+    }
+  };
+
+  async function refreshScannerTab() {
     try {
       var data = await api('/admin/api/scanner/results');
-      var results = data.results || [];
-      results.forEach(function(r) {
-        var exists = scanHistory.some(function(h) { return h.timestamp === r.timestamp && h.scanner === r.scanner; });
-        if (!exists) {
-          scanHistory.push({
-            timestamp: r.timestamp,
-            scanner: r.scanner || '',
-            grade: r.grade || '-',
-            detection: r.detection_rate ? ((r.detection_rate * 100).toFixed(0) + '%%') : '-',
-            status: r.status || '-'
-          });
-        }
-      });
-      renderScanHistory();
-    } catch(e) { console.error('scannerHistory:', e); }
+      var running = data.running || [];
+      var completed = data.completed || [];
+      renderServerHistory(completed, running);
+
+      // Auto-start polling if scans are running
+      if (running.length > 0 && !scanPollTimer) startScanPolling();
+
+      // Update run status
+      var statusEl = document.getElementById('scanner-run-status');
+      if (running.length > 0) {
+        statusEl.innerHTML = running.map(function(r) {
+          return '<div style="margin:4px 0"><span style="color:#ffaa00">&#9654; ' + escapeHtml(r.scanner) + '</span> ' +
+            '<span style="color:#888">' + escapeHtml(r.status) + ' (' + escapeHtml(r.elapsed) + ')</span> ' +
+            '<button class="scanner-btn" style="padding:2px 10px;font-size:0.75em" onclick="stopScanner(\'' + escapeHtml(r.scanner) + '\')">Stop</button></div>';
+        }).join('');
+      }
+    } catch(e) { console.error('scannerTab:', e); }
   }
 
   // ------ Main loop ------
@@ -1672,7 +1783,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     else if (id === 'panel-controls') await refreshControls();
     else if (id === 'panel-log') await refreshLog();
     else if (id === 'panel-vulns') await refreshVulns();
-    else if (id === 'panel-scanner') await refreshScannerHistory();
+    else if (id === 'panel-scanner') await refreshScannerTab();
   }
 
   // Initial load — restore tab from URL hash
