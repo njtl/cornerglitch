@@ -1,0 +1,27 @@
+{
+  "name": "glitchwebserver",
+  "version": "1.0.0",
+  "description": "**Glitch Web Server v2 — an intentionally unreliable, adaptive web server written in Go.**",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/njtl/glitchWebServer.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/njtl/glitchWebServer/issues"
+  },
+  "homepage": "https://github.com/njtl/glitchWebServer#readme",
+  "dependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
