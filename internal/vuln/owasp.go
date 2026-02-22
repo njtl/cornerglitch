@@ -45,9 +45,9 @@ func NewHandler() *Handler {
 }
 
 // ShouldHandle returns true if the given path should be handled by the OWASP
-// vulnerability emulator.
+// vulnerability emulator (including advanced and dashboard/settings vulns).
 func (h *Handler) ShouldHandle(path string) bool {
-	if strings.HasPrefix(path, "/vuln/") {
+	if strings.HasPrefix(path, "/vuln/") || path == "/vuln" {
 		return true
 	}
 	switch path {
@@ -105,6 +105,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
 		return h.serveA10(w, r)
 	}
 
+	// Advanced vulnerability categories (CORS, redirect, XXE, SSTI, etc.)
+	if h.AdvancedShouldHandle(path) {
+		return h.ServeAdvanced(w, r)
+	}
+
+	// Dashboard/settings vulnerability emulations
+	if h.DashboardShouldHandle(path) {
+		return h.ServeDashboard(w, r)
+	}
+
 	// Fallback: /vuln/ index page
 	if path == "/vuln/" || path == "/vuln" {
 		return h.serveIndex(w, r)
@@ -136,9 +146,49 @@ func (h *Handler) serveIndex(w http.ResponseWriter, r *http.Request) int {
   <li><a href="/vuln/a08/">A08:2021 - Software and Data Integrity Failures</a></li>
   <li><a href="/vuln/a09/">A09:2021 - Security Logging and Monitoring Failures</a></li>
   <li><a href="/vuln/a10/">A10:2021 - Server-Side Request Forgery (SSRF)</a></li>
+</ul>
+
+<h2>Advanced Vulnerability Emulations</h2>
+<ul>
+  <li><a href="/vuln/cors/reflect">CORS Misconfiguration</a> — origin reflection, null origin, wildcard+credentials</li>
+  <li><a href="/vuln/redirect?url=https://evil.example.com">Open Redirect</a> — unvalidated URL redirection</li>
+  <li><a href="/vuln/xxe/parse">XXE Injection</a> — XML external entity processing</li>
+  <li><a href="/vuln/ssti/render?template={{7*7}}">SSTI</a> — server-side template injection</li>
+  <li><a href="/vuln/crlf/set?lang=en">CRLF Injection</a> — HTTP header injection via CRLF</li>
+  <li><a href="/vuln/host/reset">Host Header Injection</a> — password reset poisoning, cache poisoning</li>
+  <li><a href="/vuln/verb/admin">HTTP Verb Tampering</a> — method-based access control bypass</li>
+  <li><a href="/vuln/hpp/transfer?amount=100&to=alice">HTTP Parameter Pollution</a> — duplicate parameter handling</li>
+  <li><a href="/vuln/upload/form">Insecure File Upload</a> — unrestricted file type upload</li>
+  <li><a href="/vuln/cmd/ping?host=127.0.0.1">Command Injection</a> — OS command injection via user input</li>
+  <li><a href="/vuln/graphql/introspection">GraphQL Vulnerabilities</a> — introspection, batching, depth attacks</li>
+  <li><a href="/vuln/jwt/none">JWT Vulnerabilities</a> — none algorithm, weak keys, kid injection</li>
+  <li><a href="/vuln/race/coupon">Race Conditions</a> — TOCTOU, double-spend exploits</li>
+  <li><a href="/vuln/deserialize/java">Insecure Deserialization</a> — Java, Python, PHP gadget chains</li>
+  <li><a href="/vuln/path/traverse?file=../../../etc/passwd">Path Normalization</a> — directory traversal, path bypass</li>
+</ul>
+
+<h2>Dashboard &amp; Settings Vulnerabilities</h2>
+<ul>
+  <li><a href="/vuln/dashboard/">Unauthenticated Admin Dashboard</a> — full admin access without login</li>
+  <li><a href="/vuln/dashboard/debug">Debug Information Disclosure</a> — env vars, routes, SQL queries, sessions</li>
+  <li><a href="/vuln/dashboard/phpinfo">PHPInfo Exposure</a> — full server configuration leak</li>
+  <li><a href="/vuln/dashboard/server-status">Server Status Page</a> — Apache mod_status style info leak</li>
+  <li><a href="/vuln/dashboard/api-keys">API Key Management</a> — keys shown in plaintext, no auth</li>
+  <li><a href="/vuln/dashboard/users">User Management</a> — admin user list with password hashes</li>
+  <li><a href="/vuln/dashboard/users/export">User Data Export</a> — CSV export of all user PII</li>
+  <li><a href="/vuln/dashboard/backup/download">Backup Download</a> — unauthenticated database backup</li>
+  <li><a href="/vuln/settings/">Insecure Settings Panel</a> — configuration without authentication</li>
+  <li><a href="/vuln/settings/database">Database Settings</a> — connection strings with credentials</li>
+  <li><a href="/vuln/settings/email">Email Settings</a> — SMTP credentials in plaintext</li>
+  <li><a href="/vuln/settings/integrations">Integration Settings</a> — third-party API keys exposed</li>
+  <li><a href="/vuln/settings/audit">Audit Log</a> — security events visible without auth</li>
+  <li><a href="/vuln/settings/flags">Feature Flags</a> — internal flags with secret values</li>
+  <li><a href="/vuln/settings/credentials">Service Credentials</a> — cloud provider access keys</li>
+  <li><a href="/vuln/settings/certificates">SSL Certificates</a> — private keys exposed</li>
+  <li><a href="/vuln/settings/tokens">API Tokens</a> — long-lived tokens with admin scope</li>
 </ul>`
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, h.wrapHTML("OWASP Top 10 Demos", body))
+	fmt.Fprint(w, h.wrapHTML("Vulnerability Emulation Index", body))
 	return http.StatusOK
 }
 
