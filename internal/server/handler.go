@@ -4,6 +4,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
@@ -340,6 +341,14 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 
 	// OWASP vulnerability emulation
 	if h.vulnH != nil && h.flags.IsVulnEnabled() && h.vulnH.ShouldHandle(r.URL.Path) {
+		// Check VulnConfig group/category toggles
+		vc := dashboard.GetVulnConfig()
+		if h.isVulnDisabled(r.URL.Path, vc) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`<!DOCTYPE html><html><head><title>Not Found</title></head><body><h1>404 Not Found</h1><p>The requested page could not be found.</p></body></html>`))
+			return 404, "vuln_disabled"
+		}
 		status := h.vulnH.ServeHTTP(w, r)
 		return status, "vuln"
 	}
@@ -485,6 +494,35 @@ func contains(s, substr string) bool {
 func containsStr(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+// isVulnDisabled checks if a vuln path is disabled via VulnConfig group/category toggles.
+func (h *Handler) isVulnDisabled(path string, vc *dashboard.VulnConfig) bool {
+	// Determine group and category from path
+	if strings.HasPrefix(path, "/vuln/a") {
+		// OWASP category (a01-a10)
+		if !vc.IsGroupEnabled("owasp") {
+			return true
+		}
+		// Extract category ID like "owasp-a01"
+		parts := strings.SplitN(strings.TrimPrefix(path, "/vuln/"), "/", 2)
+		if len(parts) > 0 && len(parts[0]) >= 3 {
+			catID := "owasp-" + parts[0][:3]
+			if !vc.IsCategoryEnabled(catID) {
+				return true
+			}
+		}
+	} else if strings.HasPrefix(path, "/vuln/dashboard") || strings.HasPrefix(path, "/vuln/settings") {
+		if !vc.IsGroupEnabled("dashboard") {
+			return true
+		}
+	} else if strings.HasPrefix(path, "/vuln/") {
+		// Advanced vulns (cors, redirect, xxe, ssti, etc.)
+		if !vc.IsGroupEnabled("advanced") {
 			return true
 		}
 	}
