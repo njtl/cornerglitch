@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,14 @@ const (
 	serverURL = "http://localhost:8765"
 	adminURL  = "http://localhost:8766"
 )
+
+// adminPassword is the password for the admin panel. Defaults to "admin".
+var adminPassword = func() string {
+	if p := os.Getenv("GLITCH_ADMIN_PASSWORD"); p != "" {
+		return p
+	}
+	return "admin"
+}()
 
 func requireServer(t *testing.T) {
 	t.Helper()
@@ -28,21 +37,34 @@ func requireServer(t *testing.T) {
 
 func requireAdmin(t *testing.T) {
 	t.Helper()
-	resp, err := http.Get(adminURL + "/admin")
+	req, _ := http.NewRequest("GET", adminURL+"/admin/api/config", nil)
+	req.SetBasicAuth("admin", adminPassword)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Skipf("Admin panel not running at %s: %v", adminURL, err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode == 401 {
+		t.Skipf("Admin authentication failed (set GLITCH_ADMIN_PASSWORD)")
+	}
 }
 
 func postJSON(url string, data interface{}) (*http.Response, error) {
 	body, _ := json.Marshal(data)
-	return http.Post(url, "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("admin", adminPassword)
+	return http.DefaultClient.Do(req)
 }
 
 func getJSON(t *testing.T, url string) map[string]interface{} {
 	t.Helper()
-	resp, err := http.Get(url)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.SetBasicAuth("admin", adminPassword)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
@@ -410,10 +432,7 @@ func TestConfig_ExportImportRoundTrip(t *testing.T) {
 	requireAdmin(t)
 
 	// Export
-	exportResp, _ := http.Get(adminURL + "/admin/api/config/export")
-	var exported map[string]interface{}
-	json.NewDecoder(exportResp.Body).Decode(&exported)
-	exportResp.Body.Close()
+	exported := getJSON(t, adminURL+"/admin/api/config/export")
 
 	if exported["version"] != "1.0" {
 		t.Errorf("expected version 1.0, got %v", exported["version"])
@@ -1030,7 +1049,9 @@ func TestRequestLog_FilterWorks(t *testing.T) {
 func TestAdminHTML_Loads(t *testing.T) {
 	requireAdmin(t)
 
-	resp, _ := http.Get(adminURL + "/admin")
+	req, _ := http.NewRequest("GET", adminURL+"/admin", nil)
+	req.SetBasicAuth("admin", adminPassword)
+	resp, _ := http.DefaultClient.Do(req)
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 

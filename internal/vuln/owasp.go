@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/glitchWebServer/internal/dashboard"
 )
 
 // Handler emulates OWASP Top 10 (2021) vulnerabilities with realistic-looking
@@ -57,91 +59,138 @@ func (h *Handler) ShouldHandle(path string) bool {
 	return false
 }
 
+// serveDisabled returns a 404 page for disabled vulnerability endpoints.
+func (h *Handler) serveDisabled(w http.ResponseWriter) int {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprint(w, h.wrapHTML("Not Found", "<p>The requested page could not be found.</p>"))
+	return http.StatusNotFound
+}
+
 // ServeHTTP handles the request and writes a simulated vulnerable response.
 // Returns the HTTP status code used.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
 	w.Header().Set("X-Glitch-Honeypot", "true")
 	path := r.URL.Path
+	vc := dashboard.GetVulnConfig()
 
 	// Overlap paths that map to specific categories
 	switch path {
 	case "/admin/users":
+		if !vc.IsGroupEnabled("owasp") {
+			return h.serveDisabled(w)
+		}
 		return h.serveA01Users(w, r)
 	case "/logs/access.log":
+		if !vc.IsGroupEnabled("owasp") {
+			return h.serveDisabled(w)
+		}
 		return h.serveA09AccessLog(w, r)
 	case "/proxy":
+		if !vc.IsGroupEnabled("owasp") {
+			return h.serveDisabled(w)
+		}
 		return h.serveA10Proxy(w, r)
 	}
 
-	// Route /vuln/aNN/ paths
-	if strings.HasPrefix(path, "/vuln/a01") {
-		return h.serveA01(w, r)
-	}
-	if strings.HasPrefix(path, "/vuln/a02") {
-		return h.serveA02(w, r)
-	}
-	if strings.HasPrefix(path, "/vuln/a03") {
-		return h.serveA03(w, r)
-	}
-	if strings.HasPrefix(path, "/vuln/a04") {
-		return h.serveA04(w, r)
-	}
-	if strings.HasPrefix(path, "/vuln/a05") {
-		return h.serveA05(w, r)
-	}
-	if strings.HasPrefix(path, "/vuln/a06") {
-		return h.serveA06(w, r)
-	}
-	if strings.HasPrefix(path, "/vuln/a07") {
-		return h.serveA07(w, r)
-	}
-	if strings.HasPrefix(path, "/vuln/a08") {
-		return h.serveA08(w, r)
-	}
-	if strings.HasPrefix(path, "/vuln/a09") {
-		return h.serveA09(w, r)
-	}
-	if strings.HasPrefix(path, "/vuln/a10") {
-		return h.serveA10(w, r)
+	// Route /vuln/aNN/ paths (OWASP Top 10)
+	if strings.HasPrefix(path, "/vuln/a0") || strings.HasPrefix(path, "/vuln/a10") {
+		if !vc.IsGroupEnabled("owasp") {
+			return h.serveDisabled(w)
+		}
+		if strings.HasPrefix(path, "/vuln/a01") {
+			return h.serveA01(w, r)
+		}
+		if strings.HasPrefix(path, "/vuln/a02") {
+			return h.serveA02(w, r)
+		}
+		if strings.HasPrefix(path, "/vuln/a03") {
+			return h.serveA03(w, r)
+		}
+		if strings.HasPrefix(path, "/vuln/a04") {
+			return h.serveA04(w, r)
+		}
+		if strings.HasPrefix(path, "/vuln/a05") {
+			return h.serveA05(w, r)
+		}
+		if strings.HasPrefix(path, "/vuln/a06") {
+			return h.serveA06(w, r)
+		}
+		if strings.HasPrefix(path, "/vuln/a07") {
+			return h.serveA07(w, r)
+		}
+		if strings.HasPrefix(path, "/vuln/a08") {
+			return h.serveA08(w, r)
+		}
+		if strings.HasPrefix(path, "/vuln/a09") {
+			return h.serveA09(w, r)
+		}
+		if strings.HasPrefix(path, "/vuln/a10") {
+			return h.serveA10(w, r)
+		}
 	}
 
 	// OWASP API Security Top 10 (2023)
 	if h.APIShouldHandle(path) {
+		if !vc.IsGroupEnabled("api_security") {
+			return h.serveDisabled(w)
+		}
 		return h.ServeAPISecurity(w, r)
 	}
 
 	// Advanced vulnerability categories (CORS, redirect, XXE, SSTI, etc.)
 	if h.AdvancedShouldHandle(path) {
+		if !vc.IsGroupEnabled("advanced") {
+			return h.serveDisabled(w)
+		}
 		return h.ServeAdvanced(w, r)
 	}
 
 	// Modern OWASP categories (LLM Top 10, CI/CD Top 10, Cloud-Native Top 10)
 	if h.ModernShouldHandle(path) {
+		if !vc.IsGroupEnabled("modern") {
+			return h.serveDisabled(w)
+		}
 		return h.ServeModern(w, r)
 	}
 
 	// Infrastructure OWASP categories (Serverless Top 10, Docker Top 10, K8s Top 10)
 	if h.InfraShouldHandle(path) {
+		if !vc.IsGroupEnabled("infrastructure") {
+			return h.serveDisabled(w)
+		}
 		return h.ServeInfra(w, r)
 	}
 
 	// OWASP IoT Top 10, Desktop App Top 10, Low-Code/No-Code Top 10
 	if h.IoTShouldHandle(path) {
+		if !vc.IsGroupEnabled("iot_desktop") {
+			return h.serveDisabled(w)
+		}
 		return h.ServeIoT(w, r)
 	}
 
 	// OWASP Mobile Top 10, Privacy Top 10, Client-Side Top 10
 	if h.MobileShouldHandle(path) {
+		if !vc.IsGroupEnabled("mobile_privacy") {
+			return h.serveDisabled(w)
+		}
 		return h.ServeMobile(w, r)
 	}
 
 	// OWASP Proactive Controls, ML Security, Data Security, Web 2025
 	if h.SpecializedShouldHandle(path) {
+		if !vc.IsGroupEnabled("specialized") {
+			return h.serveDisabled(w)
+		}
 		return h.ServeSpecialized(w, r)
 	}
 
 	// Dashboard/settings vulnerability emulations
 	if h.DashboardShouldHandle(path) {
+		if !vc.IsGroupEnabled("dashboard") {
+			return h.serveDisabled(w)
+		}
 		return h.ServeDashboard(w, r)
 	}
 

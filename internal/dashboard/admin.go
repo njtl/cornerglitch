@@ -594,22 +594,29 @@ func (c *AdminConfig) ResetPageTypeWeights() {
 // Vulnerability Config — controls which vuln groups/categories are active
 // ---------------------------------------------------------------------------
 
+// VulnGroups lists all supported vulnerability group names.
+var VulnGroups = []string{
+	"owasp", "api_security", "advanced", "modern",
+	"infrastructure", "iot_desktop", "mobile_privacy",
+	"specialized", "dashboard",
+}
+
 // VulnConfig controls vulnerability endpoint toggling.
 type VulnConfig struct {
-	mu               sync.RWMutex
-	owaspEnabled     bool
-	advancedEnabled  bool
-	dashboardEnabled bool
-	categories       map[string]bool
+	mu         sync.RWMutex
+	groups     map[string]bool // group name -> enabled (true = enabled)
+	categories map[string]bool
 }
 
 // NewVulnConfig returns a VulnConfig with all groups enabled.
 func NewVulnConfig() *VulnConfig {
+	groups := make(map[string]bool, len(VulnGroups))
+	for _, g := range VulnGroups {
+		groups[g] = true
+	}
 	return &VulnConfig{
-		owaspEnabled:     true,
-		advancedEnabled:  true,
-		dashboardEnabled: true,
-		categories:       make(map[string]bool),
+		groups:     groups,
+		categories: make(map[string]bool),
 	}
 }
 
@@ -617,29 +624,17 @@ func NewVulnConfig() *VulnConfig {
 func (vc *VulnConfig) IsGroupEnabled(group string) bool {
 	vc.mu.RLock()
 	defer vc.mu.RUnlock()
-	switch group {
-	case "owasp":
-		return vc.owaspEnabled
-	case "advanced":
-		return vc.advancedEnabled
-	case "dashboard":
-		return vc.dashboardEnabled
+	if enabled, ok := vc.groups[group]; ok {
+		return enabled
 	}
-	return true
+	return true // unknown groups are enabled by default
 }
 
 // SetGroup toggles a vulnerability group.
 func (vc *VulnConfig) SetGroup(group string, enabled bool) {
 	vc.mu.Lock()
 	defer vc.mu.Unlock()
-	switch group {
-	case "owasp":
-		vc.owaspEnabled = enabled
-	case "advanced":
-		vc.advancedEnabled = enabled
-	case "dashboard":
-		vc.dashboardEnabled = enabled
-	}
+	vc.groups[group] = enabled
 }
 
 // IsCategoryEnabled returns whether a specific category ID is enabled.
@@ -667,12 +662,12 @@ func (vc *VulnConfig) Snapshot() map[string]interface{} {
 	for k, v := range vc.categories {
 		cats[k] = v
 	}
+	groups := make(map[string]bool, len(vc.groups))
+	for k, v := range vc.groups {
+		groups[k] = v
+	}
 	return map[string]interface{}{
-		"groups": map[string]bool{
-			"owasp":     vc.owaspEnabled,
-			"advanced":  vc.advancedEnabled,
-			"dashboard": vc.dashboardEnabled,
-		},
+		"groups":     groups,
 		"categories": cats,
 	}
 }
