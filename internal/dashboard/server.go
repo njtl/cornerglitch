@@ -41,6 +41,9 @@ func NewServer(collector *metrics.Collector, fp *fingerprint.Engine, adapt *adap
 	// Register admin panel routes
 	RegisterAdminRoutes(mux, s)
 
+	// Register built-in scanner API routes
+	RegisterBuiltinScannerRoutes(mux)
+
 	s.httpSrv = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: AuthMiddleware(mux),

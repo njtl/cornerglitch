@@ -483,6 +483,27 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   .cfg-btn:hover { background: #444; }
   .cfg-btn.primary { background: #00aa66; color: #000; font-weight: bold; }
   .cfg-btn.primary:hover { background: #00cc77; }
+
+  /* Built-in Scanner */
+  .profile-card { background:#111;border:1px solid #333;border-radius:8px;padding:14px;cursor:pointer;transition:border-color .2s }
+  .profile-card:hover { border-color:#555 }
+  .profile-card.selected { border-color:#0ff;box-shadow:0 0 8px rgba(0,255,255,0.15) }
+  .profile-card .profile-name { color:#0ff;font-weight:bold;font-size:1em;margin-bottom:6px }
+  .profile-card .profile-desc { color:#888;font-size:0.8em;line-height:1.4 }
+  .profile-card .profile-stats { color:#555;font-size:0.75em;margin-top:8px }
+  .module-row { display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid #1a1a1a }
+  .module-row:last-child { border-bottom:none }
+  .module-row label { color:#ccc;cursor:pointer;flex:1 }
+  .module-row .mod-reqs { color:#555;font-size:0.8em;min-width:80px;text-align:right }
+  .builtin-progress { background:#111;border:1px solid #333;border-radius:4px;height:24px;position:relative;overflow:hidden;margin:10px 0 }
+  .builtin-progress-bar { height:100%%;background:linear-gradient(90deg,#0a4,#0ff);transition:width .3s }
+  .builtin-progress-text { position:absolute;top:0;left:0;right:0;text-align:center;line-height:24px;font-size:0.8em;color:#fff }
+  .severity-badge { padding:2px 8px;border-radius:3px;font-size:0.75em;font-weight:bold }
+  .severity-badge.sev-critical { background:#a00;color:#fff }
+  .severity-badge.sev-high { background:#c50;color:#fff }
+  .severity-badge.sev-medium { background:#a80;color:#fff }
+  .severity-badge.sev-low { background:#069;color:#fff }
+  .severity-badge.sev-info { background:#333;color:#aaa }
 </style>
 </head>
 <body>
@@ -734,7 +755,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <button class="cfg-btn" onclick="document.getElementById('cfg-import-file').click()">Import Config</button>
       <input type="file" id="cfg-import-file" accept=".json" style="display:none" onchange="importConfigFile(this)">
     </div>
-    <div id="cfg-import-status" style="color:#888;font-size:0.82em"></div>
+    <div id="cfg-import-status" style="color:#555;font-size:0.82em">Select a JSON config file to restore server settings</div>
   </div>
 </div>
 
@@ -803,73 +824,217 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 <!-- ==================== SCANNER TAB ==================== -->
 <div id="panel-scanner" class="panel">
 
-  <!-- Expected Profile panel -->
-  <div class="section">
-    <h2>// Expected Profile</h2>
-    <button class="scanner-btn" onclick="generateProfile()">Generate Profile</button>
-    <div id="scanner-profile-summary" style="margin-top:14px">
-      <div style="color:#555">Click "Generate Profile" to load the current vulnerability profile.</div>
-    </div>
+  <!-- Sub-tab navigation -->
+  <div style="display:flex;gap:8px;margin-bottom:16px">
+    <button class="tab-btn scanner-subtab-btn active" onclick="switchScannerSubtab('eval')">Evaluate External Scanners</button>
+    <button class="tab-btn scanner-subtab-btn" onclick="switchScannerSubtab('builtin')">Built-in Scanner</button>
   </div>
 
-  <!-- Scanner Results panel -->
-  <div class="section">
-    <h2>// Scanner Results</h2>
-    <div class="scanner-panel">
-      <h3>Select Scanner</h3>
-      <select id="scanner-type" class="scanner-select">
-        <option value="nuclei">Nuclei</option>
-        <option value="nikto">Nikto</option>
-        <option value="nmap">Nmap</option>
-        <option value="ffuf">ffuf</option>
-        <option value="wapiti">Wapiti</option>
-        <option value="generic">Generic</option>
-      </select>
-    </div>
+  <!-- ====== Sub-tab A: Evaluate External Scanners ====== -->
+  <div id="scanner-eval-panel">
 
-    <div class="scanner-panel">
-      <h3>Upload / Paste Results</h3>
-      <textarea id="scanner-output" class="scanner-textarea" placeholder="Paste scanner output here..."></textarea>
-      <button class="scanner-btn" onclick="uploadResults()">Upload &amp; Compare</button>
-    </div>
-
-    <div class="scanner-panel">
-      <h3>Run Scanner</h3>
-      <p style="color:#888;font-size:0.82em;margin-bottom:8px">Launch a scanner against this server (requires tool to be installed on host).</p>
-      <div id="scanner-run-btns">
-        <button class="scanner-btn" onclick="runScanner('nuclei')">nuclei</button>
-        <button class="scanner-btn" onclick="runScanner('nikto')">nikto</button>
-        <button class="scanner-btn" onclick="runScanner('nmap')">nmap</button>
-        <button class="scanner-btn" onclick="runScanner('ffuf')">ffuf</button>
-        <button class="scanner-btn" onclick="runScanner('wapiti')">wapiti</button>
+    <!-- Context Banner -->
+    <div class="section">
+      <h2>// Vulnerability Profile</h2>
+      <div id="scanner-profile-summary" style="margin-top:8px">
+        <div style="color:#555">Loading vulnerability profile...</div>
       </div>
+    </div>
+
+    <!-- Launch External Scanner -->
+    <div class="section">
+      <h2>// Launch External Scanner</h2>
+      <p style="color:#888;font-size:0.82em;margin-bottom:12px">Launch a scanner against this server (requires tool to be installed on host).</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+        <div class="scanner-panel" style="margin-bottom:0">
+          <h3>Nuclei</h3>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Template-based scanner. Fast, accurate, low false positives.</p>
+          <button class="scanner-btn" onclick="runScanner('nuclei')">Launch</button>
+        </div>
+        <div class="scanner-panel" style="margin-bottom:0">
+          <h3>Nikto</h3>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Classic web server scanner. Checks for misconfigurations and known vulns.</p>
+          <button class="scanner-btn" onclick="runScanner('nikto')">Launch</button>
+        </div>
+        <div class="scanner-panel" style="margin-bottom:0">
+          <h3>Nmap</h3>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Network mapper with NSE scripts for service and vuln detection.</p>
+          <button class="scanner-btn" onclick="runScanner('nmap')">Launch</button>
+        </div>
+        <div class="scanner-panel" style="margin-bottom:0">
+          <h3>ffuf</h3>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Fast web fuzzer. Directory brute-forcing and parameter discovery.</p>
+          <button class="scanner-btn" onclick="runScanner('ffuf')">Launch</button>
+        </div>
+        <div class="scanner-panel" style="margin-bottom:0">
+          <h3>Wapiti</h3>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Black-box web app scanner. Tests for XSS, SQLi, SSRF, and more.</p>
+          <button class="scanner-btn" onclick="runScanner('wapiti')">Launch</button>
+        </div>
+      </div>
+      <div id="scanner-run-btns" style="display:none"></div>
       <div id="scanner-run-status" style="margin-top:8px;color:#555;font-size:0.82em"></div>
     </div>
+
+    <!-- Upload Scanner Output -->
+    <div class="section">
+      <h2>// Upload Scanner Output</h2>
+      <div class="scanner-panel">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <label style="color:#aaa;font-size:0.85em">Scanner Type:</label>
+          <select id="scanner-type" class="scanner-select">
+            <option value="nuclei">Nuclei</option>
+            <option value="nikto">Nikto</option>
+            <option value="nmap">Nmap</option>
+            <option value="ffuf">ffuf</option>
+            <option value="wapiti">Wapiti</option>
+            <option value="generic">Generic</option>
+          </select>
+        </div>
+        <textarea id="scanner-output" class="scanner-textarea" placeholder="Paste scanner output here..."></textarea>
+        <button class="scanner-btn" onclick="uploadResults()">Upload &amp; Grade</button>
+      </div>
+    </div>
+
+    <!-- Comparison Report -->
+    <div class="section">
+      <h2>// Comparison Report</h2>
+      <div id="scanner-comparison">
+        <div style="color:#555">No comparison data yet. Upload scanner results or run a scan.</div>
+      </div>
+    </div>
+
+    <!-- Evaluation History -->
+    <div class="section">
+      <h2>// Evaluation History</h2>
+      <div class="tbl-scroll" style="max-height:300px">
+        <table>
+          <thead><tr>
+            <th>Timestamp</th>
+            <th>Scanner</th>
+            <th>Grade</th>
+            <th>Detection</th>
+            <th>Status</th>
+          </tr></thead>
+          <tbody id="scanner-history-body"></tbody>
+        </table>
+      </div>
+    </div>
+
   </div>
 
-  <!-- Comparison Report panel -->
-  <div class="section">
-    <h2>// Comparison Report</h2>
-    <div id="scanner-comparison">
-      <div style="color:#555">No comparison data yet. Upload scanner results or run a scan.</div>
-    </div>
-  </div>
+  <!-- ====== Sub-tab B: Built-in Scanner ====== -->
+  <div id="scanner-builtin-panel" style="display:none">
 
-  <!-- History panel -->
-  <div class="section">
-    <h2>// Scan History</h2>
-    <div class="tbl-scroll" style="max-height:300px">
-      <table>
-        <thead><tr>
-          <th>Timestamp</th>
-          <th>Scanner</th>
-          <th>Grade</th>
-          <th>Detection</th>
-          <th>Status</th>
-        </tr></thead>
-        <tbody id="scanner-history-body"></tbody>
-      </table>
+    <!-- Context Banner -->
+    <div class="section">
+      <h2>// Glitch Built-in Scanner</h2>
+      <p style="color:#888;font-size:0.85em;margin-bottom:8px">
+        Run the glitch server's own vulnerability scanner against a target. This scanner knows every vulnerability the server emulates and can verify coverage, resilience, and evasion handling.
+      </p>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+        <label style="color:#aaa;font-size:0.85em">Target:</label>
+        <input type="text" id="builtin-target" placeholder="http://localhost:8765"
+          value="" style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;flex:1">
+      </div>
     </div>
+
+    <!-- Scan Profile -->
+    <div class="section">
+      <h2>// Scan Profile</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+        <div class="profile-card selected" onclick="selectBuiltinProfile(this,'compliance')">
+          <input type="radio" name="builtin-profile" value="compliance" checked style="display:none">
+          <div class="profile-name">Compliance</div>
+          <div class="profile-desc">Methodical scan with minimal load. Suitable for baseline audits.</div>
+          <div class="profile-stats">Workers: 2 | Rate: 10 req/s | Evasion: none</div>
+        </div>
+        <div class="profile-card" onclick="selectBuiltinProfile(this,'aggressive')">
+          <input type="radio" name="builtin-profile" value="aggressive" style="display:none">
+          <div class="profile-name">Aggressive</div>
+          <div class="profile-desc">High-speed scan with many workers. Maximum throughput.</div>
+          <div class="profile-stats">Workers: 50 | Rate: 500 req/s | Evasion: none</div>
+        </div>
+        <div class="profile-card" onclick="selectBuiltinProfile(this,'stealth')">
+          <input type="radio" name="builtin-profile" value="stealth" style="display:none">
+          <div class="profile-name">Stealth</div>
+          <div class="profile-desc">Low and slow with advanced evasion. Avoids detection.</div>
+          <div class="profile-stats">Workers: 1 | Rate: 2 req/s | Evasion: advanced</div>
+        </div>
+        <div class="profile-card" onclick="selectBuiltinProfile(this,'nightmare')">
+          <input type="radio" name="builtin-profile" value="nightmare" style="display:none">
+          <div class="profile-name" style="color:#ff4444">Nightmare</div>
+          <div class="profile-desc" style="color:#ff8866">Unlimited rate, full evasion, maximum chaos. <strong style="color:#ff4444">Will generate extreme load.</strong></div>
+          <div class="profile-stats" style="color:#ff6644">Workers: 100 | Rate: unlimited | Evasion: nightmare</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attack Modules -->
+    <div class="section">
+      <h2>// Attack Modules</h2>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="scanner-btn" style="padding:4px 14px;font-size:0.78em" onclick="toggleAllModules(true)">Select All</button>
+        <button class="scanner-btn" style="padding:4px 14px;font-size:0.78em;background:#333;color:#ccc" onclick="toggleAllModules(false)">Deselect All</button>
+        <span id="builtin-module-count" style="color:#555;font-size:0.8em;line-height:28px;margin-left:8px">Loading modules...</span>
+      </div>
+      <div id="builtin-modules" style="background:#0d0d0d;border:1px solid #222;border-radius:8px;max-height:300px;overflow-y:auto">
+        <div style="color:#555;padding:12px;text-align:center">Loading modules...</div>
+      </div>
+    </div>
+
+    <!-- Run Controls -->
+    <div class="section">
+      <h2>// Run Controls</h2>
+      <div id="builtin-run-summary" style="color:#888;font-size:0.85em;margin-bottom:10px">
+        Profile: <span style="color:#0ff">compliance</span> |
+        Modules: <span id="builtin-selected-count" style="color:#0ff">0</span> selected |
+        Target: <span id="builtin-target-display" style="color:#0ff">-</span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="scanner-btn" id="builtin-run-btn" style="background:#0aa;color:#000;font-weight:bold;padding:10px 28px" onclick="runBuiltinScan()">Run Glitch Scanner</button>
+        <button class="scanner-btn" id="builtin-stop-btn" style="background:#a00;color:#fff;display:none;padding:10px 28px" onclick="stopBuiltinScan()">Stop Scan</button>
+      </div>
+      <div id="builtin-progress-wrap" style="display:none;margin-top:12px">
+        <div class="builtin-progress">
+          <div class="builtin-progress-bar" id="builtin-progress-bar" style="width:0%%"></div>
+          <div class="builtin-progress-text" id="builtin-progress-text">0%%</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:0.8em;color:#666;margin-top:4px">
+          <span id="builtin-status-text">Idle</span>
+          <span id="builtin-elapsed">0s</span>
+          <span id="builtin-req-count">0 requests</span>
+          <span id="builtin-finding-count">0 findings</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scan Results -->
+    <div class="section" id="builtin-results-section" style="display:none">
+      <h2>// Scan Results</h2>
+      <div id="builtin-results-cards" class="grid" style="margin-bottom:14px"></div>
+      <div id="builtin-coverage-table" style="margin-bottom:14px"></div>
+      <div id="builtin-scores" style="margin-bottom:14px"></div>
+      <div id="builtin-findings-table"></div>
+    </div>
+
+    <!-- Scan History -->
+    <div class="section">
+      <h2>// Scan History</h2>
+      <div class="tbl-scroll" style="max-height:300px">
+        <table>
+          <thead><tr>
+            <th>Timestamp</th>
+            <th>Profile</th>
+            <th>Findings</th>
+            <th>Coverage</th>
+            <th>Resilience</th>
+          </tr></thead>
+          <tbody id="builtin-history-body"></tbody>
+        </table>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -1032,7 +1197,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <input type="number" id="replay-cleanup-size" value="500" min="1" max="10000" step="10"
         style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100px">
       <span style="color:#555;font-size:0.78em">MB limit</span>
-      <button class="cfg-btn" onclick="replayCleanup()">Clean Up Old Files</button>
+      <button class="cfg-btn" onclick="replayCleanup()" title="Remove oldest capture files until total size is under the MB limit">Trim to Size Limit</button>
     </div>
   </div>
 
@@ -1063,7 +1228,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div id="replay-meta-methods" style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px"></div>
       <div id="replay-meta-paths" style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px"></div>
     </div>
-    <div id="replay-meta-protocols" style="margin-top:8px;font-size:0.82em;color:#888"></div>
+    <div id="replay-meta-protocols" style="margin-top:8px;background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px;font-size:0.82em;color:#888"></div>
   </div>
 
   <!-- Replay Target Configuration -->
@@ -1099,15 +1264,16 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <span id="replay-speed-val" style="color:#00ffcc;font-weight:bold;min-width:36px">1x</span>
         </div>
         <div style="display:flex;gap:4px;margin-top:6px">
-          <button class="cfg-btn" onclick="setReplaySpeed(1)" style="padding:4px 10px;font-size:0.75em">1x</button>
-          <button class="cfg-btn" onclick="setReplaySpeed(2)" style="padding:4px 10px;font-size:0.75em">2x</button>
-          <button class="cfg-btn" onclick="setReplaySpeed(5)" style="padding:4px 10px;font-size:0.75em">5x</button>
-          <button class="cfg-btn" onclick="document.getElementById('replay-timing').value='burst'" style="padding:4px 10px;font-size:0.75em">Burst</button>
+          <button class="cfg-btn" onclick="setReplaySpeed(1)" style="padding:4px 10px;font-size:0.75em" title="Original speed">1x</button>
+          <button class="cfg-btn" onclick="setReplaySpeed(2)" style="padding:4px 10px;font-size:0.75em" title="2x faster than original">2x</button>
+          <button class="cfg-btn" onclick="setReplaySpeed(5)" style="padding:4px 10px;font-size:0.75em" title="5x faster than original">5x</button>
+          <button class="cfg-btn" onclick="document.getElementById('replay-timing').value='burst';document.getElementById('replay-speed-val').textContent='Burst'" style="padding:4px 10px;font-size:0.75em" title="Send all requests at once, ignoring original timing">Burst</button>
         </div>
       </div>
       <div class="card">
         <div class="label">Filter Path</div>
-        <input type="text" id="replay-filter" placeholder="/api/" style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%;margin-top:6px">
+        <input type="text" id="replay-filter" placeholder="/api/ (substring match)" style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%;margin-top:6px">
+        <div style="color:#555;font-size:0.72em;margin-top:3px">Only replay requests whose path contains this text</div>
       </div>
       <div class="card">
         <div class="label">Loop</div>
@@ -1178,6 +1344,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   // ------ Helpers ------
   async function api(path, opts) {
     const res = await fetch(API + path, opts);
+    if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + res.statusText);
     return res.json();
   }
 
@@ -1545,7 +1712,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     js_trap_difficulty: 'Complexity of JavaScript challenges (0=easy, 5=very hard)',
     content_cache_ttl_sec: 'How long generated content is cached before regeneration',
     adaptive_aggressive_rps: 'Requests/sec threshold to trigger aggressive adaptive mode',
-    adaptive_labyrinth_paths: 'Min suspicious path count to redirect client into labyrinth'
+    adaptive_labyrinth_paths: 'Min suspicious path count to redirect client into labyrinth',
+    proxy_latency_prob: 'Probability of adding random latency to proxied requests (0=none, 1=always)',
+    proxy_corrupt_prob: 'Probability of corrupting proxied response data (0=none, 1=always)',
+    proxy_drop_prob: 'Probability of silently dropping proxied requests (0=none, 1=always)',
+    proxy_reset_prob: 'Probability of sending TCP RST instead of response (0=none, 1=always)'
   };
 
   const ERROR_TIPS = {
@@ -2336,6 +2507,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   async function refreshScannerTab() {
     try {
+      // Auto-load profile on first call
+      if (!vulnProfile || !vulnProfile.total_vulns) {
+        generateProfile();
+      }
+
       var data = await api('/admin/api/scanner/results');
       var running = data.running || [];
       var completed = data.completed || [];
@@ -2354,6 +2530,294 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         }).join('');
       }
     } catch(e) { console.error('scannerTab:', e); }
+  }
+
+  // ------ Built-in Scanner Tab ------
+  var builtinPollTimer = null;
+
+  window.switchScannerSubtab = function(tab) {
+    document.getElementById('scanner-eval-panel').style.display = tab === 'eval' ? '' : 'none';
+    document.getElementById('scanner-builtin-panel').style.display = tab === 'builtin' ? '' : 'none';
+    document.querySelectorAll('.scanner-subtab-btn').forEach(function(b) { b.classList.remove('active'); });
+    event.target.classList.add('active');
+    if (tab === 'eval') refreshScannerTab();
+    else refreshBuiltinScanner();
+  };
+
+  window.selectBuiltinProfile = function(el, profile) {
+    document.querySelectorAll('.profile-card').forEach(function(c) { c.classList.remove('selected'); });
+    el.classList.add('selected');
+    el.querySelector('input[type="radio"]').checked = true;
+    updateBuiltinSummary();
+  };
+
+  window.toggleAllModules = function(checked) {
+    document.querySelectorAll('#builtin-modules input[type="checkbox"]').forEach(function(cb) { cb.checked = checked; });
+    updateBuiltinModuleCount();
+  };
+
+  function updateBuiltinModuleCount() {
+    var total = document.querySelectorAll('#builtin-modules input[type="checkbox"]').length;
+    var selected = document.querySelectorAll('#builtin-modules input[type="checkbox"]:checked').length;
+    var countEl = document.getElementById('builtin-module-count');
+    if (countEl) countEl.textContent = selected + ' of ' + total + ' modules selected';
+    var selEl = document.getElementById('builtin-selected-count');
+    if (selEl) selEl.textContent = selected;
+  }
+
+  function updateBuiltinSummary() {
+    var profile = document.querySelector('input[name="builtin-profile"]:checked');
+    var profileName = profile ? profile.value : 'compliance';
+    var summary = document.getElementById('builtin-run-summary');
+    if (summary) {
+      var target = document.getElementById('builtin-target').value || 'http://' + window.location.hostname + ':8765';
+      var selected = document.querySelectorAll('#builtin-modules input[type="checkbox"]:checked').length;
+      summary.innerHTML = 'Profile: <span style="color:#0ff">' + escapeHtml(profileName) + '</span> | ' +
+        'Modules: <span id="builtin-selected-count" style="color:#0ff">' + selected + '</span> selected | ' +
+        'Target: <span id="builtin-target-display" style="color:#0ff">' + escapeHtml(target) + '</span>';
+    }
+  }
+
+  async function refreshBuiltinScanner() {
+    try {
+      // Fetch modules
+      var modData = await api('/admin/api/scanner/builtin/modules');
+      var modules = modData.modules || modData || [];
+      var modContainer = document.getElementById('builtin-modules');
+      if (Array.isArray(modules) && modules.length > 0) {
+        var html = '';
+        modules.forEach(function(m) {
+          var name = m.name || m.id || '';
+          var desc = m.description || '';
+          var reqs = m.requests || 0;
+          html += '<div class="module-row">' +
+            '<input type="checkbox" id="mod-' + escapeHtml(name) + '" value="' + escapeHtml(name) + '" checked onchange="updateBuiltinModuleCount();updateBuiltinSummary()">' +
+            '<label for="mod-' + escapeHtml(name) + '">' + escapeHtml(name) + (desc ? ' <span style="color:#555">- ' + escapeHtml(desc) + '</span>' : '') + '</label>' +
+            '<span class="mod-reqs">' + reqs + ' reqs</span>' +
+            '</div>';
+        });
+        modContainer.innerHTML = html;
+      } else {
+        modContainer.innerHTML = '<div style="color:#555;padding:12px;text-align:center">No modules available</div>';
+      }
+      updateBuiltinModuleCount();
+      updateBuiltinSummary();
+
+      // Fetch status
+      try {
+        var status = await api('/admin/api/scanner/builtin/status');
+        if (status.state === 'running') {
+          document.getElementById('builtin-run-btn').style.display = 'none';
+          document.getElementById('builtin-stop-btn').style.display = '';
+          document.getElementById('builtin-progress-wrap').style.display = '';
+          var pct = status.progress || 0;
+          document.getElementById('builtin-progress-bar').style.width = pct + '%%';
+          document.getElementById('builtin-progress-text').textContent = pct.toFixed(0) + '%%';
+          document.getElementById('builtin-status-text').textContent = status.status_text || 'Running';
+          document.getElementById('builtin-elapsed').textContent = status.elapsed || '0s';
+          document.getElementById('builtin-req-count').textContent = (status.requests || 0) + ' requests';
+          document.getElementById('builtin-finding-count').textContent = (status.findings || 0) + ' findings';
+          if (!builtinPollTimer) {
+            builtinPollTimer = setInterval(pollBuiltinStatus, 1500);
+          }
+        } else if (status.state === 'completed') {
+          document.getElementById('builtin-run-btn').style.display = '';
+          document.getElementById('builtin-stop-btn').style.display = 'none';
+          document.getElementById('builtin-progress-wrap').style.display = 'none';
+          try {
+            var results = await api('/admin/api/scanner/builtin/results');
+            renderBuiltinResults(results);
+          } catch(e) { /* no results yet */ }
+        } else {
+          document.getElementById('builtin-run-btn').style.display = '';
+          document.getElementById('builtin-stop-btn').style.display = 'none';
+          document.getElementById('builtin-progress-wrap').style.display = 'none';
+        }
+      } catch(e) { /* status endpoint may not exist yet */ }
+
+      // Fetch history
+      try {
+        var histData = await api('/admin/api/scanner/builtin/history');
+        var history = histData.history || histData || [];
+        var tbody = document.getElementById('builtin-history-body');
+        if (Array.isArray(history) && history.length > 0) {
+          var rows = history.slice().reverse().map(function(h) {
+            var covPct = h.coverage !== undefined ? (h.coverage * 100).toFixed(1) + '%%' : '-';
+            var resPct = h.resilience !== undefined ? (h.resilience * 100).toFixed(1) + '%%' : '-';
+            return '<tr>' +
+              '<td style="color:#888">' + (h.timestamp ? new Date(h.timestamp).toLocaleString() : '-') + '</td>' +
+              '<td>' + escapeHtml(h.profile || '-') + '</td>' +
+              '<td>' + (h.findings || 0) + '</td>' +
+              '<td>' + covPct + '</td>' +
+              '<td>' + resPct + '</td>' +
+              '</tr>';
+          }).join('');
+          tbody.innerHTML = rows;
+        } else {
+          tbody.innerHTML = '<tr><td colspan="5" style="color:#555;text-align:center">No scans yet</td></tr>';
+        }
+      } catch(e) {
+        document.getElementById('builtin-history-body').innerHTML = '<tr><td colspan="5" style="color:#555;text-align:center">No scans yet</td></tr>';
+      }
+
+      // Set default target
+      var targetEl = document.getElementById('builtin-target');
+      if (targetEl && !targetEl.value) {
+        targetEl.value = 'http://' + window.location.hostname + ':8765';
+      }
+    } catch(e) { console.error('refreshBuiltinScanner:', e); }
+  }
+
+  async function pollBuiltinStatus() {
+    try {
+      var status = await api('/admin/api/scanner/builtin/status');
+      if (status.state === 'running') {
+        var pct = status.progress || 0;
+        document.getElementById('builtin-progress-bar').style.width = pct + '%%';
+        document.getElementById('builtin-progress-text').textContent = pct.toFixed(0) + '%%';
+        document.getElementById('builtin-status-text').textContent = status.status_text || 'Running';
+        document.getElementById('builtin-elapsed').textContent = status.elapsed || '0s';
+        document.getElementById('builtin-req-count').textContent = (status.requests || 0) + ' requests';
+        document.getElementById('builtin-finding-count').textContent = (status.findings || 0) + ' findings';
+      } else {
+        if (builtinPollTimer) { clearInterval(builtinPollTimer); builtinPollTimer = null; }
+        document.getElementById('builtin-run-btn').style.display = '';
+        document.getElementById('builtin-stop-btn').style.display = 'none';
+        if (status.state === 'completed') {
+          document.getElementById('builtin-progress-bar').style.width = '100%%';
+          document.getElementById('builtin-progress-text').textContent = '100%%';
+          document.getElementById('builtin-status-text').textContent = 'Completed';
+          try {
+            var results = await api('/admin/api/scanner/builtin/results');
+            renderBuiltinResults(results);
+          } catch(e) { /* no results */ }
+          refreshBuiltinScanner();
+        } else {
+          document.getElementById('builtin-progress-wrap').style.display = 'none';
+        }
+      }
+    } catch(e) { console.error('pollBuiltinStatus:', e); }
+  }
+
+  window.runBuiltinScan = async function() {
+    var profile = document.querySelector('input[name="builtin-profile"]:checked');
+    var profileName = profile ? profile.value : 'compliance';
+    var modules = [];
+    document.querySelectorAll('#builtin-modules input[type="checkbox"]:checked').forEach(function(cb) {
+      modules.push(cb.value);
+    });
+    var target = document.getElementById('builtin-target').value || 'http://' + window.location.hostname + ':8765';
+
+    if (modules.length === 0) { toast('Select at least one module'); return; }
+
+    document.getElementById('builtin-run-btn').style.display = 'none';
+    document.getElementById('builtin-stop-btn').style.display = '';
+    document.getElementById('builtin-progress-wrap').style.display = '';
+    document.getElementById('builtin-progress-bar').style.width = '0%%';
+    document.getElementById('builtin-progress-text').textContent = '0%%';
+    document.getElementById('builtin-status-text').textContent = 'Starting...';
+    document.getElementById('builtin-results-section').style.display = 'none';
+
+    try {
+      await api('/admin/api/scanner/builtin/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({profile: profileName, modules: modules, target: target})
+      });
+      toast('Built-in scan started (' + profileName + ')');
+      builtinPollTimer = setInterval(pollBuiltinStatus, 1500);
+    } catch(e) {
+      toast('Failed to start scan: ' + e.message);
+      document.getElementById('builtin-run-btn').style.display = '';
+      document.getElementById('builtin-stop-btn').style.display = 'none';
+      document.getElementById('builtin-progress-wrap').style.display = 'none';
+    }
+  };
+
+  window.stopBuiltinScan = async function() {
+    try {
+      await api('/admin/api/scanner/builtin/stop', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}'
+      });
+      toast('Scan stopped');
+      if (builtinPollTimer) { clearInterval(builtinPollTimer); builtinPollTimer = null; }
+      document.getElementById('builtin-run-btn').style.display = '';
+      document.getElementById('builtin-stop-btn').style.display = 'none';
+      document.getElementById('builtin-status-text').textContent = 'Stopped';
+    } catch(e) { toast('Failed to stop scan'); }
+  };
+
+  function renderBuiltinResults(report) {
+    var findings = report.findings || [];
+    var coverage = report.coverage || {};
+    var categories = report.categories || [];
+    var overallCoverage = report.overall_coverage || 0;
+    var resilience = report.resilience || 0;
+
+    // Count by severity
+    var sevCounts = {critical:0, high:0, medium:0, low:0, info:0};
+    findings.forEach(function(f) {
+      var s = (f.severity || 'info').toLowerCase();
+      if (sevCounts[s] !== undefined) sevCounts[s]++;
+      else sevCounts.info++;
+    });
+
+    document.getElementById('builtin-results-section').style.display = '';
+
+    // Findings count cards
+    document.getElementById('builtin-results-cards').innerHTML =
+      '<div class="card"><div class="label">Critical</div><div class="value" style="color:#a00">' + sevCounts.critical + '</div></div>' +
+      '<div class="card"><div class="label">High</div><div class="value" style="color:#c50">' + sevCounts.high + '</div></div>' +
+      '<div class="card"><div class="label">Medium</div><div class="value" style="color:#a80">' + sevCounts.medium + '</div></div>' +
+      '<div class="card"><div class="label">Low</div><div class="value" style="color:#069">' + sevCounts.low + '</div></div>' +
+      '<div class="card"><div class="label">Info</div><div class="value" style="color:#888">' + sevCounts.info + '</div></div>' +
+      '<div class="card"><div class="label">Total</div><div class="value v-ok">' + findings.length + '</div></div>';
+
+    // Coverage by category
+    if (Array.isArray(categories) && categories.length > 0) {
+      var catHtml = '<table><thead><tr><th>Category</th><th>Tested</th><th>Found</th><th>Coverage</th></tr></thead><tbody>';
+      categories.forEach(function(c) {
+        var pct = c.coverage !== undefined ? (c.coverage * 100).toFixed(1) + '%%' : '-';
+        catHtml += '<tr><td>' + escapeHtml(c.name || '') + '</td><td>' + (c.tested || 0) + '</td><td>' + (c.found || 0) + '</td><td>' + pct + '</td></tr>';
+      });
+      catHtml += '</tbody></table>';
+      document.getElementById('builtin-coverage-table').innerHTML = catHtml;
+    } else {
+      document.getElementById('builtin-coverage-table').innerHTML = '';
+    }
+
+    // Overall scores
+    var covPct = (overallCoverage * 100).toFixed(1);
+    var resPct = (resilience * 100).toFixed(1);
+    document.getElementById('builtin-scores').innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
+        '<div><div style="color:#aaa;font-size:0.85em;margin-bottom:4px">Overall Coverage</div>' +
+          '<div class="prog-bar"><div class="prog-fill prog-green" style="width:' + covPct + '%%"></div></div>' +
+          '<div style="color:#0f8;font-size:0.85em">' + covPct + '%%</div></div>' +
+        '<div><div style="color:#aaa;font-size:0.85em;margin-bottom:4px">Resilience Score</div>' +
+          '<div class="prog-bar"><div class="prog-fill prog-yellow" style="width:' + resPct + '%%"></div></div>' +
+          '<div style="color:#ffcc00;font-size:0.85em">' + resPct + '%%</div></div>' +
+      '</div>';
+
+    // Findings table
+    if (findings.length > 0) {
+      var fHtml = '<table><thead><tr><th>Severity</th><th>Category</th><th>URL</th><th>Description</th></tr></thead><tbody>';
+      findings.forEach(function(f) {
+        var sev = (f.severity || 'info').toLowerCase();
+        fHtml += '<tr>' +
+          '<td><span class="severity-badge sev-' + sev + '">' + escapeHtml(f.severity || 'info') + '</span></td>' +
+          '<td>' + escapeHtml(f.category || '-') + '</td>' +
+          '<td style="font-size:0.78em;color:#44aaff">' + escapeHtml(f.url || f.endpoint || '-') + '</td>' +
+          '<td style="color:#aaa;font-size:0.82em">' + escapeHtml(f.description || f.name || '-') + '</td>' +
+          '</tr>';
+      });
+      fHtml += '</tbody></table>';
+      document.getElementById('builtin-findings-table').innerHTML = fHtml;
+    } else {
+      document.getElementById('builtin-findings-table').innerHTML = '<div style="color:#555;text-align:center;padding:12px">No findings</div>';
+    }
   }
 
   // ------ Proxy Tab ------
@@ -2806,7 +3270,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     else if (id === 'panel-controls') await refreshControls();
     else if (id === 'panel-log') await refreshLog();
     else if (id === 'panel-vulns') await refreshVulns();
-    else if (id === 'panel-scanner') await refreshScannerTab();
+    else if (id === 'panel-scanner') {
+      if (document.getElementById('scanner-builtin-panel').style.display !== 'none') await refreshBuiltinScanner();
+      else await refreshScannerTab();
+    }
     else if (id === 'panel-proxy') await refreshProxy();
     else if (id === 'panel-replay') await refreshReplay();
   }

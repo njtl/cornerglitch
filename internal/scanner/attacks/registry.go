@@ -12,9 +12,9 @@ import (
 
 // ModuleInfo describes a registered attack module for listing purposes.
 type ModuleInfo struct {
-	Name     string
-	Category string
-	Requests int // approximate request count for a typical target
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Requests int    `json:"requests"`
 }
 
 // AllModules returns instances of all built-in attack modules. The caller
