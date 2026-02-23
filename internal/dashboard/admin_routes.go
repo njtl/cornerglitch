@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -209,6 +211,18 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 	})
 	mux.HandleFunc("/admin/api/replay/stop", func(w http.ResponseWriter, r *http.Request) {
 		adminAPIReplayStop(w, r)
+	})
+	mux.HandleFunc("/admin/api/replay/upload", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayUpload(w, r)
+	})
+	mux.HandleFunc("/admin/api/replay/fetch-url", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayFetchURL(w, r)
+	})
+	mux.HandleFunc("/admin/api/replay/metadata", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayMetadata(w, r)
+	})
+	mux.HandleFunc("/admin/api/replay/cleanup", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayCleanup(w, r)
 	})
 }
 
@@ -1151,6 +1165,7 @@ var (
 	replayLoadedFile   string
 	replayLoadedPkts   []*replay.Packet
 	replayCancel       context.CancelFunc
+	replayMetadata     map[string]interface{} // Cached metadata for loaded packets
 )
 
 func adminAPIReplayFiles(w http.ResponseWriter, r *http.Request) {
@@ -1231,6 +1246,10 @@ func adminAPIReplayStatus(w http.ResponseWriter, r *http.Request) {
 		resp["packets_loaded"] = len(replayLoadedPkts)
 	}
 
+	if replayMetadata != nil {
+		resp["metadata"] = replayMetadata
+	}
+
 	json.NewEncoder(w).Encode(resp)
 }
 
@@ -1270,6 +1289,8 @@ func adminAPIReplayLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	meta := replay.ParseMetadata(packets)
+
 	replayPlayerMu.Lock()
 	// Stop any existing playback.
 	if replayPlayer != nil && replayPlayer.IsPlaying() {
@@ -1280,6 +1301,7 @@ func adminAPIReplayLoad(w http.ResponseWriter, r *http.Request) {
 	}
 	replayLoadedPkts = packets
 	replayLoadedFile = filename
+	replayMetadata = meta
 	replayPlayer = nil
 	replayCancel = nil
 	replayPlayerMu.Unlock()
@@ -1392,5 +1414,340 @@ func adminAPIReplayStop(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"message": "replay stopped",
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Replay upload, fetch-url, metadata, cleanup handlers
+// ---------------------------------------------------------------------------
+
+// sanitizeFilename strips any path components and dangerous characters.
+var reFilenameSafe = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+
+func sanitizeFilename(name string) string {
+	name = filepath.Base(name)
+	name = reFilenameSafe.ReplaceAllString(name, "_")
+	if name == "" || name == "." || name == ".." {
+		name = "upload"
+	}
+	return name
+}
+
+func formatSize(n int64) string {
+	if n > 1<<20 {
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	}
+	if n > 1<<10 {
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
+}
+
+const maxUploadSize = 100 << 20 // 100 MB
+
+func adminAPIReplayUpload(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Limit the entire request body to maxUploadSize.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "file too large or invalid multipart form",
+		})
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "missing 'file' field in upload",
+		})
+		return
+	}
+	defer file.Close()
+
+	filename := sanitizeFilename(header.Filename)
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext != ".pcap" && ext != ".jsonl" {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "unsupported file type: must be .pcap or .jsonl",
+		})
+		return
+	}
+
+	// Ensure captures directory exists.
+	if err := os.MkdirAll("captures", 0o755); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "cannot create captures directory",
+		})
+		return
+	}
+
+	destPath := filepath.Join("captures", filename)
+	dst, err := os.Create(destPath)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "cannot create file: " + err.Error(),
+		})
+		return
+	}
+
+	written, err := io.Copy(dst, io.LimitReader(file, maxUploadSize))
+	dst.Close()
+	if err != nil {
+		os.Remove(destPath)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "write error: " + err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":   true,
+		"file": filename,
+		"size": formatSize(written),
+	})
+}
+
+func adminAPIReplayFetchURL(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.URL == "" {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "url is required",
+		})
+		return
+	}
+
+	parsed, err := url.Parse(req.URL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "invalid URL: must be http or https",
+		})
+		return
+	}
+
+	// Build a sanitized filename from the URL.
+	hostPart := sanitizeFilename(parsed.Host)
+	basePart := sanitizeFilename(filepath.Base(parsed.Path))
+	if basePart == "" || basePart == "." || basePart == "upload" {
+		basePart = "capture.pcap"
+	}
+	filename := hostPart + "_" + basePart
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext != ".pcap" && ext != ".jsonl" {
+		filename += ".pcap"
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(req.URL)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "download failed: " + err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": fmt.Sprintf("download returned HTTP %d", resp.StatusCode),
+		})
+		return
+	}
+
+	if err := os.MkdirAll("captures", 0o755); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "cannot create captures directory",
+		})
+		return
+	}
+
+	destPath := filepath.Join("captures", filename)
+	dst, err := os.Create(destPath)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "cannot create file: " + err.Error(),
+		})
+		return
+	}
+
+	written, err := io.Copy(dst, io.LimitReader(resp.Body, maxUploadSize))
+	dst.Close()
+	if err != nil {
+		os.Remove(destPath)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "write error: " + err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":   true,
+		"file": filename,
+		"size": formatSize(written),
+	})
+}
+
+func adminAPIReplayMetadata(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	replayPlayerMu.Lock()
+	meta := replayMetadata
+	pkts := replayLoadedPkts
+	replayPlayerMu.Unlock()
+
+	if meta != nil {
+		json.NewEncoder(w).Encode(meta)
+		return
+	}
+
+	// Compute from loaded packets if available but not cached.
+	if len(pkts) > 0 {
+		computed := replay.ParseMetadata(pkts)
+		replayPlayerMu.Lock()
+		replayMetadata = computed
+		replayPlayerMu.Unlock()
+		json.NewEncoder(w).Encode(computed)
+		return
+	}
+
+	// Nothing loaded.
+	json.NewEncoder(w).Encode(replay.ParseMetadata(nil))
+}
+
+func adminAPIReplayCleanup(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		MaxSizeMB float64 `json:"max_size_mb"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.MaxSizeMB <= 0 {
+		req.MaxSizeMB = 500
+	}
+
+	maxBytes := int64(req.MaxSizeMB * (1 << 20))
+
+	captureDir := "captures"
+	entries, err := os.ReadDir(captureDir)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "cannot read captures directory: " + err.Error(),
+		})
+		return
+	}
+
+	type fileEntry struct {
+		Name    string
+		Size    int64
+		ModTime time.Time
+	}
+
+	var files []fileEntry
+	var totalSize int64
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if ext != ".pcap" && ext != ".jsonl" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		totalSize += info.Size()
+		files = append(files, fileEntry{
+			Name:    e.Name(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+		})
+	}
+
+	// Sort oldest first.
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].ModTime.Before(files[j].ModTime)
+	})
+
+	var deletedCount int
+	var freedBytes int64
+
+	for _, f := range files {
+		if totalSize <= maxBytes {
+			break
+		}
+		path := filepath.Join(captureDir, f.Name)
+		if err := os.Remove(path); err != nil {
+			continue
+		}
+		deletedCount++
+		freedBytes += f.Size
+		totalSize -= f.Size
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":       true,
+		"deleted":  deletedCount,
+		"freed_mb": float64(freedBytes) / (1 << 20),
 	})
 }

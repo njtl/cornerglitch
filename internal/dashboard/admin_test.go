@@ -1,11 +1,19 @@
 package dashboard
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/glitchWebServer/internal/replay"
 )
 
 // ---------------------------------------------------------------------------
@@ -541,5 +549,247 @@ func TestProxyModeAPI(t *testing.T) {
 	}
 	if resp["waf_enabled"].(bool) != true {
 		t.Error("nightmare mode should have waf_enabled=true")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Replay API tests
+// ---------------------------------------------------------------------------
+
+func TestReplayUploadAPI(t *testing.T) {
+	// Create a temporary captures directory.
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origDir)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/admin/api/replay/upload", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayUpload(w, r)
+	})
+
+	// Build multipart form with a .pcap file.
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", "test_upload.pcap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Write some dummy pcap-like content.
+	part.Write([]byte("dummy pcap content"))
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/admin/api/replay/upload", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("upload status: %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["ok"] != true {
+		t.Errorf("upload response should have ok=true, got: %v", resp)
+	}
+	if resp["file"].(string) != "test_upload.pcap" {
+		t.Errorf("file: got %q, want 'test_upload.pcap'", resp["file"])
+	}
+
+	// Verify file was created.
+	if _, err := os.Stat(filepath.Join("captures", "test_upload.pcap")); os.IsNotExist(err) {
+		t.Error("uploaded file should exist in captures/")
+	}
+}
+
+func TestReplayUploadAPI_BadExtension(t *testing.T) {
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origDir)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/admin/api/replay/upload", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayUpload(w, r)
+	})
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, _ := writer.CreateFormFile("file", "malware.exe")
+	part.Write([]byte("bad content"))
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/admin/api/replay/upload", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["ok"] != false {
+		t.Error("upload of .exe should be rejected")
+	}
+}
+
+func TestReplayCleanupAPI(t *testing.T) {
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origDir)
+
+	// Create captures dir with some files.
+	os.MkdirAll("captures", 0o755)
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("capture_%d.pcap", i)
+		data := make([]byte, 1<<20) // 1MB each
+		os.WriteFile(filepath.Join("captures", name), data, 0o644)
+		// Stagger modification times.
+		modTime := time.Now().Add(time.Duration(i) * time.Second)
+		os.Chtimes(filepath.Join("captures", name), modTime, modTime)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/admin/api/replay/cleanup", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayCleanup(w, r)
+	})
+
+	// Request cleanup to 2MB max (should delete 3 of 5 files).
+	body := `{"max_size_mb": 2}`
+	req := httptest.NewRequest("POST", "/admin/api/replay/cleanup", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("cleanup status: %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["ok"] != true {
+		t.Errorf("cleanup should return ok=true")
+	}
+
+	deleted := int(resp["deleted"].(float64))
+	if deleted != 3 {
+		t.Errorf("deleted: got %d, want 3", deleted)
+	}
+
+	freedMB := resp["freed_mb"].(float64)
+	if freedMB < 2.9 {
+		t.Errorf("freed_mb: got %.1f, want ~3.0", freedMB)
+	}
+
+	// Verify remaining files.
+	entries, _ := os.ReadDir("captures")
+	remaining := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			remaining++
+		}
+	}
+	if remaining != 2 {
+		t.Errorf("remaining files: got %d, want 2", remaining)
+	}
+}
+
+func TestReplayMetadataAPI(t *testing.T) {
+	// Save and restore global state.
+	replayPlayerMu.Lock()
+	origPkts := replayLoadedPkts
+	origMeta := replayMetadata
+	origFile := replayLoadedFile
+	replayPlayerMu.Unlock()
+	defer func() {
+		replayPlayerMu.Lock()
+		replayLoadedPkts = origPkts
+		replayMetadata = origMeta
+		replayLoadedFile = origFile
+		replayPlayerMu.Unlock()
+	}()
+
+	now := time.Now()
+	replayPlayerMu.Lock()
+	replayLoadedPkts = []*replay.Packet{
+		{Timestamp: now, Method: "GET", Path: "/test", Host: "localhost", IsRequest: true,
+			Headers: map[string]string{}},
+		{Timestamp: now.Add(time.Second), Method: "POST", Path: "/api", Host: "localhost", IsRequest: true,
+			Headers: map[string]string{}},
+	}
+	replayMetadata = nil // Force recompute.
+	replayPlayerMu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/admin/api/replay/metadata", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayMetadata(w, r)
+	})
+
+	req := httptest.NewRequest("GET", "/admin/api/replay/metadata", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("metadata status: %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if int(resp["total_packets"].(float64)) != 2 {
+		t.Errorf("total_packets: got %v, want 2", resp["total_packets"])
+	}
+	if int(resp["total_requests"].(float64)) != 2 {
+		t.Errorf("total_requests: got %v, want 2", resp["total_requests"])
+	}
+}
+
+func TestReplayStatusIncludesMetadata(t *testing.T) {
+	replayPlayerMu.Lock()
+	origPkts := replayLoadedPkts
+	origMeta := replayMetadata
+	origFile := replayLoadedFile
+	origPlayer := replayPlayer
+	replayPlayerMu.Unlock()
+	defer func() {
+		replayPlayerMu.Lock()
+		replayLoadedPkts = origPkts
+		replayMetadata = origMeta
+		replayLoadedFile = origFile
+		replayPlayer = origPlayer
+		replayPlayerMu.Unlock()
+	}()
+
+	replayPlayerMu.Lock()
+	replayLoadedPkts = []*replay.Packet{
+		{Timestamp: time.Now(), Method: "GET", Path: "/", IsRequest: true, Headers: map[string]string{}},
+	}
+	replayMetadata = map[string]interface{}{
+		"total_packets": 1,
+	}
+	replayLoadedFile = "test.pcap"
+	replayPlayer = nil
+	replayPlayerMu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/admin/api/replay/status", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayStatus(w, r)
+	})
+
+	req := httptest.NewRequest("GET", "/admin/api/replay/status", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status code: %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["metadata"] == nil {
+		t.Error("status response should include metadata when packets are loaded")
+	}
+	meta := resp["metadata"].(map[string]interface{})
+	if int(meta["total_packets"].(float64)) != 1 {
+		t.Errorf("metadata.total_packets: got %v, want 1", meta["total_packets"])
 	}
 }

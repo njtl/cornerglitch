@@ -1,6 +1,7 @@
 package replay
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -273,5 +275,222 @@ func TestPlayerStop(t *testing.T) {
 	// Should have been stopped before playing all 100 packets.
 	if stats.PacketsPlayed >= 100 {
 		t.Errorf("expected fewer than 100 packets played after stop, got %d", stats.PacketsPlayed)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ParseMetadata tests
+// ---------------------------------------------------------------------------
+
+func TestParseMetadata_Empty(t *testing.T) {
+	meta := ParseMetadata(nil)
+	if meta["total_packets"].(int) != 0 {
+		t.Errorf("total_packets should be 0 for nil input, got %v", meta["total_packets"])
+	}
+	if meta["total_requests"].(int) != 0 {
+		t.Errorf("total_requests should be 0, got %v", meta["total_requests"])
+	}
+}
+
+func TestParseMetadata_Mixed(t *testing.T) {
+	now := time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC)
+	packets := []*Packet{
+		{Timestamp: now, Method: "GET", Path: "/", Host: "example.com", IsRequest: true,
+			Headers: map[string]string{"User-Agent": "test"}},
+		{Timestamp: now.Add(100 * time.Millisecond), Method: "GET", Path: "/api/users", Host: "example.com", IsRequest: true,
+			Headers: map[string]string{}},
+		{Timestamp: now.Add(200 * time.Millisecond), Method: "POST", Path: "/api/login", Host: "api.example.com", IsRequest: true,
+			Headers: map[string]string{}, Body: []byte(`{"user":"test"}`)},
+		{Timestamp: now.Add(300 * time.Millisecond), Method: "GET", Path: "/", Host: "example.com", IsRequest: true,
+			Headers: map[string]string{}},
+		{Timestamp: now.Add(150 * time.Millisecond), IsRequest: false, StatusCode: 200,
+			Headers: map[string]string{}},
+		{Timestamp: now.Add(250 * time.Millisecond), IsRequest: false, StatusCode: 404,
+			Headers: map[string]string{}},
+	}
+
+	meta := ParseMetadata(packets)
+
+	if meta["total_packets"].(int) != 6 {
+		t.Errorf("total_packets: got %v, want 6", meta["total_packets"])
+	}
+	if meta["total_requests"].(int) != 4 {
+		t.Errorf("total_requests: got %v, want 4", meta["total_requests"])
+	}
+	if meta["total_responses"].(int) != 2 {
+		t.Errorf("total_responses: got %v, want 2", meta["total_responses"])
+	}
+
+	methods := meta["methods"].(map[string]int)
+	if methods["GET"] != 3 {
+		t.Errorf("methods[GET]: got %d, want 3", methods["GET"])
+	}
+	if methods["POST"] != 1 {
+		t.Errorf("methods[POST]: got %d, want 1", methods["POST"])
+	}
+
+	statusCodes := meta["status_codes"].(map[int]int)
+	if statusCodes[200] != 1 {
+		t.Errorf("status_codes[200]: got %d, want 1", statusCodes[200])
+	}
+	if statusCodes[404] != 1 {
+		t.Errorf("status_codes[404]: got %d, want 1", statusCodes[404])
+	}
+
+	hosts := meta["unique_hosts"].([]string)
+	if len(hosts) != 2 {
+		t.Errorf("unique_hosts count: got %d, want 2", len(hosts))
+	}
+
+	uniquePaths := meta["unique_paths"].(int)
+	if uniquePaths != 3 {
+		t.Errorf("unique_paths: got %d, want 3", uniquePaths)
+	}
+
+	topPaths := meta["top_paths"].([]map[string]interface{})
+	if len(topPaths) != 3 {
+		t.Errorf("top_paths count: got %d, want 3", len(topPaths))
+	}
+	// "/" should be first (count=2)
+	if topPaths[0]["path"].(string) != "/" || topPaths[0]["count"].(int) != 2 {
+		t.Errorf("top_paths[0]: got %v, want / with count 2", topPaths[0])
+	}
+
+	timeSpanMs := meta["time_span_ms"].(int64)
+	if timeSpanMs != 300 {
+		t.Errorf("time_span_ms: got %d, want 300", timeSpanMs)
+	}
+
+	if meta["time_start"].(string) == "" {
+		t.Error("time_start should not be empty")
+	}
+	if meta["time_end"].(string) == "" {
+		t.Error("time_end should not be empty")
+	}
+
+	protocols := meta["protocols"].([]string)
+	if len(protocols) != 1 || protocols[0] != "HTTP/1.1" {
+		t.Errorf("protocols: got %v, want [HTTP/1.1]", protocols)
+	}
+}
+
+func TestParseMetadata_AvgRequestSize(t *testing.T) {
+	now := time.Now()
+	packets := []*Packet{
+		{Timestamp: now, Method: "POST", Path: "/a", IsRequest: true,
+			Headers: map[string]string{"Content-Type": "application/json"}, Body: []byte("1234567890")},
+		{Timestamp: now, Method: "POST", Path: "/b", IsRequest: true,
+			Headers: map[string]string{"Content-Type": "text/plain"}, Body: []byte("12345678901234567890")},
+	}
+
+	meta := ParseMetadata(packets)
+	avgSize := meta["avg_request_size"].(int)
+	// Each request: body size + header key+value sizes
+	// Req1: 10 (body) + 12+16=28 (header) = 38
+	// Req2: 20 (body) + 12+10=22 (header) = 42
+	// avg = (38+42)/2 = 40
+	if avgSize != 40 {
+		t.Errorf("avg_request_size: got %d, want 40", avgSize)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LoadFromReader tests
+// ---------------------------------------------------------------------------
+
+func TestLoadFromReader_PCAP(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.pcap")
+
+	reqs := []struct{ method, urlPath string }{
+		{"GET", "/reader-test"},
+		{"POST", "/data"},
+	}
+	writePCAPFile(t, path, reqs)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	packets, err := LoadFromReader(bytes.NewReader(data), "test.pcap")
+	if err != nil {
+		t.Fatalf("LoadFromReader pcap: %v", err)
+	}
+
+	if len(packets) != 2 {
+		t.Fatalf("expected 2 packets, got %d", len(packets))
+	}
+	if packets[0].Method != "GET" || packets[0].Path != "/reader-test" {
+		t.Errorf("packet 0: got %s %s, want GET /reader-test", packets[0].Method, packets[0].Path)
+	}
+	if packets[1].Method != "POST" || packets[1].Path != "/data" {
+		t.Errorf("packet 1: got %s %s, want POST /data", packets[1].Method, packets[1].Path)
+	}
+}
+
+func TestLoadFromReader_JSONL(t *testing.T) {
+	jsonlData := `{"type":"request","method":"GET","path":"/from-reader","host":"localhost","timestamp":"2026-02-23T12:00:00Z"}
+{"type":"response","status_code":200,"timestamp":"2026-02-23T12:00:01Z"}
+`
+	packets, err := LoadFromReader(strings.NewReader(jsonlData), "data.jsonl")
+	if err != nil {
+		t.Fatalf("LoadFromReader jsonl: %v", err)
+	}
+
+	if len(packets) != 2 {
+		t.Fatalf("expected 2 packets, got %d", len(packets))
+	}
+	if packets[0].Method != "GET" || packets[0].Path != "/from-reader" {
+		t.Errorf("packet 0: got %s %s, want GET /from-reader", packets[0].Method, packets[0].Path)
+	}
+	if packets[1].StatusCode != 200 {
+		t.Errorf("packet 1 status: got %d, want 200", packets[1].StatusCode)
+	}
+}
+
+func TestLoadFromReader_UnsupportedFormat(t *testing.T) {
+	_, err := LoadFromReader(strings.NewReader("data"), "file.txt")
+	if err == nil {
+		t.Fatal("expected error for unsupported format")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Errorf("error should mention unsupported, got: %v", err)
+	}
+}
+
+func TestLoadFromReader_InvalidPCAP(t *testing.T) {
+	_, err := LoadFromReader(strings.NewReader("not pcap data"), "bad.pcap")
+	if err == nil {
+		t.Fatal("expected error for invalid pcap data")
+	}
+}
+
+func TestParseMetadata_TopPathsLimit(t *testing.T) {
+	// Create 15 unique paths, verify only top 10 are returned.
+	now := time.Now()
+	var packets []*Packet
+	for i := 0; i < 15; i++ {
+		path := fmt.Sprintf("/path/%d", i)
+		// Give each path a different count: path/0 has 15 hits, path/14 has 1 hit.
+		for j := 0; j < 15-i; j++ {
+			packets = append(packets, &Packet{
+				Timestamp: now,
+				Method:    "GET",
+				Path:      path,
+				IsRequest: true,
+				Headers:   map[string]string{},
+			})
+		}
+	}
+
+	meta := ParseMetadata(packets)
+	topPaths := meta["top_paths"].([]map[string]interface{})
+	if len(topPaths) != 10 {
+		t.Errorf("top_paths count: got %d, want 10", len(topPaths))
+	}
+	// First should be /path/0 with count 15.
+	if topPaths[0]["path"].(string) != "/path/0" || topPaths[0]["count"].(int) != 15 {
+		t.Errorf("top_paths[0]: got %v, want /path/0 with count 15", topPaths[0])
 	}
 }
