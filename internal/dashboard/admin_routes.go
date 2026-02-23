@@ -1,15 +1,21 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/replay"
 	"github.com/glitchWebServer/internal/scaneval"
 )
 
@@ -203,6 +209,23 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 
 	mux.HandleFunc("/admin/api/config/import", func(w http.ResponseWriter, r *http.Request) {
 		adminAPIConfigImport(w, r, s)
+	})
+
+	// Replay endpoints
+	mux.HandleFunc("/admin/api/replay/files", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayFiles(w, r)
+	})
+	mux.HandleFunc("/admin/api/replay/status", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayStatus(w, r)
+	})
+	mux.HandleFunc("/admin/api/replay/load", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayLoad(w, r)
+	})
+	mux.HandleFunc("/admin/api/replay/start", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayStart(w, r)
+	})
+	mux.HandleFunc("/admin/api/replay/stop", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIReplayStop(w, r)
 	})
 }
 
@@ -1132,5 +1155,259 @@ func adminAPIScannerBaseline(w http.ResponseWriter, r *http.Request, s *Server) 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"scanner":  scannerName,
 		"baseline": baseline,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Replay API handlers
+// ---------------------------------------------------------------------------
+
+var (
+	replayPlayerMu     sync.Mutex
+	replayPlayer       *replay.Player
+	replayLoadedFile   string
+	replayLoadedPkts   []*replay.Packet
+	replayCancel       context.CancelFunc
+)
+
+func adminAPIReplayFiles(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	type fileInfo struct {
+		Name     string `json:"name"`
+		Size     string `json:"size"`
+		Modified string `json:"modified"`
+	}
+
+	var files []fileInfo
+	captureDir := "captures"
+	entries, err := os.ReadDir(captureDir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(e.Name()))
+			if ext != ".pcap" && ext != ".jsonl" {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			size := info.Size()
+			sizeStr := fmt.Sprintf("%d B", size)
+			if size > 1<<20 {
+				sizeStr = fmt.Sprintf("%.1f MB", float64(size)/(1<<20))
+			} else if size > 1<<10 {
+				sizeStr = fmt.Sprintf("%.1f KB", float64(size)/(1<<10))
+			}
+			files = append(files, fileInfo{
+				Name:     e.Name(),
+				Size:     sizeStr,
+				Modified: info.ModTime().Format("2006-01-02 15:04:05"),
+			})
+		}
+	}
+
+	if files == nil {
+		files = []fileInfo{}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"files": files,
+		"count": len(files),
+	})
+}
+
+func adminAPIReplayStatus(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	replayPlayerMu.Lock()
+	defer replayPlayerMu.Unlock()
+
+	resp := map[string]interface{}{
+		"playing":        false,
+		"loaded_file":    replayLoadedFile,
+		"packets_loaded": 0,
+		"packets_played": 0,
+		"errors":         0,
+		"elapsed_ms":     0,
+	}
+
+	if replayPlayer != nil {
+		stats := replayPlayer.GetStats()
+		resp["playing"] = replayPlayer.IsPlaying()
+		resp["packets_loaded"] = stats.PacketsLoaded
+		resp["packets_played"] = stats.PacketsPlayed
+		resp["errors"] = stats.Errors
+		resp["elapsed_ms"] = stats.ElapsedMs
+	} else if len(replayLoadedPkts) > 0 {
+		resp["packets_loaded"] = len(replayLoadedPkts)
+	}
+
+	json.NewEncoder(w).Encode(resp)
+}
+
+func adminAPIReplayLoad(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		File string `json:"file"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Sanitize filename — no path traversal.
+	filename := filepath.Base(req.File)
+	path := filepath.Join("captures", filename)
+
+	packets, err := replay.LoadFile(path)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+
+	replayPlayerMu.Lock()
+	// Stop any existing playback.
+	if replayPlayer != nil && replayPlayer.IsPlaying() {
+		replayPlayer.Stop()
+	}
+	if replayCancel != nil {
+		replayCancel()
+	}
+	replayLoadedPkts = packets
+	replayLoadedFile = filename
+	replayPlayer = nil
+	replayCancel = nil
+	replayPlayerMu.Unlock()
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"file":    filename,
+		"packets": len(packets),
+	})
+}
+
+func adminAPIReplayStart(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Target     string  `json:"target"`
+		Timing     string  `json:"timing"`
+		Speed      float64 `json:"speed"`
+		FilterPath string  `json:"filter_path"`
+		Loop       bool    `json:"loop"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Target == "" {
+		req.Target = "http://localhost:8765"
+	}
+	if req.Timing == "" {
+		req.Timing = "burst"
+	}
+	if req.Speed <= 0 {
+		req.Speed = 1.0
+	}
+
+	replayPlayerMu.Lock()
+	if len(replayLoadedPkts) == 0 {
+		replayPlayerMu.Unlock()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "no packets loaded — load a capture file first",
+		})
+		return
+	}
+
+	if replayPlayer != nil && replayPlayer.IsPlaying() {
+		replayPlayerMu.Unlock()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "replay already in progress",
+		})
+		return
+	}
+
+	cfg := replay.Config{
+		TimingMode: req.Timing,
+		Speed:      req.Speed,
+		FilterPath: req.FilterPath,
+		Loop:       req.Loop,
+	}
+
+	player := replay.NewPlayer(replayLoadedPkts, cfg)
+	replayPlayer = player
+
+	ctx, cancel := context.WithCancel(context.Background())
+	replayCancel = cancel
+	replayPlayerMu.Unlock()
+
+	// Start playback in background.
+	go func() {
+		player.Play(ctx, req.Target)
+	}()
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"target":  req.Target,
+		"timing":  req.Timing,
+		"speed":   req.Speed,
+		"packets": len(replayLoadedPkts),
+	})
+}
+
+func adminAPIReplayStop(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	replayPlayerMu.Lock()
+	if replayPlayer != nil {
+		replayPlayer.Stop()
+	}
+	if replayCancel != nil {
+		replayCancel()
+		replayCancel = nil
+	}
+	replayPlayerMu.Unlock()
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "replay stopped",
 	})
 }

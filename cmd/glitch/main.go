@@ -56,7 +56,17 @@ func main() {
 	port := flag.Int("port", 8765, "Server port")
 	dashPort := flag.Int("dash-port", 8766, "Dashboard/metrics port")
 	configFile := flag.String("config", "", "Path to config JSON file to import on startup")
+	adminPass := flag.String("admin-password", "", "Admin panel password (env: GLITCH_ADMIN_PASSWORD)")
 	flag.Parse()
+
+	// Configure admin password.
+	pw := *adminPass
+	if pw == "" {
+		pw = os.Getenv("GLITCH_ADMIN_PASSWORD")
+	}
+	if pw != "" {
+		dashboard.SetAdminPassword(pw)
+	}
 
 	// Import config file if specified
 	if *configFile != "" {
