@@ -452,6 +452,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <button class="tab" onclick="showTab('vulns')">Vulnerabilities</button>
   <button class="tab" onclick="showTab('scanner')">Scanner</button>
   <button class="tab" onclick="showTab('proxy')">Proxy</button>
+  <button class="tab" onclick="showTab('replay')">Replay</button>
 </div>
 
 <!-- ==================== DASHBOARD TAB ==================== -->
@@ -865,6 +866,71 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         </tr></thead>
         <tbody id="proxy-pipeline-body"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== REPLAY TAB ==================== -->
+<div id="panel-replay" class="panel">
+  <div class="section">
+    <h2>// Capture Files</h2>
+    <div style="margin-bottom:12px">
+      <button class="btn" onclick="refreshReplayFiles()">Refresh</button>
+    </div>
+    <div class="tbl-scroll" style="max-height:300px">
+      <table>
+        <thead><tr>
+          <th>File</th>
+          <th>Size</th>
+          <th>Modified</th>
+          <th>Action</th>
+        </tr></thead>
+        <tbody id="replay-files-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>// Playback Controls</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="card-title">Timing Mode</div>
+        <select id="replay-timing" style="background:#111;color:#0f8;border:1px solid #333;padding:4px 8px;width:100%%">
+          <option value="burst">Burst (all at once)</option>
+          <option value="exact">Exact (original timing)</option>
+          <option value="scaled">Scaled (adjustable speed)</option>
+        </select>
+      </div>
+      <div class="card">
+        <div class="card-title">Speed</div>
+        <input type="range" id="replay-speed" min="0.1" max="10" step="0.1" value="1.0"
+          oninput="document.getElementById('replay-speed-val').textContent=this.value+'x'"
+          style="width:100%%;accent-color:#00ff88;">
+        <span id="replay-speed-val" style="color:#888">1x</span>
+      </div>
+      <div class="card">
+        <div class="card-title">Filter Path</div>
+        <input type="text" id="replay-filter" placeholder="/api/" style="background:#111;color:#0f8;border:1px solid #333;padding:4px 8px;width:100%%">
+      </div>
+      <div class="card">
+        <div class="card-title">Target URL</div>
+        <input type="text" id="replay-target" placeholder="http://localhost:8765" style="background:#111;color:#0f8;border:1px solid #333;padding:4px 8px;width:100%%">
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn" onclick="replayStart()">Start</button>
+      <button class="btn" onclick="replayStop()" style="background:#c33">Stop</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>// Replay Stats</h2>
+    <div class="grid" id="replay-stats">
+      <div class="card"><div class="card-title">Status</div><div id="replay-status">Idle</div></div>
+      <div class="card"><div class="card-title">Packets Loaded</div><div id="replay-loaded">0</div></div>
+      <div class="card"><div class="card-title">Packets Played</div><div id="replay-played">0</div></div>
+      <div class="card"><div class="card-title">Errors</div><div id="replay-errors">0</div></div>
+      <div class="card"><div class="card-title">Elapsed</div><div id="replay-elapsed">0ms</div></div>
     </div>
   </div>
 </div>
@@ -2030,6 +2096,87 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) { console.error('setWafBlockAction:', e); }
   };
 
+  // ------ Replay Tab ------
+  window.refreshReplayFiles = async function() {
+    try {
+      const d = await api('/admin/api/replay/files');
+      const tb = document.getElementById('replay-files-body');
+      if (!d.files || d.files.length === 0) {
+        tb.innerHTML = '<tr><td colspan="4" style="color:#666">No capture files found</td></tr>';
+        return;
+      }
+      tb.innerHTML = d.files.map(f =>
+        '<tr><td>' + escapeHtml(f.name) + '</td><td>' + f.size + '</td><td>' + f.modified + '</td>' +
+        '<td><button class="btn" onclick="replayLoad(\'' + escapeHtml(f.name) + '\')">Load</button></td></tr>'
+      ).join('');
+    } catch(e) { console.error('refreshReplayFiles:', e); }
+  };
+
+  async function refreshReplay() {
+    await refreshReplayFiles();
+    await refreshReplayStatus();
+  }
+
+  async function refreshReplayStatus() {
+    try {
+      const d = await api('/admin/api/replay/status');
+      document.getElementById('replay-status').textContent = d.playing ? 'Playing' : 'Idle';
+      document.getElementById('replay-status').style.color = d.playing ? '#0f8' : '#666';
+      document.getElementById('replay-loaded').textContent = d.packets_loaded || 0;
+      document.getElementById('replay-played').textContent = d.packets_played || 0;
+      document.getElementById('replay-errors').textContent = d.errors || 0;
+      document.getElementById('replay-elapsed').textContent = (d.elapsed_ms || 0) + 'ms';
+    } catch(e) { console.error('refreshReplayStatus:', e); }
+  }
+
+  window.replayLoad = async function(file) {
+    try {
+      const d = await fetch(API + '/admin/api/replay/load', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file: file})
+      }).then(r => r.json());
+      if (d.ok) {
+        toast('Loaded ' + d.packets + ' packets from ' + file);
+        refreshReplayStatus();
+      } else {
+        toast('Error: ' + (d.error || 'unknown'));
+      }
+    } catch(e) { console.error('replayLoad:', e); }
+  };
+
+  window.replayStart = async function() {
+    var target = document.getElementById('replay-target').value || 'http://localhost:8765';
+    var timing = document.getElementById('replay-timing').value;
+    var speed = parseFloat(document.getElementById('replay-speed').value) || 1.0;
+    var filter = document.getElementById('replay-filter').value;
+    try {
+      const d = await fetch(API + '/admin/api/replay/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({target: target, timing: timing, speed: speed, filter_path: filter})
+      }).then(r => r.json());
+      if (d.ok) {
+        toast('Replay started');
+        refreshReplayStatus();
+      } else {
+        toast('Error: ' + (d.error || 'unknown'));
+      }
+    } catch(e) { console.error('replayStart:', e); }
+  };
+
+  window.replayStop = async function() {
+    try {
+      await fetch(API + '/admin/api/replay/stop', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}'
+      });
+      toast('Replay stopped');
+      refreshReplayStatus();
+    } catch(e) { console.error('replayStop:', e); }
+  };
+
   // ------ Main loop ------
   async function refresh() {
     const active = document.querySelector('.panel.active');
@@ -2043,6 +2190,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     else if (id === 'panel-vulns') await refreshVulns();
     else if (id === 'panel-scanner') await refreshScannerTab();
     else if (id === 'panel-proxy') await refreshProxy();
+    else if (id === 'panel-replay') await refreshReplay();
   }
 
   // Initial load — restore tab from URL hash

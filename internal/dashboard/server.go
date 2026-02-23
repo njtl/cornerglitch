@@ -43,7 +43,7 @@ func NewServer(collector *metrics.Collector, fp *fingerprint.Engine, adapt *adap
 
 	s.httpSrv = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
+		Handler: AuthMiddleware(mux),
 	}
 
 	return s
