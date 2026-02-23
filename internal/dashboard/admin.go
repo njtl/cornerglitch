@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/glitchWebServer/internal/scaneval"
 )
 
 // ---------------------------------------------------------------------------
@@ -777,11 +777,11 @@ var (
 	globalVulnConfig = NewVulnConfig()
 
 	// Scanner runner — uses the real scanner package
-	scanRunner   *scanner.Runner
+	scanRunner   *scaneval.Runner
 	scanRunnerMu sync.Mutex
 
 	// Comparison history for scanner trend tracking
-	comparisonHistory = scanner.NewComparisonHistory(100)
+	comparisonHistory = scaneval.NewComparisonHistory(100)
 )
 
 // GetFeatureFlags returns the global FeatureFlags instance.
@@ -793,12 +793,12 @@ func GetAdminConfig() *AdminConfig { return globalConfig }
 // GetVulnConfig returns the global VulnConfig instance.
 func GetVulnConfig() *VulnConfig { return globalVulnConfig }
 
-// getScanRunner returns the singleton scanner.Runner, creating it on first call.
-func getScanRunner() *scanner.Runner {
+// getScanRunner returns the singleton scaneval.Runner, creating it on first call.
+func getScanRunner() *scaneval.Runner {
 	scanRunnerMu.Lock()
 	defer scanRunnerMu.Unlock()
 	if scanRunner == nil {
-		scanRunner = scanner.NewRunner(scanner.DefaultRunnerConfig(
+		scanRunner = scaneval.NewRunner(scaneval.DefaultRunnerConfig(
 			"http://localhost:8765",
 			"http://localhost:8766",
 		))
@@ -807,10 +807,10 @@ func getScanRunner() *scanner.Runner {
 }
 
 // buildScannerProfile computes an expected profile from current feature flags and config.
-func buildScannerProfile() *scanner.ExpectedProfile {
+func buildScannerProfile() *scaneval.ExpectedProfile {
 	features := globalFlags.Snapshot()
 	config := globalConfig.Get()
-	return scanner.ComputeProfile(features, config, 8765, 8766)
+	return scaneval.ComputeProfile(features, config, 8765, 8766)
 }
 
 // ---------------------------------------------------------------------------
