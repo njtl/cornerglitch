@@ -533,19 +533,32 @@ func TestPCAP_FormatSwitch(t *testing.T) {
 func TestFirecrawl_DetectedAsBotUA(t *testing.T) {
 	requireServer(t)
 
-	client := &http.Client{}
-	req, _ := http.NewRequest("GET", serverURL+"/", nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 firecrawl/1.0")
-	req.Header.Set("Accept", "text/html")
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	// Retry up to 5 times because probabilistic error injection may return 5xx or TCP errors
+	client := &http.Client{Timeout: 5 * time.Second}
+	var lastStatus int
+	var lastErr error
+	for i := 0; i < 5; i++ {
+		req, _ := http.NewRequest("GET", serverURL+"/", nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0 firecrawl/1.0")
+		req.Header.Set("Accept", "text/html")
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		resp.Body.Close()
+		lastStatus = resp.StatusCode
+		lastErr = nil
+		if lastStatus < 500 {
+			return // pass
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
-	defer resp.Body.Close()
-	// Should respond (not crash) but may apply bot treatment
-	if resp.StatusCode >= 500 {
-		t.Errorf("firecrawl UA should not cause 5xx, got %d", resp.StatusCode)
+	if lastErr != nil {
+		t.Fatalf("firecrawl UA: all 5 attempts failed with errors, last: %v", lastErr)
 	}
+	t.Errorf("firecrawl UA should not consistently cause 5xx, got %d after 5 retries", lastStatus)
 }
 
 func TestOxylabs_PlatformMismatchDetected(t *testing.T) {

@@ -284,9 +284,10 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	}
 
 	// API requests bypass error injection and go straight to the API router.
-	// But first check if honeypot claims this /api/ path (lure paths like /api/internal/config)
+	// Honeypot lure paths under /api/ (like /api/internal/config) get intercepted,
+	// but explicit API router endpoints (graphql, swagger, etc.) always go to the router.
 	if h.apiRouter != nil && h.apiRouter.ShouldHandle(r.URL.Path) {
-		if h.honey != nil && h.flags.IsHoneypotEnabled() && h.honey.ShouldHandle(r.URL.Path) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && h.honey != nil && h.flags.IsHoneypotEnabled() && h.honey.ShouldHandle(r.URL.Path) {
 			status := h.honey.ServeHTTP(w, r)
 			return status, "honeypot"
 		}
