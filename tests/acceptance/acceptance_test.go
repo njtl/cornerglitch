@@ -1038,3 +1038,375 @@ func TestAdminHTML_Loads(t *testing.T) {
 		}
 	}
 }
+
+// ===========================================================================
+// SECTION 15: New OWASP Vulnerability Categories
+// ===========================================================================
+
+func TestOWASP_APISecurityIndex(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/api-sec/")
+	if err != nil {
+		t.Fatalf("GET /vuln/api-sec/: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "API Security Top 10") {
+		t.Error("response missing 'API Security Top 10' keyword")
+	}
+}
+
+func TestOWASP_APISecBOLA(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/api-sec/api1/users/1")
+	if err != nil {
+		t.Fatalf("GET /vuln/api-sec/api1/users/1: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "BOLA") {
+		t.Error("response missing 'BOLA' keyword")
+	}
+	if !strings.Contains(s, "email") {
+		t.Error("response missing user data (email)")
+	}
+}
+
+func TestOWASP_APISecFunctionAuth(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/api-sec/api5/admin/users")
+	if err != nil {
+		t.Fatalf("GET /vuln/api-sec/api5/admin/users: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "Broken Function Level Auth") {
+		t.Error("response missing 'Broken Function Level Auth' keyword")
+	}
+}
+
+func TestOWASP_APISecSSRF(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/api-sec/api7/webhook")
+	if err != nil {
+		t.Fatalf("GET /vuln/api-sec/api7/webhook: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "SSRF") {
+		t.Error("response missing 'SSRF' keyword")
+	}
+}
+
+func TestOWASP_LLMPromptInjection(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/llm/prompt-injection")
+	if err != nil {
+		t.Fatalf("GET /vuln/llm/prompt-injection: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "system prompt") {
+		t.Error("response missing 'system prompt' keyword")
+	}
+}
+
+func TestOWASP_LLMSensitiveDisclosure(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/llm/sensitive-disclosure")
+	if err != nil {
+		t.Fatalf("GET /vuln/llm/sensitive-disclosure: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "SSN") {
+		t.Error("response missing 'SSN' keyword")
+	}
+}
+
+func TestOWASP_CICDPoisonedPipeline(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/cicd/poisoned-pipeline")
+	if err != nil {
+		t.Fatalf("GET /vuln/cicd/poisoned-pipeline: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "VULNERABLE") {
+		t.Error("response missing 'VULNERABLE' keyword")
+	}
+	if !strings.Contains(s, "pipeline") && !strings.Contains(s, "Pipeline") {
+		t.Error("response missing 'pipeline' keyword")
+	}
+}
+
+func TestOWASP_CICDCredentialHygiene(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/cicd/insufficient-credential-hygiene")
+	if err != nil {
+		t.Fatalf("GET /vuln/cicd/insufficient-credential-hygiene: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(strings.ToLower(s), "hardcoded") && !strings.Contains(strings.ToLower(s), "credential") {
+		t.Error("response missing 'hardcoded' or 'credential' keyword")
+	}
+}
+
+func TestOWASP_CloudInsecureDefaults(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/cloud/insecure-defaults")
+	if err != nil {
+		t.Fatalf("GET /vuln/cloud/insecure-defaults: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "Deployment") {
+		t.Error("response missing 'Deployment' keyword")
+	}
+	if !strings.Contains(s, "security_findings") {
+		t.Error("response missing 'security_findings' keyword")
+	}
+}
+
+func TestOWASP_CloudOverlyPermissive(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/cloud/overly-permissive")
+	if err != nil {
+		t.Fatalf("GET /vuln/cloud/overly-permissive: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "iam_policy") {
+		t.Error("response missing 'iam_policy' keyword")
+	}
+	if !strings.Contains(s, "wildcard") || !strings.Contains(s, "God mode") {
+		t.Error("response missing 'wildcard' or 'God mode' keyword")
+	}
+}
+
+func TestOWASP_MobileImproperCredential(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/mobile/improper-credential")
+	if err != nil {
+		t.Fatalf("GET /vuln/mobile/improper-credential: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "credentials") {
+		t.Error("response missing 'credentials' keyword")
+	}
+	if !strings.Contains(s, "SharedPreferences") {
+		t.Error("response missing 'SharedPreferences' keyword")
+	}
+}
+
+func TestOWASP_MobileInsecureStorage(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/mobile/insecure-storage")
+	if err != nil {
+		t.Fatalf("GET /vuln/mobile/insecure-storage: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected JSON content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "SQLite") {
+		t.Error("response missing 'SQLite' keyword")
+	}
+	if !strings.Contains(s, "cleartext") {
+		t.Error("response missing 'cleartext' keyword")
+	}
+}
+
+func TestOWASP_PrivacyWebTracking(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/privacy-risks/web-tracking")
+	if err != nil {
+		t.Fatalf("GET /vuln/privacy-risks/web-tracking: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("expected HTML content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "pixel") && !strings.Contains(s, "tracking") {
+		t.Error("response missing 'pixel' or 'tracking' keyword")
+	}
+}
+
+func TestOWASP_PrivacyDataCollection(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/privacy-risks/data-collection")
+	if err != nil {
+		t.Fatalf("GET /vuln/privacy-risks/data-collection: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("expected HTML content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "Social Security") {
+		t.Error("response missing 'Social Security' keyword")
+	}
+}
+
+func TestOWASP_ClientSideDOMXSS(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/client-side/dom-xss")
+	if err != nil {
+		t.Fatalf("GET /vuln/client-side/dom-xss: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("expected HTML content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "innerHTML") {
+		t.Error("response missing 'innerHTML' keyword")
+	}
+	if !strings.Contains(s, "XSS") {
+		t.Error("response missing 'XSS' keyword")
+	}
+}
+
+func TestOWASP_ClientSidePrototypePollution(t *testing.T) {
+	requireServer(t)
+
+	resp, err := http.Get(serverURL + "/vuln/client-side/prototype-pollution")
+	if err != nil {
+		t.Fatalf("GET /vuln/client-side/prototype-pollution: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("expected HTML content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "deepMerge") {
+		t.Error("response missing 'deepMerge' keyword")
+	}
+	if !strings.Contains(s, "__proto__") {
+		t.Error("response missing '__proto__' keyword")
+	}
+}

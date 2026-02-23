@@ -1,42 +1,52 @@
-.PHONY: build test vet clean docker-build docker-run run run-proxy cross
+.PHONY: build test vet clean docker-build docker-push k8s-deploy run cross
 
-# Build all binaries
+BINARY     := glitch
+IMAGE      := ghcr.io/njtl/glitch-server
+TAG        := latest
+NAMESPACE  := glitch-server
+
+# Default target
+all: build
+
+# Build the server binary
 build:
-	go build -o glitch ./cmd/glitch
-	go build -o glitch-proxy ./cmd/glitch-proxy
-	go build -o glitch-crawler ./cmd/glitch-crawler
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BINARY) ./cmd/glitch
 
 # Run tests
 test:
-	go test ./...
+	go test ./... -count=1
 
 # Static analysis
 vet:
 	go vet ./...
 
-# Clean build artifacts
+# Remove build artifacts
 clean:
 	rm -f glitch glitch-proxy glitch-crawler
 	rm -f glitch-linux-amd64 glitch-linux-arm64 glitch-darwin-amd64 glitch-darwin-arm64
 
-# Docker
+# Build Docker image
 docker-build:
-	docker build -t glitch-server .
+	docker build -t $(IMAGE):$(TAG) .
 
-docker-run:
-	docker run -p 8765:8765 -p 8766:8766 glitch-server
+# Push Docker image to GHCR
+docker-push: docker-build
+	docker push $(IMAGE):$(TAG)
 
-# Run directly
+# Deploy to Kubernetes
+k8s-deploy:
+	kubectl apply -f deploy/k8s/configmap.yaml -n $(NAMESPACE)
+	kubectl apply -f deploy/k8s/deployment.yaml -n $(NAMESPACE)
+	kubectl apply -f deploy/k8s/service.yaml -n $(NAMESPACE)
+	kubectl apply -f deploy/k8s/ingress.yaml -n $(NAMESPACE)
+
+# Run locally
 run: build
-	./glitch
-
-# Run proxy mode (usage: make run-proxy TARGET=http://localhost:80)
-run-proxy: build
-	./glitch-proxy -target $(TARGET)
+	./$(BINARY)
 
 # Build for multiple platforms
 cross:
-	GOOS=linux GOARCH=amd64 go build -o glitch-linux-amd64 ./cmd/glitch
-	GOOS=linux GOARCH=arm64 go build -o glitch-linux-arm64 ./cmd/glitch
-	GOOS=darwin GOARCH=amd64 go build -o glitch-darwin-amd64 ./cmd/glitch
-	GOOS=darwin GOARCH=arm64 go build -o glitch-darwin-arm64 ./cmd/glitch
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o glitch-linux-amd64 ./cmd/glitch
+	GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o glitch-linux-arm64 ./cmd/glitch
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o glitch-darwin-amd64 ./cmd/glitch
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o glitch-darwin-arm64 ./cmd/glitch

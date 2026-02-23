@@ -164,19 +164,13 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "OWASP Top 10") {
-		t.Error("index page missing 'OWASP Top 10' text")
+	if !strings.Contains(body, "Quick Access") {
+		t.Error("index page missing 'Quick Access' text")
 	}
-	// All 10 categories should be linked
-	for i := 1; i <= 10; i++ {
-		link := strings.ToLower(strings.TrimLeft(strings.Replace(
-			strings.Replace("/vuln/a0"+string(rune('0'+i))+"/", "a010", "a10", 1),
-			"a00", "a0", 1), ""))
-		_ = link
-	}
-	for _, cat := range []string{"a01", "a02", "a03", "a04", "a05", "a06", "a07", "a08", "a09", "a10"} {
-		if !strings.Contains(body, "/vuln/"+cat+"/") {
-			t.Errorf("index page missing link to /vuln/%s/", cat)
+	// Key vuln endpoints should be linked from the portal dashboard
+	for _, path := range []string{"/vuln/a01/", "/vuln/a02/", "/vuln/a03/", "/vuln/a05/", "/vuln/a07/", "/vuln/a09/", "/vuln/a10/"} {
+		if !strings.Contains(body, path) {
+			t.Errorf("index page missing link to %s", path)
 		}
 	}
 }
