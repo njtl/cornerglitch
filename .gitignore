@@ -25,3 +25,4 @@ playwright-report/
 # OS
 .DS_Store
 Thumbs.db
+captures/
