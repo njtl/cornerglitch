@@ -38,6 +38,7 @@ import (
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/selftest"
+	"github.com/glitchWebServer/internal/spider"
 	"github.com/glitchWebServer/internal/server"
 	"github.com/glitchWebServer/internal/vuln"
 	"github.com/glitchWebServer/internal/websocket"
@@ -108,8 +109,11 @@ func main() {
 	cookieT := cookies.NewTracker()
 	jsEng := jstrap.NewEngine()
 	botDet := botdetect.NewDetector()
+	spiderCfg := spider.NewConfig()
+	dashboard.SetSpiderConfig(spiderCfg)
+	spiderH := spider.NewHandler(spiderCfg)
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)

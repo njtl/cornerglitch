@@ -240,10 +240,58 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   }
   .slider-label .val { color: #00ffcc; font-weight: bold; }
 
+  /* Tooltip system */
+  .has-tip { position: relative; cursor: help; }
+  .has-tip .tip-icon {
+    display: inline-block;
+    width: 14px; height: 14px;
+    line-height: 14px;
+    text-align: center;
+    border-radius: 50%%;
+    background: #222;
+    color: #666;
+    font-size: 10px;
+    margin-left: 5px;
+    vertical-align: middle;
+    border: 1px solid #333;
+  }
+  .has-tip:hover .tip-icon { color: #0f8; border-color: #0f8; }
+  .tip-box {
+    display: none;
+    position: absolute;
+    bottom: calc(100%% + 8px);
+    left: 0;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #bbb;
+    font-size: 0.78em;
+    line-height: 1.4;
+    white-space: normal;
+    width: 280px;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    pointer-events: none;
+  }
+  .has-tip:hover .tip-box { display: block; }
+
+  /* Section group header */
+  .ew-section-header {
+    font-size: 0.82em;
+    color: #00ffcc;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 12px 0 6px 0;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #1a1a1a;
+  }
+  .ew-section-header:first-child { margin-top: 0; }
+
   /* Error weight radio grid */
   .ew-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 4px;
   }
   .ew-row {
@@ -257,11 +305,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     font-size: 0.78em;
   }
   .ew-name {
-    width: 110px;
+    width: 150px;
+    min-width: 150px;
     color: #aaa;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 0.95em;
   }
   .ew-opts { display: flex; gap: 2px; flex: 1; }
   .ew-opt {
@@ -574,33 +621,43 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 <div id="panel-controls" class="panel">
   <div class="section">
     <h2>// Feature Toggles</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Enable or disable individual server subsystems. Disabled features return normal responses instead.</p>
     <div class="toggle-grid" id="toggles"></div>
   </div>
 
   <div class="section">
-    <h2>// Depth &amp; Rate Controls</h2>
+    <h2>// Behavior Tuning</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Adjust thresholds, rates, and timing parameters that control server behavior.</p>
     <div id="sliders"></div>
   </div>
 
   <div class="section">
-    <h2>// Error Weight Distribution</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Select preset level for each error type. Weights are normalized automatically.</p>
-    <div class="ew-grid" id="error-weight-grid"></div>
+    <h2>// HTTP Error Weights</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each HTTP error response. Higher weight = more frequent. Weights are normalized automatically.</p>
+    <div class="ew-grid" id="http-error-grid"></div>
     <button class="cfg-btn" onclick="resetErrorWeights()" style="margin-top:8px">Reset All to Default</button>
   </div>
 
   <div class="section">
+    <h2>// TCP / Network Error Weights</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Low-level network errors that bypass HTTP entirely. These use raw socket manipulation (hijack, RST, slow-drip).</p>
+    <div class="ew-grid" id="tcp-error-grid"></div>
+  </div>
+
+  <div class="section">
     <h2>// Page Type Distribution</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each response page type. Set to 0 to disable.</p>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each response content type. Set to OFF to disable a format entirely.</p>
     <div class="ew-grid" id="page-type-grid"></div>
     <button class="cfg-btn" onclick="resetPageTypeWeights()" style="margin-top:8px">Reset to Default</button>
   </div>
 
   <div class="section">
-    <h2>// Advanced Controls</h2>
+    <h2>// Response &amp; Content Settings</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Configure how the server presents itself and generates content.</p>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-      <div>
-        <div class="slider-label"><span>Honeypot Response Style</span></div>
+      <div class="has-tip">
+        <div class="slider-label"><span>Honeypot Response Style</span><span class="tip-icon">?</span></div>
+        <div class="tip-box">How honeypot trap endpoints respond. Realistic mimics real apps; Tarpit adds delays; Aggressive sends fake server headers.</div>
         <select id="ctrl-honeypot-style" class="ctrl-select" onchange="setConfigKey('honeypot_response_style', this.value)">
           <option value="realistic">Realistic</option>
           <option value="verbose">Verbose</option>
@@ -610,8 +667,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <option value="tarpit">Tarpit</option>
         </select>
       </div>
-      <div>
-        <div class="slider-label"><span>Active Framework</span></div>
+      <div class="has-tip">
+        <div class="slider-label"><span>Active Framework Emulation</span><span class="tip-icon">?</span></div>
+        <div class="tip-box">Which web framework to emulate in response headers and error pages. Auto rotates between frameworks per request.</div>
         <select id="ctrl-framework" class="ctrl-select" onchange="setConfigKey('active_framework', this.value)">
           <option value="auto">Auto (rotate)</option>
           <option value="express">Express.js</option>
@@ -628,8 +686,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <option value="caddy">Caddy</option>
         </select>
       </div>
-      <div>
-        <div class="slider-label"><span>Content Theme</span></div>
+      <div class="has-tip">
+        <div class="slider-label"><span>Content Theme</span><span class="tip-icon">?</span></div>
+        <div class="tip-box">Visual theme for generated HTML pages. Affects page titles, navigation text, branding, and overall look to match a specific industry.</div>
         <select id="ctrl-theme" class="ctrl-select" onchange="setConfigKey('content_theme', this.value)">
           <option value="default">Default</option>
           <option value="saas">SaaS</option>
@@ -644,21 +703,32 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <option value="banking">Banking</option>
         </select>
       </div>
-      <div>
-        <div class="slider-label"><span>Recording Format</span></div>
+      <div class="has-tip">
+        <div class="slider-label"><span>Traffic Recording Format</span><span class="tip-icon">?</span></div>
+        <div class="tip-box">File format for recorded traffic captures. JSONL is human-readable; PCAP is compatible with Wireshark and replay tools.</div>
         <select id="ctrl-recorder-format" class="ctrl-select" onchange="setConfigKey('recorder_format', this.value)">
           <option value="jsonl">JSONL</option>
           <option value="pcap">PCAP</option>
         </select>
       </div>
-      <div>
-        <div id="advanced-sliders"></div>
-      </div>
     </div>
   </div>
 
   <div class="section">
+    <h2>// Advanced Tuning</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Fine-grained controls for traps, adaptive behavior, and caching.</p>
+    <div id="advanced-sliders"></div>
+  </div>
+
+  <div class="section">
+    <h2>// Spider &amp; Crawl Data</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Configure error rates for spider/crawler resource files (robots.txt, sitemap.xml, favicon.ico, etc.).</p>
+    <div id="spider-sliders"></div>
+  </div>
+
+  <div class="section">
     <h2>// Configuration Import / Export</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Save or restore the entire server configuration as a JSON file. Use for CI/CD, sharing profiles, or backup.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
       <button class="cfg-btn primary" onclick="exportConfig()">Export Config</button>
       <button class="cfg-btn" onclick="document.getElementById('cfg-import-file').click()">Import Config</button>
@@ -807,6 +877,26 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 <div id="panel-proxy" class="panel">
   <div class="grid" id="proxy-metrics"></div>
 
+  <!-- Proxy Configuration -->
+  <div class="section">
+    <h2>// Proxy Configuration</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div class="card">
+        <div class="label" style="margin-bottom:6px">Upstream Target</div>
+        <input type="text" id="proxy-upstream" placeholder="http://localhost:8765" value="http://localhost:8765"
+          style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%">
+        <div style="color:#555;font-size:0.72em;margin-top:4px">URL the proxy forwards requests to</div>
+      </div>
+      <div class="card">
+        <div class="label" style="margin-bottom:6px">Listen Address</div>
+        <input type="text" id="proxy-listen" placeholder="0.0.0.0:8080" value="0.0.0.0:8080"
+          style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%">
+        <div style="color:#555;font-size:0.72em;margin-top:4px">Address:port the proxy listens on</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mode Selection -->
   <div class="section">
     <h2>// Mode Selection</h2>
     <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;" id="proxy-mode-radios">
@@ -846,20 +936,54 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         <input type="radio" name="proxy-mode" value="nightmare" onchange="setProxyMode(this.value)" style="accent-color:#00ff88;">
       </label>
     </div>
+    <div id="proxy-mode-desc" style="margin-top:10px;padding:10px 14px;background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;font-size:0.82em;color:#888"></div>
   </div>
 
+  <!-- WAF Settings -->
   <div class="section">
-    <h2>// WAF Status</h2>
+    <h2>// WAF Settings</h2>
     <div id="proxy-waf-status">
-      <div style="color:#555">WAF not enabled. Select WAF mode to activate.</div>
+      <div style="color:#555">WAF not enabled. Select WAF, Gateway, or Nightmare mode to activate.</div>
+    </div>
+    <div id="proxy-waf-settings" style="display:none;margin-top:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="card">
+          <div class="label" style="margin-bottom:6px">WAF Block Action</div>
+          <select id="proxy-waf-action" class="ctrl-select" onchange="setWafBlockAction(this.value)">
+            <option value="block">Block</option>
+            <option value="log">Log Only</option>
+            <option value="challenge">Challenge</option>
+            <option value="reject" selected>Reject</option>
+            <option value="tarpit">Tarpit</option>
+            <option value="redirect">Redirect</option>
+          </select>
+        </div>
+        <div class="card">
+          <div class="label" style="margin-bottom:6px">Rate Limit (req/sec)</div>
+          <input type="number" id="proxy-waf-ratelimit" value="100" min="1" max="100000" step="10"
+            style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%">
+        </div>
+      </div>
     </div>
   </div>
 
+  <!-- Chaos Configuration -->
   <div class="section">
     <h2>// Chaos Configuration</h2>
     <div id="proxy-chaos-sliders"></div>
   </div>
 
+  <!-- Connection Info -->
+  <div class="section">
+    <h2>// Connection Info</h2>
+    <div class="grid" id="proxy-connection-info">
+      <div class="card"><div class="label">Active Connections</div><div class="value v-info" id="proxy-active-conns">0</div></div>
+      <div class="card"><div class="label">Requests Forwarded</div><div class="value v-ok" id="proxy-fwd-reqs">0</div></div>
+      <div class="card"><div class="label">Requests Blocked</div><div class="value v-err" id="proxy-blocked-reqs">0</div></div>
+    </div>
+  </div>
+
+  <!-- Pipeline Stats -->
   <div class="section">
     <h2>// Pipeline Stats</h2>
     <div class="tbl-scroll" style="max-height:300px">
@@ -879,10 +1003,44 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
 <!-- ==================== REPLAY TAB ==================== -->
 <div id="panel-replay" class="panel">
+
+  <!-- Upload Section -->
+  <div class="section">
+    <h2>// Upload Capture</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div class="card">
+        <div class="label" style="margin-bottom:8px">Upload File</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="file" id="replay-upload-file" accept=".pcap,.jsonl"
+            style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px;border-radius:4px;font-family:inherit;font-size:0.82em;flex:1">
+          <button class="scanner-btn" onclick="replayUpload()" style="white-space:nowrap">Upload</button>
+        </div>
+        <div style="color:#555;font-size:0.72em;margin-top:4px">Accepts .pcap and .jsonl files (max 100 MB)</div>
+      </div>
+      <div class="card">
+        <div class="label" style="margin-bottom:8px">Load from URL</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="replay-fetch-url" placeholder="https://example.com/capture.pcap"
+            style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;flex:1">
+          <button class="scanner-btn" onclick="replayFetchURL()" style="white-space:nowrap">Fetch</button>
+        </div>
+        <div style="color:#555;font-size:0.72em;margin-top:4px">Download a .pcap or .jsonl from a remote URL</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center">
+      <div class="label" style="white-space:nowrap">Cleanup:</div>
+      <input type="number" id="replay-cleanup-size" value="500" min="1" max="10000" step="10"
+        style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100px">
+      <span style="color:#555;font-size:0.78em">MB limit</span>
+      <button class="cfg-btn" onclick="replayCleanup()">Clean Up Old Files</button>
+    </div>
+  </div>
+
+  <!-- Capture Files List -->
   <div class="section">
     <h2>// Capture Files</h2>
     <div style="margin-bottom:12px">
-      <button class="btn" onclick="refreshReplayFiles()">Refresh</button>
+      <button class="scanner-btn" onclick="refreshReplayFiles()">Refresh</button>
     </div>
     <div class="tbl-scroll" style="max-height:300px">
       <table>
@@ -897,47 +1055,93 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- PCAP Metadata -->
+  <div class="section" id="replay-metadata-section" style="display:none">
+    <h2>// Capture Metadata</h2>
+    <div class="grid" id="replay-metadata-cards"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div id="replay-meta-methods" style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px"></div>
+      <div id="replay-meta-paths" style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px"></div>
+    </div>
+    <div id="replay-meta-protocols" style="margin-top:8px;font-size:0.82em;color:#888"></div>
+  </div>
+
+  <!-- Replay Target Configuration -->
+  <div class="section">
+    <h2>// Replay Target</h2>
+    <div style="margin-bottom:8px;color:#888;font-size:0.82em">Requests will be replayed against this URL</div>
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
+      <span class="label" style="white-space:nowrap">Target URL</span>
+      <input type="text" id="replay-target" placeholder="http://localhost:8765" value="http://localhost:8765"
+        style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.85em;flex:1">
+    </div>
+    <div id="replay-target-display" style="font-size:0.82em;color:#555"></div>
+  </div>
+
+  <!-- Playback Controls -->
   <div class="section">
     <h2>// Playback Controls</h2>
     <div class="grid">
       <div class="card">
-        <div class="card-title">Timing Mode</div>
-        <select id="replay-timing" style="background:#111;color:#0f8;border:1px solid #333;padding:4px 8px;width:100%%">
+        <div class="label">Timing Mode</div>
+        <select id="replay-timing" class="ctrl-select" style="margin-top:6px">
           <option value="burst">Burst (all at once)</option>
           <option value="exact">Exact (original timing)</option>
           <option value="scaled">Scaled (adjustable speed)</option>
         </select>
       </div>
       <div class="card">
-        <div class="card-title">Speed</div>
-        <input type="range" id="replay-speed" min="0.1" max="10" step="0.1" value="1.0"
-          oninput="document.getElementById('replay-speed-val').textContent=this.value+'x'"
-          style="width:100%%;accent-color:#00ff88;">
-        <span id="replay-speed-val" style="color:#888">1x</span>
+        <div class="label">Speed</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+          <input type="range" id="replay-speed" min="0.1" max="10" step="0.1" value="1.0"
+            oninput="document.getElementById('replay-speed-val').textContent=this.value+'x'"
+            style="flex:1;accent-color:#00ff88;">
+          <span id="replay-speed-val" style="color:#00ffcc;font-weight:bold;min-width:36px">1x</span>
+        </div>
+        <div style="display:flex;gap:4px;margin-top:6px">
+          <button class="cfg-btn" onclick="setReplaySpeed(1)" style="padding:4px 10px;font-size:0.75em">1x</button>
+          <button class="cfg-btn" onclick="setReplaySpeed(2)" style="padding:4px 10px;font-size:0.75em">2x</button>
+          <button class="cfg-btn" onclick="setReplaySpeed(5)" style="padding:4px 10px;font-size:0.75em">5x</button>
+          <button class="cfg-btn" onclick="document.getElementById('replay-timing').value='burst'" style="padding:4px 10px;font-size:0.75em">Burst</button>
+        </div>
       </div>
       <div class="card">
-        <div class="card-title">Filter Path</div>
-        <input type="text" id="replay-filter" placeholder="/api/" style="background:#111;color:#0f8;border:1px solid #333;padding:4px 8px;width:100%%">
+        <div class="label">Filter Path</div>
+        <input type="text" id="replay-filter" placeholder="/api/" style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%;margin-top:6px">
       </div>
       <div class="card">
-        <div class="card-title">Target URL</div>
-        <input type="text" id="replay-target" placeholder="http://localhost:8765" style="background:#111;color:#0f8;border:1px solid #333;padding:4px 8px;width:100%%">
+        <div class="label">Loop</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer">
+          <input type="checkbox" id="replay-loop" style="accent-color:#00ff88;width:18px;height:18px">
+          <span style="color:#888;font-size:0.82em">Repeat when finished</span>
+        </label>
       </div>
     </div>
-    <div style="margin-top:12px;display:flex;gap:8px">
-      <button class="btn" onclick="replayStart()">Start</button>
-      <button class="btn" onclick="replayStop()" style="background:#c33">Stop</button>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="scanner-btn" onclick="replayStart()" id="replay-play-btn">Play</button>
+      <button class="cfg-btn" onclick="replayPause()" id="replay-pause-btn" style="display:none">Pause</button>
+      <button class="cfg-btn" onclick="replayStop()" style="background:#662222;color:#ff6666" id="replay-stop-btn">Stop</button>
     </div>
   </div>
 
+  <!-- Playback Status -->
   <div class="section">
-    <h2>// Replay Stats</h2>
+    <h2>// Playback Status</h2>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <div id="replay-state-badge" style="background:#222;color:#666;padding:6px 16px;border-radius:20px;font-size:0.85em;font-weight:bold;letter-spacing:0.5px">STOPPED</div>
+      <div id="replay-state-detail" style="color:#888;font-size:0.82em"></div>
+    </div>
+    <!-- Progress bar -->
+    <div style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;height:28px;overflow:hidden;position:relative;margin-bottom:12px">
+      <div id="replay-progress-bar" style="height:100%%;background:linear-gradient(90deg,#00aa66,#00ff88);width:0%%;transition:width 0.5s;border-radius:6px"></div>
+      <div id="replay-progress-text" style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:0.78em;color:#ccc;font-weight:bold">0 / 0 packets</div>
+    </div>
     <div class="grid" id="replay-stats">
-      <div class="card"><div class="card-title">Status</div><div id="replay-status">Idle</div></div>
-      <div class="card"><div class="card-title">Packets Loaded</div><div id="replay-loaded">0</div></div>
-      <div class="card"><div class="card-title">Packets Played</div><div id="replay-played">0</div></div>
-      <div class="card"><div class="card-title">Errors</div><div id="replay-errors">0</div></div>
-      <div class="card"><div class="card-title">Elapsed</div><div id="replay-elapsed">0ms</div></div>
+      <div class="card"><div class="label">Packets Loaded</div><div class="value v-info" id="replay-loaded">0</div></div>
+      <div class="card"><div class="label">Packets Played</div><div class="value v-ok" id="replay-played">0</div></div>
+      <div class="card"><div class="label">Errors</div><div class="value v-err" id="replay-errors">0</div></div>
+      <div class="card"><div class="label">Elapsed</div><div class="value v-info" id="replay-elapsed">0ms</div></div>
+      <div class="card"><div class="label">Loaded File</div><div class="value" id="replay-loaded-file" style="font-size:0.85em;color:#888">None</div></div>
     </div>
   </div>
 </div>
@@ -1281,20 +1485,102 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     recorder: 'Traffic Recorder',
     websocket: 'WebSocket',
     privacy: 'Privacy/Consent',
-    health: 'Health Endpoints'
+    health: 'Health Endpoints',
+    spider: 'Spider / Crawl Data'
   };
 
-  const ERROR_TYPES = [
+  const HTTP_ERROR_TYPES = [
     'none',
     '500_internal','502_bad_gateway','503_unavailable','504_timeout',
     '404_not_found','403_forbidden','429_rate_limit','408_timeout',
     'slow_drip','connection_reset','partial_body','wrong_content_type',
     'garbage_body','empty_body','huge_headers',
     'delay_1s','delay_3s','delay_10s','delay_random',
-    'redirect_loop','double_encoding','flip_flop',
+    'redirect_loop','double_encoding','flip_flop'
+  ];
+  const TCP_ERROR_TYPES = [
     'packet_drop','tcp_reset','stream_corrupt','session_timeout',
     'keepalive_abuse','tls_half_close','slow_headers','accept_then_fin'
   ];
+  const ERROR_TYPES = HTTP_ERROR_TYPES.concat(TCP_ERROR_TYPES);
+
+  const FEATURE_TIPS = {
+    labyrinth: 'Generates infinite pages to trap web crawlers and AI scrapers in an endless maze',
+    error_inject: 'Randomly injects HTTP errors (5xx, 4xx, timeouts) into responses',
+    captcha: 'Shows CAPTCHA challenges when bot-like activity is detected',
+    honeypot: 'Serves decoy pages with hidden links to identify automated tools',
+    vuln: 'Exposes intentionally vulnerable endpoints (OWASP categories) for scanner testing',
+    analytics: 'Injects fake analytics/tracking scripts into served pages',
+    cdn: 'Emulates CDN response headers and caching behavior',
+    oauth: 'Provides fake OAuth/OpenID Connect authorization endpoints',
+    header_corrupt: 'Injects invalid or malformed HTTP headers into responses',
+    cookie_traps: 'Sets trap cookies that detect automated cookie handling',
+    js_traps: 'Embeds JavaScript challenges to detect headless browsers',
+    bot_detection: 'Scores visitors based on behavioral heuristics to identify bots',
+    random_blocking: 'Randomly blocks requests with configurable probability',
+    framework_emul: 'Mimics server signatures of popular frameworks (Rails, Django, etc.)',
+    search: 'Serves fake search engine results pages for crawler testing',
+    email: 'Emulates webmail login and inbox pages',
+    i18n: 'Serves content in multiple languages with locale detection',
+    recorder: 'Records all incoming HTTP traffic for later replay',
+    websocket: 'Provides WebSocket upgrade endpoints with test payloads',
+    privacy: 'Serves GDPR/privacy consent banners and cookie notices',
+    health: 'Exposes health check and status endpoints',
+    spider: 'Serves robots.txt, sitemap.xml, favicon.ico and other crawler data files with configurable error injection'
+  };
+
+  const SLIDER_TIPS = {
+    max_labyrinth_depth: 'Maximum page depth before the labyrinth loops back',
+    error_rate_multiplier: 'Multiplies the base error probability (0=no errors, 5=very frequent)',
+    captcha_trigger_thresh: 'Number of requests before CAPTCHA is shown',
+    block_chance: 'Probability of randomly blocking any individual request',
+    block_duration_sec: 'How long a client stays blocked after being randomly selected',
+    bot_score_threshold: 'Score above which a visitor is classified as a bot (0-100)',
+    header_corrupt_level: 'Severity of header corruption (0=none, 4=extreme)',
+    delay_min_ms: 'Minimum artificial response delay in milliseconds',
+    delay_max_ms: 'Maximum artificial response delay in milliseconds',
+    labyrinth_link_density: 'Number of links generated per labyrinth page',
+    adaptive_interval_sec: 'Seconds between adaptive behavior re-evaluation',
+    cookie_trap_frequency: 'How often trap cookies are injected (higher = more frequent)',
+    js_trap_difficulty: 'Complexity of JavaScript challenges (0=easy, 5=very hard)',
+    content_cache_ttl_sec: 'How long generated content is cached before regeneration',
+    adaptive_aggressive_rps: 'Requests/sec threshold to trigger aggressive adaptive mode',
+    adaptive_labyrinth_paths: 'Min suspicious path count to redirect client into labyrinth'
+  };
+
+  const ERROR_TIPS = {
+    none: 'No error — serve normal response',
+    '500_internal': 'HTTP 500 Internal Server Error',
+    '502_bad_gateway': 'HTTP 502 Bad Gateway',
+    '503_unavailable': 'HTTP 503 Service Unavailable',
+    '504_timeout': 'HTTP 504 Gateway Timeout',
+    '404_not_found': 'HTTP 404 Not Found',
+    '403_forbidden': 'HTTP 403 Forbidden',
+    '429_rate_limit': 'HTTP 429 Too Many Requests',
+    '408_timeout': 'HTTP 408 Request Timeout',
+    slow_drip: 'Send response one byte at a time over seconds',
+    connection_reset: 'Abruptly reset the TCP connection mid-response',
+    partial_body: 'Send truncated response body',
+    wrong_content_type: 'Serve content with an incorrect Content-Type header',
+    garbage_body: 'Return random binary garbage as the response body',
+    empty_body: 'Return 200 OK but with a completely empty body',
+    huge_headers: 'Send very large response headers to overflow buffers',
+    delay_1s: 'Add a fixed 1 second delay before responding',
+    delay_3s: 'Add a fixed 3 second delay before responding',
+    delay_10s: 'Add a fixed 10 second delay before responding',
+    delay_random: 'Add a random delay (1-30s) before responding',
+    redirect_loop: 'Redirect the client in an infinite loop',
+    double_encoding: 'Double-encode the response body',
+    flip_flop: 'Alternate between valid and broken responses',
+    packet_drop: 'Accept connection but never send any data (TCP black hole)',
+    tcp_reset: 'Send TCP RST instead of a proper close',
+    stream_corrupt: 'Start valid HTTP then inject garbage bytes mid-stream',
+    session_timeout: 'Send response at 1 byte/second (extreme slow-loris)',
+    keepalive_abuse: 'Send keep-alive with infinite timeout then stall',
+    tls_half_close: 'Close write side of connection but keep reading',
+    slow_headers: 'Send HTTP headers one byte at a time',
+    accept_then_fin: 'Accept connection and immediately send FIN'
+  };
 
   async function refreshControls() {
     try {
@@ -1302,8 +1588,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       const el = document.getElementById('toggles');
       el.innerHTML = Object.keys(FEATURE_LABELS).map(key => {
         const on = features[key] ? 'checked' : '';
+        const tip = FEATURE_TIPS[key] || '';
         return '<div class="toggle-row">' +
-          '<div class="toggle-name">' + FEATURE_LABELS[key] + '</div>' +
+          '<div class="toggle-name has-tip">' + FEATURE_LABELS[key] +
+          (tip ? '<span class="tip-icon">?</span><span class="tip-box">' + tip + '</span>' : '') +
+          '</div>' +
           '<label class="toggle-sw">' +
           '<input type="checkbox" ' + on + ' onchange="toggleFeature(\'' + key + '\', this.checked)">' +
           '<div class="toggle-track"></div>' +
@@ -1355,6 +1644,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       refreshErrorWeights();
       // Page type weights
       refreshPageTypeWeights();
+      // Spider config
+      refreshSpiderConfig();
     } catch(e) { console.error('controls:', e); }
   }
 
@@ -1370,8 +1661,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     try {
       const data = await api('/admin/api/error-weights');
       const weights = data.weights || {};
-      const el = document.getElementById('error-weight-grid');
-      el.innerHTML = ERROR_TYPES.map(t => {
+      const httpEl = document.getElementById('http-error-grid');
+      if (httpEl) httpEl.innerHTML = HTTP_ERROR_TYPES.map(t => {
+        var val = weights[t] !== undefined ? weights[t] : 0;
+        return ewRow(t, val);
+      }).join('');
+      const tcpEl = document.getElementById('tcp-error-grid');
+      if (tcpEl) tcpEl.innerHTML = TCP_ERROR_TYPES.map(t => {
         var val = weights[t] !== undefined ? weights[t] : 0;
         return ewRow(t, val);
       }).join('');
@@ -1392,7 +1688,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         p.label + '</label>';
     }).join('');
     var displayName = name.replace(/_/g, ' ');
-    return '<div class="ew-row"><span class="ew-name" title="' + name + '">' + displayName + '</span><div class="ew-opts">' + opts + '</div></div>';
+    var tip = ERROR_TIPS[name] || '';
+    return '<div class="ew-row"><span class="ew-name has-tip" title="' + name + '">' + displayName +
+      (tip ? '<span class="tip-icon">?</span><span class="tip-box">' + tip + '</span>' : '') +
+      '</span><div class="ew-opts">' + opts + '</div></div>';
   }
 
   window.ewSelect = function(name, val, el) {
@@ -1479,11 +1778,53 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }).then(() => toast(key + ' updated'));
   };
 
+  // Spider config
+  async function refreshSpiderConfig() {
+    try {
+      const cfg = await api('/admin/api/spider');
+      document.getElementById('spider-sliders').innerHTML =
+        spiderSlider('sitemap_error_rate', 'Sitemap Error Rate', cfg.sitemap_error_rate || 0, 0, 1, 0.01) +
+        spiderSlider('sitemap_gzip_error_rate', 'Sitemap Gzip Error Rate', cfg.sitemap_gzip_error_rate || 0, 0, 1, 0.01) +
+        spiderSlider('favicon_error_rate', 'Favicon Error Rate', cfg.favicon_error_rate || 0, 0, 1, 0.01) +
+        spiderSlider('robots_error_rate', 'Robots.txt Error Rate', cfg.robots_error_rate || 0, 0, 1, 0.01) +
+        spiderSlider('meta_error_rate', 'Meta Files Error Rate', cfg.meta_error_rate || 0, 0, 1, 0.01);
+    } catch(e) { console.error('spider-config:', e); }
+  }
+
+  function spiderSlider(key, label, value, min, max, step) {
+    const isFloat = step < 1;
+    const display = isFloat ? parseFloat(value).toFixed(2) : parseInt(value);
+    return '<div class="slider-group">' +
+      '<div class="slider-label"><span>' + label + '</span>' +
+      '<span class="val" id="sp-' + key + '">' + display + '</span></div>' +
+      '<input type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '" oninput="spiderSliderChange(\'' + key + '\', this.value)" onchange="sliderCommitSpider(\'' + key + '\', this.value)">' +
+      '</div>';
+  }
+
+  let spiderSliderTimer = {};
+  window.spiderSliderChange = function(key, val) {
+    document.getElementById('sp-' + key).textContent = parseFloat(val).toFixed(2);
+  };
+
+  window.sliderCommitSpider = function(key, val) {
+    clearTimeout(spiderSliderTimer[key]);
+    spiderSliderTimer[key] = setTimeout(() => {
+      api('/admin/api/spider', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({key: key, value: parseFloat(val)})
+      }).then(() => toast(key + ': ' + parseFloat(val).toFixed(2)));
+    }, 300);
+  };
+
   function slider(key, label, value, min, max, step) {
     const isFloat = step < 1;
     const display = isFloat ? parseFloat(value).toFixed(1) : parseInt(value);
+    const tip = SLIDER_TIPS[key] || '';
     return '<div class="slider-group">' +
-      '<div class="slider-label"><span>' + label + '</span><span class="val" id="sv-' + key + '">' + display + '</span></div>' +
+      '<div class="slider-label has-tip"><span>' + label + '</span>' +
+      (tip ? '<span class="tip-icon">?</span><span class="tip-box">' + tip + '</span>' : '') +
+      '<span class="val" id="sv-' + key + '">' + display + '</span></div>' +
       '<input type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '" oninput="sliderChange(\'' + key + '\', this.value, ' + isFloat + ')" onchange="sliderCommit(\'' + key + '\', this.value)">' +
       '</div>';
   }

@@ -34,6 +34,7 @@ import (
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/server"
+	"github.com/glitchWebServer/internal/spider"
 	"github.com/glitchWebServer/internal/vuln"
 	"github.com/glitchWebServer/internal/websocket"
 )
@@ -66,12 +67,13 @@ func newTestHandler() *server.Handler {
 	cookieT := cookies.NewTracker()
 	jsEng := jstrap.NewEngine()
 	botDet := botdetect.NewDetector()
+	spiderH := spider.NewHandler(nil)
 
 	return server.NewHandler(
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet,
+		headerEng, cookieT, jsEng, botDet, spiderH,
 	)
 }
 
