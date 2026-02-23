@@ -763,13 +763,96 @@ func ImportConfig(export *ConfigExport) {
 }
 
 // ---------------------------------------------------------------------------
+// Proxy Config — stateful proxy mode and settings
+// ---------------------------------------------------------------------------
+
+// ProxyModes lists all valid proxy modes.
+var ProxyModes = []string{"transparent", "waf", "chaos", "gateway", "nightmare"}
+
+// ProxyConfig holds the current proxy configuration.
+type ProxyConfig struct {
+	mu             sync.RWMutex
+	Mode           string  `json:"mode"`
+	WAFEnabled     bool    `json:"waf_enabled"`
+	WAFBlockAction string  `json:"waf_block_action"`
+	LatencyProb    float64 `json:"latency_prob"`
+	CorruptProb    float64 `json:"corrupt_prob"`
+	DropProb       float64 `json:"drop_prob"`
+	ResetProb      float64 `json:"reset_prob"`
+}
+
+// NewProxyConfig returns a ProxyConfig with transparent defaults.
+func NewProxyConfig() *ProxyConfig {
+	return &ProxyConfig{
+		Mode:           "transparent",
+		WAFBlockAction: "reject",
+	}
+}
+
+// GetMode returns the current proxy mode.
+func (pc *ProxyConfig) GetMode() string {
+	pc.mu.RLock()
+	defer pc.mu.RUnlock()
+	return pc.Mode
+}
+
+// SetMode sets the proxy mode if valid.
+func (pc *ProxyConfig) SetMode(mode string) bool {
+	for _, m := range ProxyModes {
+		if m == mode {
+			pc.mu.Lock()
+			defer pc.mu.Unlock()
+			pc.Mode = mode
+			// Auto-configure WAF for waf/gateway/nightmare modes
+			switch mode {
+			case "waf", "gateway", "nightmare":
+				pc.WAFEnabled = true
+			default:
+				pc.WAFEnabled = false
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// Snapshot returns a copy of proxy state for JSON serialization.
+func (pc *ProxyConfig) Snapshot() map[string]interface{} {
+	pc.mu.RLock()
+	defer pc.mu.RUnlock()
+	return map[string]interface{}{
+		"mode": pc.Mode,
+		"pipeline_stats": map[string]int64{
+			"requests_processed":  0,
+			"responses_processed": 0,
+			"requests_blocked":    0,
+			"responses_modified":  0,
+		},
+		"waf_enabled": pc.WAFEnabled,
+		"waf_stats": map[string]interface{}{
+			"detections":   0,
+			"rate_limited": 0,
+			"block_action": pc.WAFBlockAction,
+		},
+		"chaos_config": map[string]float64{
+			"latency_prob": pc.LatencyProb,
+			"corrupt_prob": pc.CorruptProb,
+			"drop_prob":    pc.DropProb,
+			"reset_prob":   pc.ResetProb,
+		},
+		"interceptors": []interface{}{},
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Singleton holders — used by the admin API handlers
 // ---------------------------------------------------------------------------
 
 var (
-	globalFlags      = NewFeatureFlags()
-	globalConfig     = NewAdminConfig()
-	globalVulnConfig = NewVulnConfig()
+	globalFlags       = NewFeatureFlags()
+	globalConfig      = NewAdminConfig()
+	globalVulnConfig  = NewVulnConfig()
+	globalProxyConfig = NewProxyConfig()
 
 	// Scanner runner — uses the real scanner package
 	scanRunner   *scaneval.Runner
@@ -787,6 +870,9 @@ func GetAdminConfig() *AdminConfig { return globalConfig }
 
 // GetVulnConfig returns the global VulnConfig instance.
 func GetVulnConfig() *VulnConfig { return globalVulnConfig }
+
+// GetProxyConfig returns the global ProxyConfig instance.
+func GetProxyConfig() *ProxyConfig { return globalProxyConfig }
 
 // getScanRunner returns the singleton scaneval.Runner, creating it on first call.
 func getScanRunner() *scaneval.Runner {

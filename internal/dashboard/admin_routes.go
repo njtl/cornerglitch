@@ -121,28 +121,7 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/admin/api/proxy/status", func(w http.ResponseWriter, r *http.Request) {
 		setCORS(w)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"mode": "transparent",
-			"pipeline_stats": map[string]int64{
-				"requests_processed":  0,
-				"responses_processed": 0,
-				"requests_blocked":    0,
-				"responses_modified":  0,
-			},
-			"waf_enabled": false,
-			"waf_stats": map[string]interface{}{
-				"detections":   0,
-				"rate_limited": 0,
-				"block_action": "reject",
-			},
-			"chaos_config": map[string]float64{
-				"latency_prob": 0,
-				"corrupt_prob": 0,
-				"drop_prob":    0,
-				"reset_prob":   0,
-			},
-			"interceptors": []interface{}{},
-		})
+		json.NewEncoder(w).Encode(globalProxyConfig.Snapshot())
 	})
 
 	mux.HandleFunc("/admin/api/proxy/mode", func(w http.ResponseWriter, r *http.Request) {
@@ -163,6 +142,10 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
 			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+		if !globalProxyConfig.SetMode(req.Mode) {
+			http.Error(w, `{"error":"invalid proxy mode"}`, http.StatusBadRequest)
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
