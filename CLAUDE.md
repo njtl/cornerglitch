@@ -1,16 +1,38 @@
-# CLAUDE.md — Glitch Web Server
+# CLAUDE.md — Glitch
 
 ## What is this project?
 
-An intentionally unreliable, adaptive HTTP server written in Go. Designed as a "DVWA on steroids" — a comprehensive scanner testing target with 347+ vulnerability endpoints across all 18 OWASP Top 10 lists, 30 error types, 8 page formats, an infinite scraper labyrinth, client fingerprinting, and adaptive behavior. A full admin panel exposes all internal state with 21 feature toggles, 19+ config parameters, and real-time monitoring.
+**Glitch — HTTP Chaos Testing Framework.** A 3-in-1 tool for testing every layer of the HTTP stack:
+
+- **Glitch Server** (`glitch`) — Backend emulator. Unreliable, adaptive, vulnerable. Simulates broken web services with dozens of error types, hundreds of vulnerability endpoints across all OWASP Top 10 lists, infinite scraper labyrinths, client fingerprinting, and adaptive behavior.
+- **Glitch Scanner** (`glitch-scanner`) — Client emulator. Aggressive, malformed, adversarial. Simulates scanners, scrapers, fuzzers, and malicious clients with configurable attack modules, crawling, evasion, and resilience testing.
+- **Glitch Proxy** (`glitch-proxy`) — Middleware emulator. Corrupting, filtering, chaotic. Simulates proxies, WAFs, WAAPs, API gateways, and load balancers with traffic manipulation, chaos injection, and WAF rule simulation.
+
+**Nightmare Mode**: All three configured for maximum adversarial behavior simultaneously. If your service survives nightmare mode, it can handle anything production throws at it.
+
+**Target audience**: Anyone building a client (scanner, scraper, crawler), a proxy (WAF, WAAP, API gateway, load balancer, CDN), or a backend (web app, API, microservice) — Glitch tests any combination of these services against real-world chaos.
 
 ## Build & Run
 
 ```bash
-go build -o glitch ./cmd/glitch    # build
-./glitch                            # run (ports 8765 + 8766)
-./glitch -port 9000 -dash-port 9001 # custom ports
-./glitch -config config.json        # load saved configuration
+# Server (backend emulator)
+go build -o glitch ./cmd/glitch
+./glitch                                    # ports 8765 + 8766
+./glitch -port 9000 -dash-port 9001         # custom ports
+./glitch -config config.json                # load saved configuration
+./glitch -nightmare                         # nightmare mode
+
+# Scanner (client emulator)
+go build -o glitch-scanner ./cmd/glitch-scanner
+glitch-scanner -target http://localhost:8765
+glitch-scanner -target http://localhost:8765 -profile nightmare
+
+# Proxy (middleware emulator)
+go build -o glitch-proxy ./cmd/glitch-proxy
+glitch-proxy -target http://localhost:8765 -mode chaos
+
+# Self-test (all three against each other)
+glitch selftest --mode nightmare --duration 60s
 ```
 
 No external dependencies — stdlib only, go 1.24+.
@@ -18,30 +40,24 @@ No external dependencies — stdlib only, go 1.24+.
 ## Project Layout
 
 ```
-cmd/glitch/main.go              Entry point, flag parsing, graceful shutdown, config loading
+cmd/
+  glitch/main.go                 Server binary + selftest subcommand
+  glitch-scanner/main.go         Scanner binary
+  glitch-proxy/main.go           Proxy binary
+
 internal/
-  server/handler.go              Main request handler — dispatches to all 30+ subsystems
-  errors/generator.go            30 error types (22 HTTP + 8 TCP) with weighted probability profiles
-  pages/generator.go             8 content generators (HTML, JSON, XML, CSV, SSE, etc.)
-  content/engine.go              Deterministic page generation with JS API calls for scanner discovery
+  # Server subsystems
+  server/handler.go              Main request handler — dispatches to all subsystems
+  errors/generator.go            Error types (HTTP + TCP) with weighted probability profiles
+  pages/generator.go             Content generators (HTML, JSON, XML, CSV, SSE, etc.)
+  content/engine.go              Deterministic page generation with JS API calls
   labyrinth/labyrinth.go         Infinite procedural page graph for trapping scrapers
   fingerprint/engine.go          Client ID via headers, UA classification, IP
-  adaptive/engine.go             8 behavior modes, re-evaluates per client every 30s
-  metrics/collector.go           Ring buffer (10k records), time series, per-client profiles
-  dashboard/
-    server.go                    Dashboard HTTP server (port 8766)
-    admin.go                     Admin data structures, singletons, config import/export
-    admin_routes.go              Admin API endpoints (toggles, config, vulns, scanner, PCAP)
-    admin_html.go                Admin panel HTML/CSS/JS (7 tabs, 21 toggles, full controls)
-  vuln/
-    owasp.go                     OWASP Web Top 10 (2021) + routing for all vuln categories
-    api_security.go              OWASP API Security Top 10 (2023) — 50 endpoints
-    modern.go                    LLM Top 10 (2025), CI/CD Top 10 (2022), Cloud-Native Top 10 (2022)
-    mobile_privacy.go            Mobile Top 10 (2024), Privacy Top 10 (2021), Client-Side Top 10 (2024)
-    infrastructure.go            Serverless Top 10 (2018), Docker Top 10 (2019), K8s Top 10 (2022)
-    iot_desktop.go               IoT Top 10 (2018), Desktop App Top 10 (2021), Low-Code Top 10 (2022)
-    specialized.go               Proactive Controls (2024), ML Security (2023), Data Security (2025), Web 2025
-  api/                           REST API handlers (users, products, CMS, forms, infra)
+  adaptive/engine.go             Behavior modes, re-evaluates per client periodically
+  metrics/collector.go           Ring buffer, time series, per-client profiles
+  dashboard/                     Admin panel + unified dashboard (7 tabs, all controls)
+  vuln/                          All vulnerability endpoints (all OWASP Top 10 lists)
+  api/                           REST API emulation (users, products, CMS, forms, infra)
   honeypot/                      Honeypot lure paths and response generation
   botdetect/                     Bot detection scoring and classification
   captcha/                       CAPTCHA challenge system
@@ -49,97 +65,106 @@ internal/
   headers/                       Header corruption engine
   cookies/                       Cookie trap system
   jstrap/                        JavaScript trap challenges
-  proxy/                         Reverse proxy with scoring-based interception
-  scanner/                       Scanner profile, comparison, and coverage analysis
-  recorder/                      Traffic recording (JSONL/PCAP formats)
   health/                        Health endpoints + Spring Boot Actuator emulation
-  search/                        Search engine simulation
-  email/                         Email/webmail simulation
-  oauth/                         OAuth/SSO discovery and token endpoints
-  cdn/                           CDN static asset emulation
-  i18n/                          Internationalization (12 languages)
-  privacy/                       Privacy policy and consent flows
-  websocket/                     WebSocket endpoint
-  analytics/                     Analytics and tracking simulation
+  search/, email/, oauth/, cdn/, i18n/, privacy/, websocket/, analytics/
+  recorder/                      Traffic recording (JSONL/PCAP formats)
+
+  # Scanner subsystems
+  scanner/
+    engine.go                    Scanner orchestrator
+    config.go                    Configuration and profiles
+    crawler.go                   Page/API discovery
+    reporter.go                  Findings and coverage reports
+    attacks/                     Attack modules (owasp, injection, fuzzing, protocol, auth)
+    resilience/                  Error handling, timeouts, connections
+    evasion/                     WAF bypass, encoding, fragmentation
+    profiles/                    Scan profiles (aggressive, stealth, nightmare, compliance)
+
+  # Proxy subsystems
+  proxy/                         Core proxy + interception pipeline
+    chaos/                       Chaos modules (latency, corruption, connection, rewrite)
+    waf/                         WAF modules (signatures, ratelimit, geoblock, botblock)
+    modes/                       Mode implementations (transparent, waf, chaos, nightmare)
+
+  # Scanner evaluation (comparison tool)
+  scaneval/                      Scanner profile comparison, coverage matrix
+
+  # Self-test
+  selftest/                      Pipeline orchestration, monitoring, reporting
+
+docs/                            PRDs, architecture plan
 tests/
-  acceptance/acceptance_test.go  55+ acceptance tests (14 sections)
+  acceptance/                    Acceptance tests
   integration/                   Integration tests
-deploy/
-  k8s/                           Kubernetes manifests (deployment, service, configmap, ingress)
-.github/workflows/               CI (lint/test/build) + Docker multi-arch push
-Dockerfile                       Multi-stage, non-root, healthcheck
-docker-compose.yml               Local deployment with volumes
-Makefile                         build, test, vet, clean, docker-build, k8s-deploy, run, cross
+  nightmare/                     Nightmare mode survival tests
 ```
 
 ## Key Conventions
 
 - **Zero external deps.** Everything uses Go stdlib. Do not add third-party modules.
-- **All server logic is in `internal/`.** Nothing in `internal/` is meant to be imported by external code.
+- **All logic is in `internal/`.** Nothing in `internal/` is meant to be imported by external code.
 - **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0.
 - **Labyrinth pages are deterministic** — seeded from path via SHA-256 so the same URL always yields the same page.
 - **Adaptive behavior** is per-client (keyed by fingerprint ID) and mode transitions happen in `adaptive/engine.go:evaluate()`.
-- **Admin panel runs on a separate port** (default 8766) with 7 tabs: Dashboard, Sessions, Traffic, Controls, Request Log, Vulnerabilities, Scanner.
-- **Vuln pages use "Acme Corp Portal" layout** — nav bar, sidebar, breadcrumbs, footer. They look like a real corporate web app, not demo pages.
+- **Admin panel runs on a separate port** (default 8766) with tabs: Dashboard, Sessions, Traffic, Controls, Request Log, Vulnerabilities, Scanner, Proxy.
+- **Vuln pages use "Acme Corp Portal" layout** — corporate-looking nav bar, sidebar, breadcrumbs, footer.
 - **Content pages include JS API calls** — `fetch()` calls, `<link rel="prefetch">` hints, and hidden `<a>` tags so scanners discover API endpoints.
-- **Config is fully serializable** — export/import via `/admin/api/config/export` and `/admin/api/config/import`, or load from file with `-config` flag.
-- **Every subsystem is controllable** — all 21 feature toggles and 19+ config parameters are wired to their actual subsystems, not just stored in config.
+- **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag.
+- **Every subsystem is controllable** — all feature toggles and config parameters are wired to their actual subsystems.
+- **Avoid hard numbers in docs** — use qualitative language since counts change as the project evolves.
+
+### Vuln Handler Routing Chain
+
+In `vuln/owasp.go:ServeHTTP`, paths are routed in order with longer prefixes checked before shorter ones (api10 before api1, a10 before a01) to avoid prefix collisions.
+
+### Admin Panel Architecture
+
+- Data structures in `dashboard/admin.go`: FeatureFlags, AdminConfig, VulnConfig, ConfigExport (all thread-safe with sync.RWMutex)
+- API routes in `dashboard/admin_routes.go`
+- HTML/CSS/JS in `dashboard/admin_html.go`: single-page app with auto-refresh
 
 ## Testing
 
 ```bash
-go build ./cmd/glitch/           # compile check
+go build ./...                   # compile all binaries
 go vet ./...                     # static analysis
-go test ./... -count=1           # all unit tests (30 packages, 1500+ test functions)
+go test ./... -count=1           # all unit tests
 ```
 
 ### Acceptance Tests (require running server)
 
 ```bash
-./glitch &                                          # start server first
-go test ./tests/acceptance/ -count=1 -timeout 120s  # 55+ acceptance tests
-go test ./tests/integration/ -count=1 -timeout 60s  # integration tests
+./glitch &
+go test ./tests/acceptance/ -count=1 -timeout 120s
+go test ./tests/integration/ -count=1 -timeout 60s
 ```
 
 ### PM Acceptance Testing
 
 **This is the default quality gate.** After any implementation work, the PM agent runs acceptance tests against the live application and produces a structured pass/fail report. Work is not considered done until PM acceptance passes.
 
-The acceptance suite covers 14 sections: Dashboard metrics, Sessions, Feature toggles, Config parameters, Error/page weights, Vulnerability controls, Config import/export, PCAP recording, Bot detection, Scanner framework, Subsystem responses, Blocking/adaptive, Request log, Admin panel HTML, and OWASP categories.
-
 ## Architecture Notes
 
-Request flow:
+### Server Request Flow
 1. `server/handler.go:ServeHTTP` — fingerprints client, gets adaptive behavior
 2. `handler.dispatch` — checks subsystem eligibility (honeypot, API, vuln, labyrinth), rolls error type, serves page
 3. Every request is recorded in `metrics/collector.go` (ring buffer + per-client profile)
-4. Adaptive engine re-evaluates client behavior every 30s based on accumulated metrics
+4. Adaptive engine re-evaluates client behavior periodically based on accumulated metrics
 5. Dashboard reads from collector and adaptive engine via JSON APIs
 
-The adaptive engine classifies clients into: browser, search_bot, ai_scraper, script_bot, api_tester, load_tester, unknown — then assigns a behavior mode accordingly.
+### Three-Way Architecture
+```
+Scanner → Proxy → Server
+   ↓         ↓       ↓
+   └─────────┴───────┘
+         Dashboard
+```
 
-### Vuln Handler Routing Chain
-
-In `vuln/owasp.go:ServeHTTP`, paths are routed in this order:
-1. OWASP Web Top 10 A01-A10 (note: A10 must be checked before A01 to avoid prefix collision)
-2. API Security Top 10 (same: api10 before api1)
-3. Advanced categories (CORS, XXE, SSTI, JWT, etc.)
-4. Modern categories (LLM, CI/CD, Cloud-Native)
-5. Infrastructure (Serverless, Docker, K8s)
-6. IoT/Desktop/Low-Code
-7. Mobile/Privacy/Client-Side
-8. Specialized (Proactive Controls, ML Security, Data Security, Web 2025)
-9. Dashboard/Settings vulns
-
-### Admin Panel Architecture
-
-- Data structures in `dashboard/admin.go`: FeatureFlags, AdminConfig, VulnConfig, ConfigExport (all thread-safe with sync.RWMutex)
-- API routes in `dashboard/admin_routes.go`: 30+ endpoints for toggles, config, vulns, scanner, PCAP, blocking, clients
-- HTML/CSS/JS in `dashboard/admin_html.go`: single-page app with 7 tabs, auto-refresh, file upload/download
+Each component can be replaced with a real service for testing. See `docs/PLAN.md` for the full architecture.
 
 ## Agent Team
 
-See `~/.claude/agents/` for all available agents. Key agents for this project:
+See `~/.claude/agents/` for all available agents:
 
 | Agent | Primary use in this project |
 |-------|----------------------------|
@@ -150,19 +175,17 @@ See `~/.claude/agents/` for all available agents. Key agents for this project:
 | `pentester` | Verify vuln endpoints are exploitable, scanner coverage testing |
 | `sre` | Docker/K8s deployment, CI/CD pipelines, performance tuning |
 | `consultant` | Go web server architecture decisions, stdlib patterns |
+| `chaos-engineer` | Nightmare mode design, failure scenarios, survival criteria |
+| `protocol-engineer` | TCP/HTTP protocol-level features, connection hijacking |
 | `marketing` | README, project positioning, release announcements |
 
-New agents can be created in `~/.claude/agents/<name>.md` when needed — follow the existing format with YAML frontmatter + autonomous operation rules + responsibilities.
+New agents can be created in `~/.claude/agents/<name>.md` — follow the existing format with YAML frontmatter + autonomous operation rules + responsibilities.
 
-## Project Stats
+## Documentation
 
-| Metric | Value |
-|--------|-------|
-| Vulnerability endpoints | ~347 |
-| OWASP Top 10 lists | 18 |
-| Error types | 30 (22 HTTP + 8 TCP) |
-| Test functions | 1,506 |
-| Packages with tests | 30 |
-| Go source files | 98 |
-| Lines of code | ~89,670 |
-| External dependencies | 0 (stdlib only) |
+- `docs/PLAN.md` — Master architecture plan for the 3-way framework
+- `docs/PRD-scanner.md` — Scanner component PRD
+- `docs/PRD-proxy.md` — Proxy component PRD
+- `docs/PRD-nightmare.md` — Nightmare mode PRD
+- `docs/PRD-selftest.md` — Self-test pipeline PRD
+- `done_*.md` — Work session logs with PM feedback tracking
