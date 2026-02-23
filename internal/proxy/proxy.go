@@ -60,6 +60,9 @@ type ReverseProxy struct {
 	opts           Options
 	scoreThreshold atomic.Value // float64
 
+	// Interception pipeline (configured by modes package)
+	Pipeline *Pipeline
+
 	// Per-client state
 	clients sync.Map // map[string]*clientState
 
@@ -128,6 +131,17 @@ func NewReverseProxy(target string, opts Options) *ReverseProxy {
 	// Configure the stdlib reverse proxy
 	rp.reverseProxy = &httputil.ReverseProxy{
 		Director: rp.director,
+		ModifyResponse: func(resp *http.Response) error {
+			if rp.Pipeline != nil {
+				processed, err := rp.Pipeline.ProcessResponse(resp)
+				if err != nil {
+					return err
+				}
+				// Copy modified fields back into the original response
+				*resp = *processed
+			}
+			return nil
+		},
 	}
 
 	// Start background cleanup of expired client state
@@ -161,6 +175,30 @@ func (rp *ReverseProxy) Shutdown() {
 // ServeHTTP is the main handler: fingerprint, score, decide pass/intercept.
 func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rp.totalRequests.Add(1)
+
+	// Run requests through the pipeline before any other processing.
+	// The pipeline may modify headers, inject latency, or block requests entirely.
+	if rp.Pipeline != nil {
+		processed, err := rp.Pipeline.ProcessRequest(r)
+		if err != nil {
+			// Pipeline blocked the request (e.g., WAF signature match)
+			rp.blocked.Add(1)
+			if rp.opts.EnableLogging {
+				log.Printf("[proxy] PIPELINE_BLOCK %s %s error=%v", r.Method, r.URL.Path, err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintf(w, `{"error":"Forbidden","message":%q}`, err.Error())
+			return
+		}
+		if processed == nil {
+			// Interceptor signaled silent block
+			rp.blocked.Add(1)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		r = processed
+	}
 
 	// Check passthrough paths first (fast path)
 	for _, p := range rp.opts.PassthroughPaths {

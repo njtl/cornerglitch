@@ -13,16 +13,20 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/proxy"
+	"github.com/glitchWebServer/internal/proxy/modes"
 )
 
 func main() {
 	target := flag.String("target", "", "Backend server URL (required)")
 	listen := flag.String("listen", ":8080", "Listen address")
 	threshold := flag.Float64("threshold", 50, "Bot score threshold for interception (0-100)")
-	mode := flag.String("mode", "glitch", "Intercept mode: block|challenge|labyrinth|glitch")
+	mode := flag.String("mode", "transparent", "Proxy mode: "+strings.Join(modes.List(), "|"))
 	dashboard := flag.Int("dashboard", 8766, "Dashboard port")
 	passthrough := flag.String("passthrough", "", "Comma-separated paths to always pass through")
 	verbose := flag.Bool("verbose", false, "Verbose logging")
+	chaosProb := flag.Float64("chaos-prob", 0, "Override chaos injection probability (0.0-1.0); 0 uses mode default")
+	wafAction := flag.String("waf-action", "", "Override WAF action: block|log; empty uses mode default")
+	rateLimit := flag.Int("rate-limit", 0, "Override rate limit (requests/sec); 0 uses mode default")
 	flag.Parse()
 
 	if *target == "" {
@@ -31,16 +35,23 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Examples:\n")
 		fmt.Fprintf(os.Stderr, "  glitch-proxy -target http://localhost:3000\n")
 		fmt.Fprintf(os.Stderr, "  glitch-proxy -target http://localhost:3000 -threshold 30\n")
-		fmt.Fprintf(os.Stderr, "  glitch-proxy -target http://localhost:3000 -mode block\n")
-		fmt.Fprintf(os.Stderr, "  glitch-proxy -target http://localhost:3000 -mode labyrinth -threshold 40\n\n")
+		fmt.Fprintf(os.Stderr, "  glitch-proxy -target http://localhost:3000 -mode chaos\n")
+		fmt.Fprintf(os.Stderr, "  glitch-proxy -target http://localhost:3000 -mode nightmare -chaos-prob 0.5\n")
+		fmt.Fprintf(os.Stderr, "  glitch-proxy -target http://localhost:3000 -mode waf -waf-action log -rate-limit 200\n\n")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
-	// Validate intercept mode
-	validModes := map[string]bool{"block": true, "challenge": true, "labyrinth": true, "glitch": true}
-	if !validModes[*mode] {
-		fmt.Fprintf(os.Stderr, "Error: invalid mode %q. Must be one of: block, challenge, labyrinth, glitch\n", *mode)
+	// Validate intercept mode using the modes registry
+	selectedMode, err := modes.Get(*mode)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Validate waf-action if provided
+	if *wafAction != "" && *wafAction != "block" && *wafAction != "log" {
+		fmt.Fprintf(os.Stderr, "Error: invalid -waf-action %q. Must be one of: block, log\n", *wafAction)
 		os.Exit(1)
 	}
 
@@ -66,6 +77,31 @@ func main() {
 
 	rp := proxy.NewReverseProxy(*target, opts)
 
+	// Create and configure the pipeline based on the selected mode
+	pipeline := proxy.NewPipeline()
+	chaosCfg := modes.ChaosConfig{}
+	wafCfg := modes.WAFConfig{}
+	selectedMode.Configure(pipeline, &chaosCfg, &wafCfg)
+
+	// Apply CLI overrides to chaos probability
+	if *chaosProb > 0 {
+		chaosCfg.LatencyProb = *chaosProb
+		chaosCfg.CorruptProb = *chaosProb * 0.3 // scale corruption to 30% of latency prob
+	}
+
+	// Apply CLI overrides to WAF action
+	if *wafAction != "" {
+		wafCfg.BlockAction = *wafAction
+	}
+
+	// Apply CLI overrides to rate limit
+	if *rateLimit > 0 {
+		wafCfg.RateLimitRPS = *rateLimit
+	}
+
+	// Attach the configured pipeline to the proxy
+	rp.Pipeline = pipeline
+
 	// Start the dashboard
 	dashSrv := rp.StartDashboard(*dashboard)
 
@@ -81,6 +117,15 @@ func main() {
 	go func() {
 		log.Printf("\033[36m[glitch-proxy]\033[0m Proxying %s -> %s", *listen, *target)
 		log.Printf("\033[36m[glitch-proxy]\033[0m Mode: %s | Threshold: %.0f | Dashboard: :%d", *mode, *threshold, *dashboard)
+		if *chaosProb > 0 {
+			log.Printf("\033[36m[glitch-proxy]\033[0m Chaos probability override: %.2f", *chaosProb)
+		}
+		if *wafAction != "" {
+			log.Printf("\033[36m[glitch-proxy]\033[0m WAF action override: %s", *wafAction)
+		}
+		if *rateLimit > 0 {
+			log.Printf("\033[36m[glitch-proxy]\033[0m Rate limit override: %d req/s", *rateLimit)
+		}
 		if len(passthroughPaths) > 0 {
 			log.Printf("\033[36m[glitch-proxy]\033[0m Passthrough paths: %s", strings.Join(passthroughPaths, ", "))
 		}
