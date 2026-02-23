@@ -451,6 +451,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <button class="tab" onclick="showTab('log')">Request Log</button>
   <button class="tab" onclick="showTab('vulns')">Vulnerabilities</button>
   <button class="tab" onclick="showTab('scanner')">Scanner</button>
+  <button class="tab" onclick="showTab('proxy')">Proxy</button>
 </div>
 
 <!-- ==================== DASHBOARD TAB ==================== -->
@@ -789,6 +790,80 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <th>Status</th>
         </tr></thead>
         <tbody id="scanner-history-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PROXY TAB ==================== -->
+<div id="panel-proxy" class="panel">
+  <div class="grid" id="proxy-metrics"></div>
+
+  <div class="section">
+    <h2>// Mode Selection</h2>
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;" id="proxy-mode-radios">
+      <label class="toggle-row" style="cursor:pointer;">
+        <div>
+          <div class="toggle-name">TRANSPARENT</div>
+          <div style="color:#555;font-size:0.72em;margin-top:2px;">Pass-through, no modification</div>
+        </div>
+        <input type="radio" name="proxy-mode" value="transparent" onchange="setProxyMode(this.value)" checked style="accent-color:#00ff88;">
+      </label>
+      <label class="toggle-row" style="cursor:pointer;">
+        <div>
+          <div class="toggle-name">WAF</div>
+          <div style="color:#555;font-size:0.72em;margin-top:2px;">Web Application Firewall filtering</div>
+        </div>
+        <input type="radio" name="proxy-mode" value="waf" onchange="setProxyMode(this.value)" style="accent-color:#00ff88;">
+      </label>
+      <label class="toggle-row" style="cursor:pointer;">
+        <div>
+          <div class="toggle-name">CHAOS</div>
+          <div style="color:#555;font-size:0.72em;margin-top:2px;">Random latency, corruption, drops</div>
+        </div>
+        <input type="radio" name="proxy-mode" value="chaos" onchange="setProxyMode(this.value)" style="accent-color:#00ff88;">
+      </label>
+      <label class="toggle-row" style="cursor:pointer;">
+        <div>
+          <div class="toggle-name">GATEWAY</div>
+          <div style="color:#555;font-size:0.72em;margin-top:2px;">API gateway with rate limiting</div>
+        </div>
+        <input type="radio" name="proxy-mode" value="gateway" onchange="setProxyMode(this.value)" style="accent-color:#00ff88;">
+      </label>
+      <label class="toggle-row" style="cursor:pointer;">
+        <div>
+          <div class="toggle-name">NIGHTMARE</div>
+          <div style="color:#555;font-size:0.72em;margin-top:2px;">Maximum chaos, all glitches active</div>
+        </div>
+        <input type="radio" name="proxy-mode" value="nightmare" onchange="setProxyMode(this.value)" style="accent-color:#00ff88;">
+      </label>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>// WAF Status</h2>
+    <div id="proxy-waf-status">
+      <div style="color:#555">WAF not enabled. Select WAF mode to activate.</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>// Chaos Configuration</h2>
+    <div id="proxy-chaos-sliders"></div>
+  </div>
+
+  <div class="section">
+    <h2>// Pipeline Stats</h2>
+    <div class="tbl-scroll" style="max-height:300px">
+      <table>
+        <thead><tr>
+          <th>Interceptor</th>
+          <th>Requests</th>
+          <th>Responses</th>
+          <th>Blocked</th>
+          <th>Avg Latency</th>
+        </tr></thead>
+        <tbody id="proxy-pipeline-body"></tbody>
       </table>
     </div>
   </div>
@@ -1862,6 +1937,99 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) { console.error('scannerTab:', e); }
   }
 
+  // ------ Proxy Tab ------
+  async function refreshProxy() {
+    try {
+      const data = await api('/admin/api/proxy/status');
+      const stats = data.pipeline_stats || {};
+      const chaosConf = data.chaos_config || {};
+      const mode = data.mode || 'transparent';
+
+      // Update metric cards
+      document.getElementById('proxy-metrics').innerHTML =
+        card('Mode', (mode || 'transparent').toUpperCase(), 'v-info') +
+        card('Requests Processed', (stats.requests_processed || 0).toLocaleString(), 'v-ok') +
+        card('Responses Processed', (stats.responses_processed || 0).toLocaleString(), 'v-ok') +
+        card('Requests Blocked', (stats.requests_blocked || 0).toLocaleString(), (stats.requests_blocked || 0) > 0 ? 'v-err' : 'v-ok') +
+        card('Responses Modified', (stats.responses_modified || 0).toLocaleString(), 'v-warn');
+
+      // Update radio buttons
+      var radios = document.querySelectorAll('input[name="proxy-mode"]');
+      radios.forEach(function(r) { r.checked = r.value === mode; });
+
+      // WAF status
+      var wafEl = document.getElementById('proxy-waf-status');
+      if (data.waf_enabled) {
+        var wafStats = data.waf_stats || {};
+        wafEl.innerHTML =
+          '<div class="grid" style="margin-bottom:12px">' +
+            card('Detections', (wafStats.detections || 0).toLocaleString(), 'v-warn') +
+            card('Rate Limited', (wafStats.rate_limited || 0).toLocaleString(), 'v-err') +
+            card('Block Action', wafStats.block_action || 'reject', 'v-info') +
+          '</div>' +
+          '<div style="margin-top:8px;">' +
+            '<label class="toggle-row" style="display:inline-flex;gap:12px;">' +
+              '<span class="toggle-name">Block Action</span>' +
+              '<select class="ctrl-select" style="width:auto;min-width:120px;" onchange="setWafBlockAction(this.value)">' +
+                '<option value="reject"' + (wafStats.block_action === 'reject' ? ' selected' : '') + '>Reject</option>' +
+                '<option value="tarpit"' + (wafStats.block_action === 'tarpit' ? ' selected' : '') + '>Tarpit</option>' +
+                '<option value="redirect"' + (wafStats.block_action === 'redirect' ? ' selected' : '') + '>Redirect</option>' +
+              '</select>' +
+            '</label>' +
+          '</div>';
+      } else {
+        wafEl.innerHTML = '<div style="color:#555">WAF not enabled. Select WAF mode to activate.</div>';
+      }
+
+      // Chaos sliders
+      document.getElementById('proxy-chaos-sliders').innerHTML =
+        slider('proxy_latency_prob', 'Latency Probability', chaosConf.latency_prob || 0, 0, 1, 0.01) +
+        slider('proxy_corrupt_prob', 'Corruption Probability', chaosConf.corrupt_prob || 0, 0, 1, 0.01) +
+        slider('proxy_drop_prob', 'Drop Probability', chaosConf.drop_prob || 0, 0, 1, 0.01) +
+        slider('proxy_reset_prob', 'Reset Probability', chaosConf.reset_prob || 0, 0, 1, 0.01);
+
+      // Pipeline table
+      var interceptors = data.interceptors || [];
+      var pipeBody = document.getElementById('proxy-pipeline-body');
+      if (interceptors.length > 0) {
+        pipeBody.innerHTML = interceptors.map(function(ic) {
+          return '<tr>' +
+            '<td>' + escapeHtml(ic.name || 'unknown') + '</td>' +
+            '<td>' + (ic.requests || 0) + '</td>' +
+            '<td>' + (ic.responses || 0) + '</td>' +
+            '<td>' + (ic.blocked || 0) + '</td>' +
+            '<td>' + (ic.avg_latency_ms || 0).toFixed(1) + ' ms</td>' +
+            '</tr>';
+        }).join('');
+      } else {
+        pipeBody.innerHTML = '<tr><td colspan="5" style="color:#555;text-align:center">No interceptors registered</td></tr>';
+      }
+    } catch(e) { console.error('proxy:', e); }
+  }
+
+  window.setProxyMode = async function(mode) {
+    try {
+      await fetch(API + '/admin/api/proxy/mode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: mode})
+      });
+      toast('Proxy mode: ' + mode.toUpperCase());
+      refreshProxy();
+    } catch(e) { console.error('setProxyMode:', e); }
+  };
+
+  window.setWafBlockAction = async function(action) {
+    try {
+      await fetch(API + '/admin/api/proxy/mode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({waf_block_action: action})
+      });
+      toast('WAF block action: ' + action);
+    } catch(e) { console.error('setWafBlockAction:', e); }
+  };
+
   // ------ Main loop ------
   async function refresh() {
     const active = document.querySelector('.panel.active');
@@ -1874,6 +2042,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     else if (id === 'panel-log') await refreshLog();
     else if (id === 'panel-vulns') await refreshVulns();
     else if (id === 'panel-scanner') await refreshScannerTab();
+    else if (id === 'panel-proxy') await refreshProxy();
   }
 
   // Initial load — restore tab from URL hash

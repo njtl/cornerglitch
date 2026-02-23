@@ -111,6 +111,60 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		adminAPIScannerBaseline(w, r, s)
 	})
 
+	// Proxy status and mode
+	mux.HandleFunc("/admin/api/proxy/status", func(w http.ResponseWriter, r *http.Request) {
+		setCORS(w)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"mode": "transparent",
+			"pipeline_stats": map[string]int64{
+				"requests_processed":  0,
+				"responses_processed": 0,
+				"requests_blocked":    0,
+				"responses_modified":  0,
+			},
+			"waf_enabled": false,
+			"waf_stats": map[string]interface{}{
+				"detections":   0,
+				"rate_limited": 0,
+				"block_action": "reject",
+			},
+			"chaos_config": map[string]float64{
+				"latency_prob": 0,
+				"corrupt_prob": 0,
+				"drop_prob":    0,
+				"reset_prob":   0,
+			},
+			"interceptors": []interface{}{},
+		})
+	})
+
+	mux.HandleFunc("/admin/api/proxy/mode", func(w http.ResponseWriter, r *http.Request) {
+		setCORS(w)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+			return
+		}
+		var req struct {
+			Mode           string `json:"mode"`
+			WAFBlockAction string `json:"waf_block_action"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":   true,
+			"mode": req.Mode,
+		})
+	})
+
 	// Vulnerability controls
 	mux.HandleFunc("/admin/api/vulns", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
