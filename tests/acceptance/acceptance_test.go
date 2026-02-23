@@ -551,20 +551,26 @@ func TestFirecrawl_DetectedAsBotUA(t *testing.T) {
 func TestOxylabs_PlatformMismatchDetected(t *testing.T) {
 	requireServer(t)
 
+	// Retry a few times since the server has probabilistic error injection
+	// that can randomly return 5xx on any request.
 	client := &http.Client{}
-	req, _ := http.NewRequest("GET", serverURL+"/", nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
-	req.Header.Set("Sec-Ch-Ua-Platform", `"Linux"`)
-	req.Header.Set("Sec-Ch-Ua", `"Chromium";v="120", "Google Chrome";v="120"`)
-	req.Header.Set("Accept", "text/html")
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	for i := 0; i < 5; i++ {
+		req, _ := http.NewRequest("GET", serverURL+"/", nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
+		req.Header.Set("Sec-Ch-Ua-Platform", `"Linux"`)
+		req.Header.Set("Sec-Ch-Ua", `"Chromium";v="120", "Google Chrome";v="120"`)
+		req.Header.Set("Accept", "text/html")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode < 500 {
+			return // success — got a non-5xx response
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 500 {
-		t.Errorf("platform mismatch should not cause 5xx, got %d", resp.StatusCode)
-	}
+	t.Error("platform mismatch request returned 5xx on all 5 attempts")
 }
 
 func TestFirecrawl_HoneypotPathsExist(t *testing.T) {

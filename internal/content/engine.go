@@ -258,6 +258,11 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
 	// SVG hero image
 	heroSVG := e.elems.ImagePlaceholder(rng, 1200, 400)
 
+	// Generate API discovery elements for security scanners
+	prefetchLinks := generateAPIPrefetchLinks(rng)
+	hiddenAPILinks := generateHiddenAPILinks(rng)
+	apiScript := generateAPIScriptBlock(rng)
+
 	// Generate the full HTML document
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
@@ -273,6 +278,7 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
   <meta property="og:type" content="website">
   <meta property="og:url" content="http://%s%s">
   <meta name="twitter:card" content="summary_large_image">
+%s
   <style>
     %s
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -324,6 +330,8 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
   %s
   %s
   %s
+  %s
+  %s
 </body>
 </html>`,
 		escHTML(title),
@@ -333,6 +341,7 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
 		escHTML(title),
 		escHTML(metaDesc),
 		host, path,
+		prefetchLinks,
 		e.themeCSS(),
 		e.elems.NavHeader(rng, navItems),
 		breadcrumbs,
@@ -344,6 +353,8 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
 		footer,
 		extras,
 		e.elems.SocialShareButtons(),
+		hiddenAPILinks,
+		apiScript,
 	)
 
 	return html
@@ -816,4 +827,227 @@ func escHTML(s string) string {
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	s = strings.ReplaceAll(s, "\"", "&quot;")
 	return s
+}
+
+// --- API Discovery for Security Scanners ---
+
+// apiCallSnippet represents a JavaScript fetch/API call that security scanners can discover.
+type apiCallSnippet struct {
+	// id is a short identifier used for deterministic selection.
+	id string
+	// code is the JavaScript source to include in the script block.
+	code string
+}
+
+// allAPICallSnippets returns the full pool of JavaScript API call snippets.
+// Each snippet is a realistic fetch/XHR/beacon call that references a discoverable API endpoint.
+func allAPICallSnippets() []apiCallSnippet {
+	return []apiCallSnippet{
+		{
+			id: "autocomplete",
+			code: `    // Search autocomplete
+    fetch('/api/autocomplete?q=' + encodeURIComponent(document.querySelector('input[name=q]')?.value || 'test'))
+      .then(r => r.json()).then(d => { /* populate suggestions */ });`,
+		},
+		{
+			id: "comments",
+			code: `    // Load comments for this page
+    fetch('/api/comments?path=' + encodeURIComponent(location.pathname))
+      .then(r => r.json()).then(d => { /* render comments */ });`,
+		},
+		{
+			id: "analytics",
+			code: `    // Analytics beacon
+    navigator.sendBeacon('/collect', JSON.stringify({event:'pageview',path:location.pathname,ts:Date.now()}));`,
+		},
+		{
+			id: "tracking",
+			code: `    // Tracking pixel
+    new Image().src = '/tr?t=' + Date.now() + '&p=' + encodeURIComponent(location.pathname);`,
+		},
+		{
+			id: "auth-status",
+			code: `    // Check auth status
+    fetch('/api/auth/status', {credentials:'include'})
+      .then(r => r.json()).then(d => { /* update UI */ });`,
+		},
+		{
+			id: "notifications",
+			code: `    // Load notifications
+    fetch('/api/v1/notifications?limit=5')
+      .then(r => r.json()).then(d => { /* show bell count */ });`,
+		},
+		{
+			id: "user-me",
+			code: `    // Load user data (if logged in)
+    fetch('/api/v1/users/me', {headers:{'Authorization':'Bearer ' + (document.cookie.match(/token=([^;]+)/)||[])[1]}})
+      .then(r => r.json()).catch(() => {});`,
+		},
+		{
+			id: "newsletter",
+			code: `    // Newsletter check
+    fetch('/api/newsletter/status')
+      .then(r => r.json()).then(d => { /* update form */ });`,
+		},
+		{
+			id: "csrf",
+			code: `    // CSRF token refresh
+    fetch('/api/csrf-token').then(r => r.json()).then(d => {
+      document.querySelectorAll('input[name=csrf_token]').forEach(i => i.value = d.token);
+    });`,
+		},
+		{
+			id: "websocket",
+			code: `    // WebSocket connection for real-time updates
+    if (window.WebSocket) {
+      var ws = new WebSocket('ws://' + location.host + '/ws/notifications');
+      ws.onmessage = function(e) { /* handle notification */ };
+    }`,
+		},
+		{
+			id: "related-content",
+			code: `    // Dynamic content loading
+    fetch('/api/v1/content/related?path=' + encodeURIComponent(location.pathname))
+      .then(r => r.json()).then(d => { /* populate sidebar */ });`,
+		},
+		{
+			id: "products-rec",
+			code: `    // Product recommendations
+    fetch('/api/v1/products/recommendations?limit=4')
+      .then(r => r.json()).then(d => { /* show products */ });`,
+		},
+		{
+			id: "search-suggest",
+			code: `    // Search suggestions on input
+    document.querySelector('#search-input')?.addEventListener('input', function(e) {
+      fetch('/api/search/suggest?q=' + encodeURIComponent(e.target.value))
+        .then(r => r.json()).then(d => { /* show dropdown */ });
+    });`,
+		},
+	}
+}
+
+// generateAPIScriptBlock produces a <script> tag containing a deterministic subset of
+// realistic JavaScript API calls. The RNG controls which 8-12 calls appear on this page.
+func generateAPIScriptBlock(rng *rand.Rand) string {
+	all := allAPICallSnippets()
+
+	// Shuffle the pool deterministically using Fisher-Yates.
+	shuffled := make([]apiCallSnippet, len(all))
+	copy(shuffled, all)
+	for i := len(shuffled) - 1; i > 0; i-- {
+		j := rng.Intn(i + 1)
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	}
+
+	// Pick between 8 and 12 snippets (clamped to pool size).
+	count := 8 + rng.Intn(5) // 8..12
+	if count > len(shuffled) {
+		count = len(shuffled)
+	}
+	selected := shuffled[:count]
+
+	var sb strings.Builder
+	sb.WriteString("  <script>\n  document.addEventListener('DOMContentLoaded', function() {\n")
+	for i, snippet := range selected {
+		sb.WriteString(snippet.code)
+		sb.WriteString("\n")
+		if i < len(selected)-1 {
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("  });\n  </script>")
+	return sb.String()
+}
+
+// prefetchEntry represents a <link> prefetch/preconnect/dns-prefetch hint.
+type prefetchEntry struct {
+	rel  string
+	href string
+}
+
+// allPrefetchEntries returns the full pool of link-hint entries for the <head>.
+func allPrefetchEntries() []prefetchEntry {
+	return []prefetchEntry{
+		{rel: "prefetch", href: "/api/v1/users/me"},
+		{rel: "preconnect", href: "/api/v1/notifications"},
+		{rel: "dns-prefetch", href: "/api/v1/content/related"},
+		{rel: "prefetch", href: "/api/auth/status"},
+		{rel: "prefetch", href: "/api/csrf-token"},
+		{rel: "preconnect", href: "/api/v1/products/recommendations"},
+		{rel: "dns-prefetch", href: "/api/comments"},
+		{rel: "prefetch", href: "/api/newsletter/status"},
+		{rel: "dns-prefetch", href: "/api/autocomplete"},
+		{rel: "prefetch", href: "/api/search/suggest"},
+	}
+}
+
+// generateAPIPrefetchLinks produces 3-6 deterministic <link> prefetch/preconnect hints.
+func generateAPIPrefetchLinks(rng *rand.Rand) string {
+	all := allPrefetchEntries()
+
+	// Shuffle deterministically.
+	shuffled := make([]prefetchEntry, len(all))
+	copy(shuffled, all)
+	for i := len(shuffled) - 1; i > 0; i-- {
+		j := rng.Intn(i + 1)
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	}
+
+	count := 3 + rng.Intn(4) // 3..6
+	if count > len(shuffled) {
+		count = len(shuffled)
+	}
+
+	var sb strings.Builder
+	for _, entry := range shuffled[:count] {
+		sb.WriteString(fmt.Sprintf("  <link rel=\"%s\" href=\"%s\">\n", entry.rel, entry.href))
+	}
+	return sb.String()
+}
+
+// hiddenLinkEntry represents a hidden <a> tag for API endpoint discovery.
+type hiddenLinkEntry struct {
+	href  string
+	label string
+}
+
+// allHiddenLinks returns the full pool of hidden anchor links for scanner discovery.
+func allHiddenLinks() []hiddenLinkEntry {
+	return []hiddenLinkEntry{
+		{href: "/api/v1/docs", label: "API Documentation"},
+		{href: "/api/v2/graphql", label: "GraphQL"},
+		{href: "/swagger/index.html", label: "Swagger UI"},
+		{href: "/api/v1/openapi.json", label: "OpenAPI Spec"},
+		{href: "/api/v1/health", label: "API Health"},
+		{href: "/api/v2/schema", label: "API Schema"},
+		{href: "/api/v1/admin", label: "Admin API"},
+		{href: "/api/v1/debug", label: "Debug Console"},
+		{href: "/.well-known/openid-configuration", label: "OpenID Config"},
+		{href: "/api/v1/webhooks", label: "Webhooks"},
+	}
+}
+
+// generateHiddenAPILinks produces 3-5 deterministic hidden <a> tags that reference
+// API documentation and other discoverable endpoints.
+func generateHiddenAPILinks(rng *rand.Rand) string {
+	all := allHiddenLinks()
+
+	shuffled := make([]hiddenLinkEntry, len(all))
+	copy(shuffled, all)
+	for i := len(shuffled) - 1; i > 0; i-- {
+		j := rng.Intn(i + 1)
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	}
+
+	count := 3 + rng.Intn(3) // 3..5
+	if count > len(shuffled) {
+		count = len(shuffled)
+	}
+
+	var sb strings.Builder
+	for _, link := range shuffled[:count] {
+		sb.WriteString(fmt.Sprintf("  <a href=\"%s\" style=\"position:absolute;left:-9999px\">%s</a>\n", link.href, link.label))
+	}
+	return sb.String()
 }
