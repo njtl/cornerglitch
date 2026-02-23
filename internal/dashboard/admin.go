@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/scaneval"
+	"github.com/glitchWebServer/internal/spider"
 )
 
 // ---------------------------------------------------------------------------
@@ -38,6 +39,7 @@ type FeatureFlags struct {
 	websocket      bool
 	privacy        bool
 	health         bool
+	spider         bool
 }
 
 // NewFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -64,6 +66,7 @@ func NewFeatureFlags() *FeatureFlags {
 		websocket:      true,
 		privacy:        true,
 		health:         true,
+		spider:         true,
 	}
 }
 
@@ -193,6 +196,12 @@ func (f *FeatureFlags) IsHealthEnabled() bool {
 	return f.health
 }
 
+func (f *FeatureFlags) IsSpiderEnabled() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.spider
+}
+
 // Set toggles a named feature. Returns false if the name is unknown.
 func (f *FeatureFlags) Set(name string, enabled bool) bool {
 	f.mu.Lock()
@@ -240,6 +249,8 @@ func (f *FeatureFlags) Set(name string, enabled bool) bool {
 		f.privacy = enabled
 	case "health":
 		f.health = enabled
+	case "spider":
+		f.spider = enabled
 	default:
 		return false
 	}
@@ -272,6 +283,7 @@ func (f *FeatureFlags) Snapshot() map[string]bool {
 		"websocket":       f.websocket,
 		"privacy":         f.privacy,
 		"health":          f.health,
+		"spider":          f.spider,
 	}
 }
 
@@ -849,10 +861,11 @@ func (pc *ProxyConfig) Snapshot() map[string]interface{} {
 // ---------------------------------------------------------------------------
 
 var (
-	globalFlags       = NewFeatureFlags()
-	globalConfig      = NewAdminConfig()
-	globalVulnConfig  = NewVulnConfig()
-	globalProxyConfig = NewProxyConfig()
+	globalFlags        = NewFeatureFlags()
+	globalConfig       = NewAdminConfig()
+	globalVulnConfig   = NewVulnConfig()
+	globalProxyConfig  = NewProxyConfig()
+	globalSpiderConfig = spider.NewConfig()
 
 	// Scanner runner — uses the real scanner package
 	scanRunner   *scaneval.Runner
@@ -873,6 +886,17 @@ func GetVulnConfig() *VulnConfig { return globalVulnConfig }
 
 // GetProxyConfig returns the global ProxyConfig instance.
 func GetProxyConfig() *ProxyConfig { return globalProxyConfig }
+
+// GetSpiderConfig returns the global spider Config instance.
+func GetSpiderConfig() *spider.Config { return globalSpiderConfig }
+
+// SetSpiderConfig replaces the global spider Config singleton. This allows
+// the main function to share the same Config instance with the spider handler.
+func SetSpiderConfig(cfg *spider.Config) {
+	if cfg != nil {
+		globalSpiderConfig = cfg
+	}
+}
 
 // getScanRunner returns the singleton scaneval.Runner, creating it on first call.
 func getScanRunner() *scaneval.Runner {

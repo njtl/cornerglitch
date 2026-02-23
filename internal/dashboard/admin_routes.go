@@ -156,6 +156,15 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		})
 	})
 
+	// Spider config
+	mux.HandleFunc("/admin/api/spider", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			adminAPISpiderPost(w, r)
+		} else {
+			adminAPISpiderGet(w, r)
+		}
+	})
+
 	// Vulnerability controls
 	mux.HandleFunc("/admin/api/vulns", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -1012,6 +1021,60 @@ func adminAPIPageTypeWeightsPost(w http.ResponseWriter, r *http.Request) {
 		"ok":        true,
 		"page_type": req.PageType,
 		"weight":    req.Weight,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Spider config handlers
+// ---------------------------------------------------------------------------
+
+func adminAPISpiderGet(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(globalSpiderConfig.Snapshot())
+}
+
+func adminAPISpiderPost(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Key   string      `json:"key"`
+		Value interface{} `json:"value"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	// JSON numbers decode as float64; convert appropriately for the spider config.
+	var typedValue interface{}
+	switch v := req.Value.(type) {
+	case float64:
+		typedValue = v
+	case bool:
+		typedValue = v
+	case string:
+		typedValue = v
+	default:
+		typedValue = req.Value
+	}
+
+	if !globalSpiderConfig.Set(req.Key, typedValue) {
+		http.Error(w, `{"error":"unknown key or invalid value type"}`, http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":    true,
+		"key":   req.Key,
+		"value": req.Value,
 	})
 }
 

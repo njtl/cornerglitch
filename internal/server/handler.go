@@ -32,6 +32,7 @@ import (
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/search"
+	"github.com/glitchWebServer/internal/spider"
 	"github.com/glitchWebServer/internal/vuln"
 	"github.com/glitchWebServer/internal/websocket"
 )
@@ -74,6 +75,7 @@ type Handler struct {
 	cookieT   *cookies.Tracker
 	jsEng     *jstrap.Engine
 	botDet    *botdetect.Detector
+	spiderH   *spider.Handler
 	flags     *dashboard.FeatureFlags
 	config    *dashboard.AdminConfig
 }
@@ -105,6 +107,7 @@ func NewHandler(
 	cookieT *cookies.Tracker,
 	jsEng *jstrap.Engine,
 	botDet *botdetect.Detector,
+	spiderH *spider.Handler,
 ) *Handler {
 	return &Handler{
 		collector: collector,
@@ -133,6 +136,7 @@ func NewHandler(
 		cookieT:   cookieT,
 		jsEng:     jsEng,
 		botDet:    botDet,
+		spiderH:   spiderH,
 		flags:     dashboard.GetFeatureFlags(),
 		config:    dashboard.GetAdminConfig(),
 	}
@@ -256,6 +260,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		color = purple
 	case responseType == "blocked":
 		color = red
+	case responseType == "spider":
+		color = cyan
 	}
 
 	log.Printf("%s[%s]%s %s %s %d %s (client=%s class=%s mode=%s)",
@@ -275,6 +281,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.healthH != nil && h.flags.IsHealthEnabled() && h.healthH.ShouldHandle(r.URL.Path) {
 		status := h.healthH.ServeHTTP(w, r)
 		return status, "health"
+	}
+
+	// Spider/crawler resource files (robots.txt, sitemap.xml, favicon.ico, etc.)
+	if h.spiderH != nil && h.flags.IsSpiderEnabled() && h.spiderH.ShouldHandle(r.URL.Path) {
+		status := h.spiderH.ServeHTTP(w, r)
+		return status, "spider"
 	}
 
 	// JS trap challenge/beacon endpoints
