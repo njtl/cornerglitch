@@ -438,3 +438,108 @@ func TestConfigStringAPI(t *testing.T) {
 		t.Errorf("honeypot_response_style: got %v, want 'tarpit'", cfg2["honeypot_response_style"])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ProxyConfig tests
+// ---------------------------------------------------------------------------
+
+func TestProxyConfig_Default(t *testing.T) {
+	pc := NewProxyConfig()
+	if pc.GetMode() != "transparent" {
+		t.Errorf("default mode: got %q, want 'transparent'", pc.GetMode())
+	}
+	snap := pc.Snapshot()
+	if snap["mode"].(string) != "transparent" {
+		t.Error("snapshot mode should be transparent")
+	}
+	if snap["waf_enabled"].(bool) != false {
+		t.Error("waf_enabled should be false by default")
+	}
+}
+
+func TestProxyConfig_SetMode(t *testing.T) {
+	pc := NewProxyConfig()
+
+	for _, mode := range ProxyModes {
+		if !pc.SetMode(mode) {
+			t.Errorf("SetMode(%q) should return true", mode)
+		}
+		if pc.GetMode() != mode {
+			t.Errorf("after SetMode(%q), GetMode() = %q", mode, pc.GetMode())
+		}
+	}
+
+	// Invalid mode
+	if pc.SetMode("invalid_mode") {
+		t.Error("SetMode('invalid_mode') should return false")
+	}
+}
+
+func TestProxyConfig_WAFAutoEnable(t *testing.T) {
+	pc := NewProxyConfig()
+
+	pc.SetMode("waf")
+	snap := pc.Snapshot()
+	if snap["waf_enabled"].(bool) != true {
+		t.Error("waf mode should auto-enable WAF")
+	}
+
+	pc.SetMode("transparent")
+	snap = pc.Snapshot()
+	if snap["waf_enabled"].(bool) != false {
+		t.Error("transparent mode should auto-disable WAF")
+	}
+
+	pc.SetMode("nightmare")
+	snap = pc.Snapshot()
+	if snap["waf_enabled"].(bool) != true {
+		t.Error("nightmare mode should auto-enable WAF")
+	}
+}
+
+func TestProxyModeAPI(t *testing.T) {
+	origPC := globalProxyConfig
+	globalProxyConfig = NewProxyConfig()
+	defer func() { globalProxyConfig = origPC }()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/admin/api/proxy/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(globalProxyConfig.Snapshot())
+	})
+	mux.HandleFunc("/admin/api/proxy/mode", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var req struct {
+			Mode string `json:"mode"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		if !globalProxyConfig.SetMode(req.Mode) {
+			http.Error(w, `{"error":"invalid proxy mode"}`, http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "mode": req.Mode})
+	})
+
+	// Set mode to nightmare
+	body := `{"mode":"nightmare"}`
+	req := httptest.NewRequest("POST", "/admin/api/proxy/mode", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("POST status: %d", rec.Code)
+	}
+
+	// Verify GET returns nightmare
+	req2 := httptest.NewRequest("GET", "/admin/api/proxy/status", nil)
+	rec2 := httptest.NewRecorder()
+	mux.ServeHTTP(rec2, req2)
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec2.Body.Bytes(), &resp)
+	if resp["mode"].(string) != "nightmare" {
+		t.Errorf("GET proxy/status mode: got %q, want 'nightmare'", resp["mode"])
+	}
+	if resp["waf_enabled"].(bool) != true {
+		t.Error("nightmare mode should have waf_enabled=true")
+	}
+}
