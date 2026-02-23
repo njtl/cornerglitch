@@ -2357,6 +2357,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   }
 
   // ------ Proxy Tab ------
+  var proxyModeDescriptions = {
+    transparent: 'Pass-through mode. All requests and responses flow without any modification. Useful as a baseline or when you want zero interference.',
+    waf: 'Web Application Firewall mode. Inspects requests for SQL injection, XSS, path traversal, and other attack patterns. Matching requests are handled according to the configured block action.',
+    chaos: 'Chaos engineering mode. Randomly injects latency, corrupts responses, drops connections, and resets sockets based on configured probabilities. Useful for resilience testing.',
+    gateway: 'API gateway mode. Combines WAF filtering with rate limiting. Requests exceeding the rate limit are throttled or rejected.',
+    nightmare: 'Maximum chaos mode. Activates WAF, chaos injection, and all glitch behaviors simultaneously. Every request is subjected to the full gauntlet of unreliability.'
+  };
+
   async function refreshProxy() {
     try {
       const data = await api('/admin/api/proxy/status');
@@ -2364,9 +2372,15 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       const chaosConf = data.chaos_config || {};
       const mode = data.mode || 'transparent';
 
-      // Update metric cards
+      // Mode badge color
+      var modeColors = {transparent:'#00ff88',waf:'#ffaa00',chaos:'#ff4444',gateway:'#4488ff',nightmare:'#ff44ff'};
+      var modeColor = modeColors[mode] || '#888';
+
+      // Update metric cards with colored mode badge
       document.getElementById('proxy-metrics').innerHTML =
-        card('Mode', (mode || 'transparent').toUpperCase(), 'v-info') +
+        '<div class="card"><div class="label">Current Mode</div><div class="value" style="color:' + modeColor + '">' +
+          '<span style="display:inline-block;background:' + modeColor + '22;border:1px solid ' + modeColor + ';padding:4px 14px;border-radius:20px;font-size:0.75em;letter-spacing:1px">' +
+          (mode || 'transparent').toUpperCase() + '</span></div></div>' +
         card('Requests Processed', (stats.requests_processed || 0).toLocaleString(), 'v-ok') +
         card('Responses Processed', (stats.responses_processed || 0).toLocaleString(), 'v-ok') +
         card('Requests Blocked', (stats.requests_blocked || 0).toLocaleString(), (stats.requests_blocked || 0) > 0 ? 'v-err' : 'v-ok') +
@@ -2376,8 +2390,15 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var radios = document.querySelectorAll('input[name="proxy-mode"]');
       radios.forEach(function(r) { r.checked = r.value === mode; });
 
+      // Update mode description
+      var descEl = document.getElementById('proxy-mode-desc');
+      if (descEl) {
+        descEl.innerHTML = '<span style="color:' + modeColor + ';font-weight:bold">' + (mode || 'transparent').toUpperCase() + ':</span> ' + (proxyModeDescriptions[mode] || 'Unknown mode.');
+      }
+
       // WAF status
       var wafEl = document.getElementById('proxy-waf-status');
+      var wafSettingsEl = document.getElementById('proxy-waf-settings');
       if (data.waf_enabled) {
         var wafStats = data.waf_stats || {};
         wafEl.innerHTML =
@@ -2385,19 +2406,17 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
             card('Detections', (wafStats.detections || 0).toLocaleString(), 'v-warn') +
             card('Rate Limited', (wafStats.rate_limited || 0).toLocaleString(), 'v-err') +
             card('Block Action', wafStats.block_action || 'reject', 'v-info') +
-          '</div>' +
-          '<div style="margin-top:8px;">' +
-            '<label class="toggle-row" style="display:inline-flex;gap:12px;">' +
-              '<span class="toggle-name">Block Action</span>' +
-              '<select class="ctrl-select" style="width:auto;min-width:120px;" onchange="setWafBlockAction(this.value)">' +
-                '<option value="reject"' + (wafStats.block_action === 'reject' ? ' selected' : '') + '>Reject</option>' +
-                '<option value="tarpit"' + (wafStats.block_action === 'tarpit' ? ' selected' : '') + '>Tarpit</option>' +
-                '<option value="redirect"' + (wafStats.block_action === 'redirect' ? ' selected' : '') + '>Redirect</option>' +
-              '</select>' +
-            '</label>' +
           '</div>';
+        if (wafSettingsEl) {
+          wafSettingsEl.style.display = 'block';
+          var actionSelect = document.getElementById('proxy-waf-action');
+          if (actionSelect && wafStats.block_action) {
+            actionSelect.value = wafStats.block_action;
+          }
+        }
       } else {
-        wafEl.innerHTML = '<div style="color:#555">WAF not enabled. Select WAF mode to activate.</div>';
+        wafEl.innerHTML = '<div style="color:#555">WAF not enabled. Select WAF, Gateway, or Nightmare mode to activate.</div>';
+        if (wafSettingsEl) wafSettingsEl.style.display = 'none';
       }
 
       // Chaos sliders
@@ -2406,6 +2425,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         slider('proxy_corrupt_prob', 'Corruption Probability', chaosConf.corrupt_prob || 0, 0, 1, 0.01) +
         slider('proxy_drop_prob', 'Drop Probability', chaosConf.drop_prob || 0, 0, 1, 0.01) +
         slider('proxy_reset_prob', 'Reset Probability', chaosConf.reset_prob || 0, 0, 1, 0.01);
+
+      // Connection info
+      var connEl = document.getElementById('proxy-active-conns');
+      if (connEl) connEl.textContent = (stats.active_connections || 0).toLocaleString();
+      var fwdEl = document.getElementById('proxy-fwd-reqs');
+      if (fwdEl) fwdEl.textContent = (stats.requests_processed || 0).toLocaleString();
+      var blkEl = document.getElementById('proxy-blocked-reqs');
+      if (blkEl) blkEl.textContent = (stats.requests_blocked || 0).toLocaleString();
 
       // Pipeline table
       var interceptors = data.interceptors || [];
@@ -2460,7 +2487,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       }
       tb.innerHTML = d.files.map(f =>
         '<tr><td>' + escapeHtml(f.name) + '</td><td>' + f.size + '</td><td>' + f.modified + '</td>' +
-        '<td><button class="btn" onclick="replayLoad(\'' + escapeHtml(f.name) + '\')">Load</button></td></tr>'
+        '<td><button class="scanner-btn" style="padding:4px 12px;font-size:0.78em" onclick="replayLoad(\'' + escapeHtml(f.name) + '\')">Load</button></td></tr>'
       ).join('');
     } catch(e) { console.error('refreshReplayFiles:', e); }
   };
@@ -2473,17 +2500,171 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   async function refreshReplayStatus() {
     try {
       const d = await api('/admin/api/replay/status');
-      document.getElementById('replay-status').textContent = d.playing ? 'Playing' : 'Idle';
-      document.getElementById('replay-status').style.color = d.playing ? '#0f8' : '#666';
-      document.getElementById('replay-loaded').textContent = d.packets_loaded || 0;
-      document.getElementById('replay-played').textContent = d.packets_played || 0;
-      document.getElementById('replay-errors').textContent = d.errors || 0;
-      document.getElementById('replay-elapsed').textContent = (d.elapsed_ms || 0) + 'ms';
+      var loaded = d.packets_loaded || 0;
+      var played = d.packets_played || 0;
+      var errors = d.errors || 0;
+      var elapsed = d.elapsed_ms || 0;
+      var isPlaying = d.playing;
+      var loadedFile = d.loaded_file || '';
+
+      // State badge
+      var badge = document.getElementById('replay-state-badge');
+      var detail = document.getElementById('replay-state-detail');
+      if (badge) {
+        if (isPlaying) {
+          badge.textContent = 'PLAYING';
+          badge.style.background = '#00aa6633';
+          badge.style.color = '#00ff88';
+          badge.style.border = '1px solid #00ff88';
+          detail.textContent = played + ' / ' + loaded + ' packets';
+        } else if (loaded > 0 && played > 0 && played < loaded) {
+          badge.textContent = 'PAUSED';
+          badge.style.background = '#ffaa0033';
+          badge.style.color = '#ffaa00';
+          badge.style.border = '1px solid #ffaa00';
+          detail.textContent = played + ' / ' + loaded + ' packets';
+        } else if (loaded > 0 && played >= loaded && played > 0) {
+          badge.textContent = 'COMPLETED';
+          badge.style.background = '#4488ff33';
+          badge.style.color = '#4488ff';
+          badge.style.border = '1px solid #4488ff';
+          detail.textContent = played + ' / ' + loaded + ' packets done';
+        } else {
+          badge.textContent = 'STOPPED';
+          badge.style.background = '#222';
+          badge.style.color = '#666';
+          badge.style.border = '1px solid #333';
+          detail.textContent = loaded > 0 ? loaded + ' packets loaded' : 'No capture loaded';
+        }
+      }
+
+      // Progress bar
+      var pct = loaded > 0 ? Math.min(100, (played / loaded) * 100) : 0;
+      var progBar = document.getElementById('replay-progress-bar');
+      if (progBar) progBar.style.width = pct.toFixed(1) + '%%';
+      var progText = document.getElementById('replay-progress-text');
+      if (progText) progText.textContent = played + ' / ' + loaded + ' packets';
+
+      // Stats cards
+      document.getElementById('replay-loaded').textContent = loaded;
+      document.getElementById('replay-played').textContent = played;
+      document.getElementById('replay-errors').textContent = errors;
+      document.getElementById('replay-elapsed').textContent = elapsed > 1000 ? (elapsed / 1000).toFixed(1) + 's' : elapsed + 'ms';
+      var fileEl = document.getElementById('replay-loaded-file');
+      if (fileEl) fileEl.textContent = loadedFile || 'None';
+
+      // Target display
+      var targetInput = document.getElementById('replay-target');
+      var targetVal = targetInput ? (targetInput.value || 'http://localhost:8765') : 'http://localhost:8765';
+      var isSelf = targetVal.indexOf('localhost:8765') !== -1 || targetVal.indexOf('127.0.0.1:8765') !== -1;
+      var targetDisp = document.getElementById('replay-target-display');
+      if (targetDisp) targetDisp.innerHTML = 'Target: <span style="color:#00ffcc">' + escapeHtml(targetVal) + '</span>' + (isSelf ? ' <span style="color:#888">(self)</span>' : '');
+
+      // Play button state
+      var playBtn = document.getElementById('replay-play-btn');
+      if (playBtn) {
+        playBtn.textContent = isPlaying ? 'Playing...' : 'Play';
+        playBtn.disabled = isPlaying;
+      }
+
+      // Metadata display
+      if (d.metadata) {
+        renderReplayMetadata(d.metadata);
+      } else if (loaded > 0) {
+        try {
+          var meta = await api('/admin/api/replay/metadata');
+          renderReplayMetadata(meta);
+        } catch(me) {}
+      } else {
+        var metaSec = document.getElementById('replay-metadata-section');
+        if (metaSec) metaSec.style.display = 'none';
+      }
     } catch(e) { console.error('refreshReplayStatus:', e); }
+  }
+
+  function renderReplayMetadata(meta) {
+    var metaSec = document.getElementById('replay-metadata-section');
+    if (!meta || !meta.total_packets) {
+      if (metaSec) metaSec.style.display = 'none';
+      return;
+    }
+    if (metaSec) metaSec.style.display = 'block';
+
+    // Time span formatting
+    var spanMs = meta.time_span_ms || 0;
+    var spanStr = '';
+    if (spanMs > 3600000) spanStr = (spanMs / 3600000).toFixed(1) + ' hours';
+    else if (spanMs > 60000) spanStr = (spanMs / 60000).toFixed(1) + ' minutes';
+    else if (spanMs > 1000) spanStr = (spanMs / 1000).toFixed(1) + ' seconds';
+    else spanStr = spanMs + ' ms';
+
+    var hosts = meta.unique_hosts || [];
+
+    var cardsEl = document.getElementById('replay-metadata-cards');
+    if (cardsEl) {
+      cardsEl.innerHTML =
+        card('Total Packets', (meta.total_packets || 0).toLocaleString(), 'v-info') +
+        card('Total Requests', (meta.total_requests || 0).toLocaleString(), 'v-ok') +
+        card('Total Responses', (meta.total_responses || 0).toLocaleString(), 'v-ok') +
+        card('Unique Hosts', (Array.isArray(hosts) ? hosts.length : hosts || 0).toLocaleString(), 'v-warn') +
+        card('Unique Paths', (meta.unique_paths || 0).toLocaleString(), 'v-info') +
+        card('Time Span', spanStr, 'v-info');
+    }
+
+    // Method distribution bar
+    var methods = meta.methods || {};
+    var methodKeys = Object.keys(methods).sort(function(a,b) { return methods[b] - methods[a]; });
+    var totalMethods = methodKeys.reduce(function(s,k) { return s + methods[k]; }, 0) || 1;
+    var methodColors = {GET:'#00ff88',POST:'#4488ff',PUT:'#ffaa00',DELETE:'#ff4444',PATCH:'#aa44ff',HEAD:'#44ffaa',OPTIONS:'#888'};
+    var methodHtml = '<div style="font-size:0.78em;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Method Distribution</div>';
+    methodHtml += '<div style="display:flex;height:18px;border-radius:4px;overflow:hidden;margin-bottom:8px">';
+    methodKeys.forEach(function(m) {
+      var pctVal = (methods[m] / totalMethods * 100).toFixed(1);
+      var col = methodColors[m] || '#888';
+      methodHtml += '<div style="width:' + pctVal + '%%;background:' + col + ';min-width:' + (pctVal > 3 ? '0' : '2') + 'px" title="' + m + ': ' + methods[m] + ' (' + pctVal + '%%' + ')"></div>';
+    });
+    methodHtml += '</div>';
+    methodKeys.forEach(function(m) {
+      var col = methodColors[m] || '#888';
+      methodHtml += '<span style="margin-right:12px;font-size:0.78em"><span style="display:inline-block;width:8px;height:8px;background:' + col + ';border-radius:2px;margin-right:4px"></span>' + m + ': ' + methods[m] + '</span>';
+    });
+    var methodsEl = document.getElementById('replay-meta-methods');
+    if (methodsEl) methodsEl.innerHTML = methodHtml;
+
+    // Top paths
+    var topPaths = meta.top_paths || [];
+    var pathsHtml = '<div style="font-size:0.78em;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Top Paths</div>';
+    if (topPaths.length > 0) {
+      topPaths.slice(0, 10).forEach(function(p) {
+        var name = p.path || p.Path || '';
+        var count = p.count || p.Count || 0;
+        pathsHtml += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:0.78em;border-bottom:1px solid #1a1a1a">' +
+          '<span style="color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%%">' + escapeHtml(name) + '</span>' +
+          '<span style="color:#00ffcc">' + count + '</span></div>';
+      });
+    } else {
+      pathsHtml += '<div style="color:#555;font-size:0.78em">No paths recorded</div>';
+    }
+    var pathsEl = document.getElementById('replay-meta-paths');
+    if (pathsEl) pathsEl.innerHTML = pathsHtml;
+
+    // Protocols
+    var protocols = meta.protocols || [];
+    var protoEl = document.getElementById('replay-meta-protocols');
+    if (protoEl) {
+      if (protocols.length > 0) {
+        protoEl.innerHTML = 'Protocols: ' + protocols.map(function(p) {
+          return '<span style="background:#1a1a1a;border:1px solid #333;padding:2px 8px;border-radius:4px;margin-right:4px;color:#aaa">' + escapeHtml(p) + '</span>';
+        }).join('');
+      } else {
+        protoEl.innerHTML = '';
+      }
+    }
   }
 
   window.replayLoad = async function(file) {
     try {
+      toast('Loading ' + file + '...');
       const d = await fetch(API + '/admin/api/replay/load', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -2498,24 +2679,108 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) { console.error('replayLoad:', e); }
   };
 
+  window.replayUpload = async function() {
+    var fileInput = document.getElementById('replay-upload-file');
+    if (!fileInput.files || fileInput.files.length === 0) {
+      toast('Select a file first');
+      return;
+    }
+    var formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    try {
+      toast('Uploading...');
+      var resp = await fetch(API + '/admin/api/replay/upload', {
+        method: 'POST',
+        body: formData
+      }).then(r => r.json());
+      if (resp.ok) {
+        toast('Uploaded: ' + resp.file + ' (' + resp.size + ')');
+        fileInput.value = '';
+        refreshReplayFiles();
+      } else {
+        toast('Upload error: ' + (resp.error || 'unknown'));
+      }
+    } catch(e) {
+      toast('Upload failed: ' + e.message);
+      console.error('replayUpload:', e);
+    }
+  };
+
+  window.replayFetchURL = async function() {
+    var urlVal = document.getElementById('replay-fetch-url').value;
+    if (!urlVal) {
+      toast('Enter a URL first');
+      return;
+    }
+    try {
+      toast('Fetching from URL...');
+      var resp = await fetch(API + '/admin/api/replay/fetch-url', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: urlVal})
+      }).then(r => r.json());
+      if (resp.ok) {
+        toast('Downloaded: ' + resp.file + ' (' + resp.size + ')');
+        document.getElementById('replay-fetch-url').value = '';
+        refreshReplayFiles();
+      } else {
+        toast('Fetch error: ' + (resp.error || 'unknown'));
+      }
+    } catch(e) {
+      toast('Fetch failed: ' + e.message);
+      console.error('replayFetchURL:', e);
+    }
+  };
+
+  window.replayCleanup = async function() {
+    var maxMB = parseFloat(document.getElementById('replay-cleanup-size').value) || 500;
+    try {
+      var resp = await fetch(API + '/admin/api/replay/cleanup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({max_size_mb: maxMB})
+      }).then(r => r.json());
+      if (resp.ok) {
+        toast('Cleaned up: ' + resp.deleted + ' files, freed ' + (resp.freed_mb || 0).toFixed(1) + ' MB');
+        refreshReplayFiles();
+      } else {
+        toast('Cleanup error: ' + (resp.error || 'unknown'));
+      }
+    } catch(e) {
+      toast('Cleanup failed: ' + e.message);
+      console.error('replayCleanup:', e);
+    }
+  };
+
+  window.setReplaySpeed = function(speed) {
+    var el = document.getElementById('replay-speed');
+    el.value = speed;
+    document.getElementById('replay-speed-val').textContent = speed + 'x';
+  };
+
   window.replayStart = async function() {
     var target = document.getElementById('replay-target').value || 'http://localhost:8765';
     var timing = document.getElementById('replay-timing').value;
     var speed = parseFloat(document.getElementById('replay-speed').value) || 1.0;
     var filter = document.getElementById('replay-filter').value;
+    var loop = document.getElementById('replay-loop') ? document.getElementById('replay-loop').checked : false;
     try {
       const d = await fetch(API + '/admin/api/replay/start', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({target: target, timing: timing, speed: speed, filter_path: filter})
+        body: JSON.stringify({target: target, timing: timing, speed: speed, filter_path: filter, loop: loop})
       }).then(r => r.json());
       if (d.ok) {
-        toast('Replay started');
+        toast('Replay started against ' + target);
         refreshReplayStatus();
       } else {
         toast('Error: ' + (d.error || 'unknown'));
       }
     } catch(e) { console.error('replayStart:', e); }
+  };
+
+  window.replayPause = async function() {
+    await window.replayStop();
   };
 
   window.replayStop = async function() {
