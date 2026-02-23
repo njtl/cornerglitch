@@ -1341,3 +1341,214 @@ func TestEngine_CacheStats(t *testing.T) {
 		t.Errorf("engine cache initial size = %d, want 0", stats.Size)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 5. API discovery injection tests
+// ---------------------------------------------------------------------------
+
+func TestEngine_Serve_ContainsAPIScriptBlock(t *testing.T) {
+	eng := NewEngine()
+	defer eng.Stop()
+
+	paths := []string{"/blog/test-article", "/products/widget", "/about/team", "/services/consulting", "/"}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			eng.Serve(w, req)
+			body := w.Body.String()
+
+			if !strings.Contains(body, "DOMContentLoaded") {
+				t.Errorf("page %s missing DOMContentLoaded script wrapper", path)
+			}
+			if !strings.Contains(body, "fetch(") {
+				t.Errorf("page %s missing fetch() calls in script block", path)
+			}
+		})
+	}
+}
+
+func TestEngine_Serve_ContainsAPIPrefetchLinks(t *testing.T) {
+	eng := NewEngine()
+	defer eng.Stop()
+
+	paths := []string{"/blog/test-article", "/products/widget", "/"}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			eng.Serve(w, req)
+			body := w.Body.String()
+
+			hasPrefetch := strings.Contains(body, `rel="prefetch"`)
+			hasPreconnect := strings.Contains(body, `rel="preconnect"`)
+			hasDNSPrefetch := strings.Contains(body, `rel="dns-prefetch"`)
+
+			if !hasPrefetch && !hasPreconnect && !hasDNSPrefetch {
+				t.Errorf("page %s missing prefetch/preconnect/dns-prefetch link hints", path)
+			}
+		})
+	}
+}
+
+func TestEngine_Serve_ContainsHiddenAPILinks(t *testing.T) {
+	eng := NewEngine()
+	defer eng.Stop()
+
+	paths := []string{"/blog/test-article", "/products/widget", "/"}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			eng.Serve(w, req)
+			body := w.Body.String()
+
+			if !strings.Contains(body, `style="position:absolute;left:-9999px"`) {
+				t.Errorf("page %s missing hidden API discovery links", path)
+			}
+		})
+	}
+}
+
+func TestEngine_Serve_APIScriptHasVariation(t *testing.T) {
+	eng := NewEngine()
+	defer eng.Stop()
+
+	// Two different paths should have different API call selections (shuffled order).
+	req1 := httptest.NewRequest(http.MethodGet, "/blog/alpha-article", nil)
+	w1 := httptest.NewRecorder()
+	eng.Serve(w1, req1)
+	script1 := extractScriptBlock(w1.Body.String())
+
+	eng.cache.Clear()
+
+	req2 := httptest.NewRequest(http.MethodGet, "/products/beta-product", nil)
+	w2 := httptest.NewRecorder()
+	eng.Serve(w2, req2)
+	script2 := extractScriptBlock(w2.Body.String())
+
+	if script1 == "" {
+		t.Fatal("script block not found in first page")
+	}
+	if script2 == "" {
+		t.Fatal("script block not found in second page")
+	}
+	// The script blocks should differ because the RNG produces different shuffles.
+	if script1 == script2 {
+		t.Error("expected different API call selections for different pages, but they are identical")
+	}
+}
+
+func TestEngine_Serve_APIScriptIsDeterministic(t *testing.T) {
+	eng := NewEngine()
+	defer eng.Stop()
+
+	path := "/blog/deterministic-api-test"
+
+	req1 := httptest.NewRequest(http.MethodGet, path, nil)
+	w1 := httptest.NewRecorder()
+	eng.Serve(w1, req1)
+	body1 := w1.Body.String()
+
+	eng.cache.Clear()
+
+	req2 := httptest.NewRequest(http.MethodGet, path, nil)
+	w2 := httptest.NewRecorder()
+	eng.Serve(w2, req2)
+	body2 := w2.Body.String()
+
+	if body1 != body2 {
+		t.Error("same path should produce identical output including API script block")
+	}
+}
+
+func TestEngine_Serve_ScriptBlockContainsAPIEndpoints(t *testing.T) {
+	eng := NewEngine()
+	defer eng.Stop()
+
+	req := httptest.NewRequest(http.MethodGet, "/blog/endpoint-check", nil)
+	w := httptest.NewRecorder()
+	eng.Serve(w, req)
+	body := w.Body.String()
+
+	// Check that at least some well-known API endpoints appear in the body.
+	apiEndpoints := []string{
+		"/api/",
+	}
+	foundAny := false
+	for _, ep := range apiEndpoints {
+		if strings.Contains(body, ep) {
+			foundAny = true
+			break
+		}
+	}
+	if !foundAny {
+		t.Error("page should contain at least one /api/ endpoint reference in script block")
+	}
+}
+
+func TestGenerateAPIScriptBlock_SnippetCount(t *testing.T) {
+	// The function should include between 8 and 12 API call snippets.
+	// Each snippet begins with a JS comment line "    // ...".
+	for seed := int64(0); seed < 50; seed++ {
+		rng := rand.New(rand.NewSource(seed))
+		block := generateAPIScriptBlock(rng)
+
+		// Count snippet comment headers (each snippet starts with "    // ").
+		snippetCount := strings.Count(block, "\n    // ")
+		// The first snippet's comment may be at the start of the block after the opening line.
+		if strings.HasPrefix(block, "  <script>\n  document.addEventListener") {
+			snippetCount = strings.Count(block, "    // ")
+		}
+
+		if snippetCount < 8 || snippetCount > 12 {
+			t.Errorf("seed %d: expected 8-12 API call snippets, got %d", seed, snippetCount)
+		}
+
+		// Verify the block contains at least one fetch() call.
+		if !strings.Contains(block, "fetch(") {
+			t.Errorf("seed %d: script block missing any fetch() call", seed)
+		}
+	}
+}
+
+func TestGenerateAPIPrefetchLinks_Count(t *testing.T) {
+	for seed := int64(0); seed < 50; seed++ {
+		rng := rand.New(rand.NewSource(seed))
+		links := generateAPIPrefetchLinks(rng)
+
+		count := strings.Count(links, "<link ")
+		if count < 3 || count > 6 {
+			t.Errorf("seed %d: expected 3-6 prefetch links, got %d", seed, count)
+		}
+	}
+}
+
+func TestGenerateHiddenAPILinks_Count(t *testing.T) {
+	for seed := int64(0); seed < 50; seed++ {
+		rng := rand.New(rand.NewSource(seed))
+		links := generateHiddenAPILinks(rng)
+
+		count := strings.Count(links, "<a ")
+		if count < 3 || count > 5 {
+			t.Errorf("seed %d: expected 3-5 hidden links, got %d", seed, count)
+		}
+	}
+}
+
+// extractScriptBlock extracts the DOMContentLoaded script block from HTML.
+func extractScriptBlock(html string) string {
+	start := strings.Index(html, "document.addEventListener('DOMContentLoaded'")
+	if start == -1 {
+		return ""
+	}
+	// Find the enclosing </script>
+	end := strings.Index(html[start:], "</script>")
+	if end == -1 {
+		return ""
+	}
+	return html[start : start+end]
+}
