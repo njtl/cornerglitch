@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/glitchWebServer/internal/scaneval"
 )
 
 // ---------------------------------------------------------------------------
@@ -700,7 +700,7 @@ func adminAPIScannerCompare(w http.ResponseWriter, r *http.Request, s *Server) {
 	}
 
 	profile := buildScannerProfile()
-	report, err := scanner.ParseAndCompare(req.Scanner, []byte(req.Data), profile)
+	report, err := scaneval.ParseAndCompare(req.Scanner, []byte(req.Data), profile)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"error":   err.Error(),
@@ -998,7 +998,7 @@ func adminAPIScannerHistory(w http.ResponseWriter, r *http.Request, s *Server) {
 	w.Header().Set("Content-Type", "application/json")
 
 	scannerFilter := r.URL.Query().Get("scanner")
-	var entries []scanner.HistoryEntry
+	var entries []scaneval.HistoryEntry
 	if scannerFilter != "" {
 		entries = comparisonHistory.GetByScanner(scannerFilter)
 	} else {
@@ -1035,10 +1035,10 @@ func adminAPIScannerMultiCompare(w http.ResponseWriter, r *http.Request, s *Serv
 	}
 
 	profile := buildScannerProfile()
-	reports := make(map[string]*scanner.ComparisonReport, len(req.Reports))
+	reports := make(map[string]*scaneval.ComparisonReport, len(req.Reports))
 
 	for scannerName, rawOutput := range req.Reports {
-		report, err := scanner.ParseAndCompare(scannerName, []byte(rawOutput), profile)
+		report, err := scaneval.ParseAndCompare(scannerName, []byte(rawOutput), profile)
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":   err.Error(),
@@ -1051,7 +1051,7 @@ func adminAPIScannerMultiCompare(w http.ResponseWriter, r *http.Request, s *Serv
 		comparisonHistory.Add(report)
 	}
 
-	mc := scanner.CompareMultiple(reports, profile)
+	mc := scaneval.CompareMultiple(reports, profile)
 	json.NewEncoder(w).Encode(mc)
 }
 

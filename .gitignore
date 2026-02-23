@@ -2,6 +2,7 @@
 /glitch
 /glitch-crawler
 /glitch-proxy
+/glitch-scanner
 *.exe
 
 # Go
