@@ -37,12 +37,22 @@ import (
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/search"
+	"github.com/glitchWebServer/internal/selftest"
 	"github.com/glitchWebServer/internal/server"
 	"github.com/glitchWebServer/internal/vuln"
 	"github.com/glitchWebServer/internal/websocket"
 )
 
 func main() {
+	// Check for subcommands before flag parsing.
+	if len(os.Args) > 1 && os.Args[1] == "selftest" {
+		if err := selftest.RunCLI(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	port := flag.Int("port", 8765, "Server port")
 	dashPort := flag.Int("dash-port", 8766, "Dashboard/metrics port")
 	configFile := flag.String("config", "", "Path to config JSON file to import on startup")
