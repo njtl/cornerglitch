@@ -440,7 +440,7 @@ func (r *Reporter) buildCoverage() map[string]*CoverageInfo {
 	coverage := make(map[string]*CoverageInfo)
 
 	for _, res := range r.results {
-		cat := res.Request.Category
+		cat := strings.ToLower(res.Request.Category)
 		if cat == "" {
 			cat = "general"
 		}
@@ -452,9 +452,9 @@ func (r *Reporter) buildCoverage() map[string]*CoverageInfo {
 		ci.Tested++
 	}
 
-	// Count detections per category.
+	// Count detections per category (normalized to lowercase for matching).
 	for _, f := range r.findings {
-		cat := f.Category
+		cat := strings.ToLower(f.Category)
 		if cat == "" {
 			cat = "general"
 		}
