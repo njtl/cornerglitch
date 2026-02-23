@@ -105,9 +105,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
 		return h.serveA10(w, r)
 	}
 
+	// OWASP API Security Top 10 (2023)
+	if h.APIShouldHandle(path) {
+		return h.ServeAPISecurity(w, r)
+	}
+
 	// Advanced vulnerability categories (CORS, redirect, XXE, SSTI, etc.)
 	if h.AdvancedShouldHandle(path) {
 		return h.ServeAdvanced(w, r)
+	}
+
+	// Modern OWASP categories (LLM Top 10, CI/CD Top 10, Cloud-Native Top 10)
+	if h.ModernShouldHandle(path) {
+		return h.ServeModern(w, r)
+	}
+
+	// OWASP Mobile Top 10, Privacy Top 10, Client-Side Top 10
+	if h.MobileShouldHandle(path) {
+		return h.ServeMobile(w, r)
 	}
 
 	// Dashboard/settings vulnerability emulations
@@ -133,62 +148,261 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
 
 func (h *Handler) serveIndex(w http.ResponseWriter, r *http.Request) int {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	body := `<h2>OWASP Top 10 (2021) Vulnerability Demos</h2>
-<p>This server emulates realistic vulnerable responses for educational purposes. All data is synthetic.</p>
-<ul>
-  <li><a href="/vuln/a01/">A01:2021 - Broken Access Control</a></li>
-  <li><a href="/vuln/a02/">A02:2021 - Cryptographic Failures</a></li>
-  <li><a href="/vuln/a03/">A03:2021 - Injection</a></li>
-  <li><a href="/vuln/a04/">A04:2021 - Insecure Design</a></li>
-  <li><a href="/vuln/a05/">A05:2021 - Security Misconfiguration</a></li>
-  <li><a href="/vuln/a06/">A06:2021 - Vulnerable and Outdated Components</a></li>
-  <li><a href="/vuln/a07/">A07:2021 - Identification and Authentication Failures</a></li>
-  <li><a href="/vuln/a08/">A08:2021 - Software and Data Integrity Failures</a></li>
-  <li><a href="/vuln/a09/">A09:2021 - Security Logging and Monitoring Failures</a></li>
-  <li><a href="/vuln/a10/">A10:2021 - Server-Side Request Forgery (SSRF)</a></li>
-</ul>
+	body := `<style>
+  .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-bottom: 28px; }
+  .dash-card { background: #fff; border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: 20px; transition: box-shadow 0.15s, border-color 0.15s; text-decoration: none; color: inherit; display: block; }
+  .dash-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: var(--brand-primary); text-decoration: none; }
+  .dash-card .card-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; }
+  .dash-card .card-icon svg { width: 20px; height: 20px; }
+  .dash-card h3 { font-size: 14px; font-weight: 600; margin: 0 0 6px; color: var(--text-primary); }
+  .dash-card p { font-size: 12.5px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+  .dash-card .card-meta { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 11px; color: var(--text-muted); }
+  .dash-card .card-meta .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .icon-blue { background: #dbeafe; color: #2563eb; }
+  .icon-green { background: #d1fae5; color: #059669; }
+  .icon-purple { background: #ede9fe; color: #7c3aed; }
+  .icon-amber { background: #fef3c7; color: #d97706; }
+  .icon-red { background: #fee2e2; color: #dc2626; }
+  .icon-cyan { background: #cffafe; color: #0891b2; }
+  .icon-indigo { background: #e0e7ff; color: #4f46e5; }
+  .icon-rose { background: #ffe4e6; color: #e11d48; }
+  .section-heading { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin: 28px 0 14px; display: flex; align-items: center; gap: 8px; }
+  .section-heading::after { content: ''; flex: 1; height: 1px; background: var(--border-light); }
+  .two-col { display: grid; grid-template-columns: 1fr 360px; gap: 20px; margin-top: 8px; }
+  @media (max-width: 960px) { .two-col { grid-template-columns: 1fr; } }
+  .activity-list { list-style: none; padding: 0; margin: 0; }
+  .activity-list li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-light); font-size: 13px; align-items: flex-start; }
+  .activity-list li:last-child { border-bottom: none; }
+  .activity-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+  .activity-time { color: var(--text-muted); font-size: 11px; white-space: nowrap; margin-left: auto; flex-shrink: 0; }
+  .activity-text { color: var(--text-secondary); flex: 1; }
+  .activity-text strong { color: var(--text-primary); font-weight: 550; }
+  .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .status-item { background: var(--sidebar-bg); border: 1px solid var(--border-light); border-radius: var(--radius); padding: 12px 14px; }
+  .status-item .status-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+  .status-item .status-value { font-size: 16px; font-weight: 650; color: var(--text-primary); display: flex; align-items: center; gap: 6px; }
+  .status-item .status-value .indicator { width: 8px; height: 8px; border-radius: 50%; }
+  .status-item .status-value .indicator.green { background: #059669; }
+  .status-item .status-value .indicator.yellow { background: #d97706; }
+  .status-item .status-value .indicator.red { background: #dc2626; }
+  .stat-bar { display: flex; gap: 0; height: 32px; border-radius: 6px; overflow: hidden; margin-top: 16px; }
+  .stat-bar > div { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; }
+</style>
 
-<h2>Advanced Vulnerability Emulations</h2>
-<ul>
-  <li><a href="/vuln/cors/reflect">CORS Misconfiguration</a> — origin reflection, null origin, wildcard+credentials</li>
-  <li><a href="/vuln/redirect?url=https://evil.example.com">Open Redirect</a> — unvalidated URL redirection</li>
-  <li><a href="/vuln/xxe/parse">XXE Injection</a> — XML external entity processing</li>
-  <li><a href="/vuln/ssti/render?template={{7*7}}">SSTI</a> — server-side template injection</li>
-  <li><a href="/vuln/crlf/set?lang=en">CRLF Injection</a> — HTTP header injection via CRLF</li>
-  <li><a href="/vuln/host/reset">Host Header Injection</a> — password reset poisoning, cache poisoning</li>
-  <li><a href="/vuln/verb/admin">HTTP Verb Tampering</a> — method-based access control bypass</li>
-  <li><a href="/vuln/hpp/transfer?amount=100&to=alice">HTTP Parameter Pollution</a> — duplicate parameter handling</li>
-  <li><a href="/vuln/upload/form">Insecure File Upload</a> — unrestricted file type upload</li>
-  <li><a href="/vuln/cmd/ping?host=127.0.0.1">Command Injection</a> — OS command injection via user input</li>
-  <li><a href="/vuln/graphql/introspection">GraphQL Vulnerabilities</a> — introspection, batching, depth attacks</li>
-  <li><a href="/vuln/jwt/none">JWT Vulnerabilities</a> — none algorithm, weak keys, kid injection</li>
-  <li><a href="/vuln/race/coupon">Race Conditions</a> — TOCTOU, double-spend exploits</li>
-  <li><a href="/vuln/deserialize/java">Insecure Deserialization</a> — Java, Python, PHP gadget chains</li>
-  <li><a href="/vuln/path/traverse?file=../../../etc/passwd">Path Normalization</a> — directory traversal, path bypass</li>
-</ul>
+<div class="section-heading">Quick Access</div>
+<div class="dashboard-grid">
+  <a href="/vuln/a01/" class="dash-card">
+    <div class="card-icon icon-blue">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+    </div>
+    <h3>User Management</h3>
+    <p>Manage user accounts, permissions, and role assignments across the organization.</p>
+    <div class="card-meta"><span class="dot" style="background:#059669"></span> 248 active users</div>
+  </a>
+  <a href="/vuln/a02/" class="dash-card">
+    <div class="card-icon icon-green">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+    </div>
+    <h3>Credential Store</h3>
+    <p>Service credentials, encryption keys, and certificate management for production systems.</p>
+    <div class="card-meta"><span class="dot" style="background:#d97706"></span> 3 expiring soon</div>
+  </a>
+  <a href="/vuln/a03/" class="dash-card">
+    <div class="card-icon icon-purple">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+    </div>
+    <h3>Data Browser</h3>
+    <p>Query and inspect production data stores. Execute SQL, search records, and export results.</p>
+    <div class="card-meta"><span class="dot" style="background:#059669"></span> Connected</div>
+  </a>
+  <a href="/vuln/a05/" class="dash-card">
+    <div class="card-icon icon-amber">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    </div>
+    <h3>Configuration</h3>
+    <p>Server settings, environment variables, feature flags, and runtime configuration.</p>
+    <div class="card-meta"><span class="dot" style="background:#059669"></span> 12 modules loaded</div>
+  </a>
+  <a href="/vuln/a07/" class="dash-card">
+    <div class="card-icon icon-red">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    </div>
+    <h3>Authentication</h3>
+    <p>SSO configuration, session management, password policies, and MFA enrollment settings.</p>
+    <div class="card-meta"><span class="dot" style="background:#dc2626"></span> MFA not enforced</div>
+  </a>
+  <a href="/vuln/a06/" class="dash-card">
+    <div class="card-icon icon-cyan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+    </div>
+    <h3>Components</h3>
+    <p>Third-party libraries, system dependencies, and framework version tracking.</p>
+    <div class="card-meta"><span class="dot" style="background:#dc2626"></span> 6 critical updates</div>
+  </a>
+  <a href="/vuln/a09/" class="dash-card">
+    <div class="card-icon icon-indigo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    </div>
+    <h3>Reports &amp; Logs</h3>
+    <p>Access logs, security events, audit trail, and compliance monitoring dashboards.</p>
+    <div class="card-meta"><span class="dot" style="background:#059669"></span> Real-time</div>
+  </a>
+  <a href="/vuln/a10/" class="dash-card">
+    <div class="card-icon icon-rose">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+    </div>
+    <h3>Network &amp; Proxy</h3>
+    <p>Internal service routing, reverse proxy configuration, and outbound request policies.</p>
+    <div class="card-meta"><span class="dot" style="background:#d97706"></span> 2 rules pending</div>
+  </a>
+</div>
 
-<h2>Dashboard &amp; Settings Vulnerabilities</h2>
-<ul>
-  <li><a href="/vuln/dashboard/">Unauthenticated Admin Dashboard</a> — full admin access without login</li>
-  <li><a href="/vuln/dashboard/debug">Debug Information Disclosure</a> — env vars, routes, SQL queries, sessions</li>
-  <li><a href="/vuln/dashboard/phpinfo">PHPInfo Exposure</a> — full server configuration leak</li>
-  <li><a href="/vuln/dashboard/server-status">Server Status Page</a> — Apache mod_status style info leak</li>
-  <li><a href="/vuln/dashboard/api-keys">API Key Management</a> — keys shown in plaintext, no auth</li>
-  <li><a href="/vuln/dashboard/users">User Management</a> — admin user list with password hashes</li>
-  <li><a href="/vuln/dashboard/users/export">User Data Export</a> — CSV export of all user PII</li>
-  <li><a href="/vuln/dashboard/backup/download">Backup Download</a> — unauthenticated database backup</li>
-  <li><a href="/vuln/settings/">Insecure Settings Panel</a> — configuration without authentication</li>
-  <li><a href="/vuln/settings/database">Database Settings</a> — connection strings with credentials</li>
-  <li><a href="/vuln/settings/email">Email Settings</a> — SMTP credentials in plaintext</li>
-  <li><a href="/vuln/settings/integrations">Integration Settings</a> — third-party API keys exposed</li>
-  <li><a href="/vuln/settings/audit">Audit Log</a> — security events visible without auth</li>
-  <li><a href="/vuln/settings/flags">Feature Flags</a> — internal flags with secret values</li>
-  <li><a href="/vuln/settings/credentials">Service Credentials</a> — cloud provider access keys</li>
-  <li><a href="/vuln/settings/certificates">SSL Certificates</a> — private keys exposed</li>
-  <li><a href="/vuln/settings/tokens">API Tokens</a> — long-lived tokens with admin scope</li>
-</ul>`
+<div class="two-col">
+  <div>
+    <div class="card">
+      <div class="card-header">
+        <h3>Recent Activity</h3>
+        <a href="/vuln/settings/audit" style="font-size:12px;">View all</a>
+      </div>
+      <ul class="activity-list">
+        <li>
+          <span class="activity-dot" style="background:#dc2626"></span>
+          <span class="activity-text"><strong>admin@acme.com</strong> exported user database via <a href="/vuln/dashboard/users/export">CSV export</a></span>
+          <span class="activity-time">2 min ago</span>
+        </li>
+        <li>
+          <span class="activity-dot" style="background:#d97706"></span>
+          <span class="activity-text"><strong>svc-deploy</strong> rotated <a href="/vuln/dashboard/api-keys">API key</a> for production service</span>
+          <span class="activity-time">14 min ago</span>
+        </li>
+        <li>
+          <span class="activity-dot" style="background:#059669"></span>
+          <span class="activity-text"><strong>j.martinez</strong> updated <a href="/vuln/settings/database">database connection</a> pool settings</span>
+          <span class="activity-time">28 min ago</span>
+        </li>
+        <li>
+          <span class="activity-dot" style="background:#dc2626"></span>
+          <span class="activity-text">Failed login attempt for <strong>root</strong> from 203.0.113.42 &mdash; <a href="/vuln/a07/">review</a></span>
+          <span class="activity-time">43 min ago</span>
+        </li>
+        <li>
+          <span class="activity-dot" style="background:#2563eb"></span>
+          <span class="activity-text"><strong>admin@acme.com</strong> modified <a href="/vuln/a01/admin-panel">role permissions</a> for "Developer" group</span>
+          <span class="activity-time">1 hr ago</span>
+        </li>
+        <li>
+          <span class="activity-dot" style="background:#d97706"></span>
+          <span class="activity-text"><strong>system</strong> detected outdated <a href="/vuln/a06/">component versions</a> during scheduled scan</span>
+          <span class="activity-time">2 hrs ago</span>
+        </li>
+        <li>
+          <span class="activity-dot" style="background:#059669"></span>
+          <span class="activity-text"><strong>k.chen</strong> uploaded new <a href="/vuln/settings/certificates">TLS certificate</a> for api.acme.com</span>
+          <span class="activity-time">3 hrs ago</span>
+        </li>
+        <li>
+          <span class="activity-dot" style="background:#2563eb"></span>
+          <span class="activity-text"><strong>svc-backup</strong> completed <a href="/vuln/dashboard/backup/download">database backup</a> (4.2 GB)</span>
+          <span class="activity-time">4 hrs ago</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-header">
+        <h3>System Status</h3>
+        <span class="tag tag-success">Operational</span>
+      </div>
+      <div class="status-grid">
+        <div class="status-item">
+          <div class="status-label">Application</div>
+          <div class="status-value"><span class="indicator green"></span> Healthy</div>
+        </div>
+        <div class="status-item">
+          <div class="status-label">Database</div>
+          <div class="status-value"><span class="indicator green"></span> Connected</div>
+        </div>
+        <div class="status-item">
+          <div class="status-label">Cache</div>
+          <div class="status-value"><span class="indicator yellow"></span> 87%% hit</div>
+        </div>
+        <div class="status-item">
+          <div class="status-label">Queue</div>
+          <div class="status-value"><span class="indicator green"></span> 12 pending</div>
+        </div>
+      </div>
+      <div class="stat-bar">
+        <div style="width:72%;background:#059669">72%% OK</div>
+        <div style="width:18%;background:#d97706">18%% Warn</div>
+        <div style="width:10%;background:#dc2626">10%% Err</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>Quick Links</h3>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <a href="/vuln/dashboard/debug" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          Debug Console
+        </a>
+        <a href="/vuln/dashboard/phpinfo" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          Server Info
+        </a>
+        <a href="/vuln/dashboard/server-status" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Service Health
+        </a>
+        <a href="/vuln/settings/integrations" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          Integrations
+        </a>
+        <a href="/vuln/settings/tokens" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+          API Tokens
+        </a>
+        <a href="/vuln/dashboard/backup/download" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Backup &amp; Restore
+        </a>
+        <a href="/vuln/api-sec/" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          API Security Top 10
+        </a>
+        <a href="/vuln/llm/" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4M4.22 4.22l2.83 2.83m9.9 9.9l2.83 2.83M1 12h4m14 0h4M4.22 19.78l2.83-2.83m9.9-9.9l2.83-2.83"/></svg>
+          LLM Top 10
+        </a>
+        <a href="/vuln/cicd/" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          CI/CD Top 10
+        </a>
+        <a href="/vuln/cloud/" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>
+          Cloud-Native Top 10
+        </a>
+        <a href="/vuln/mobile/" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+          Mobile Top 10
+        </a>
+        <a href="/vuln/privacy-risks/" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          Privacy Top 10
+        </a>
+        <a href="/vuln/client-side/" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--text-secondary);transition:background 0.1s;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          Client-Side Top 10
+        </a>
+      </div>
+    </div>
+  </div>
+</div>`
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, h.wrapHTML("Vulnerability Emulation Index", body))
+	fmt.Fprint(w, h.wrapHTML("Portal Home", body))
 	return http.StatusOK
 }
 
@@ -1907,99 +2121,294 @@ func (h *Handler) wrapHTML(title, body string) string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>%s - Acme Corp</title>
+  <title>%s | Acme Corp Portal</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%%3E%%3Crect width='32' height='32' rx='6' fill='%%231a73e8'/%%3E%%3Ctext x='50%%%%' y='55%%%%' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-weight='700' font-size='18' fill='white'%%3EA%%3C/text%%3E%%3C/svg%%3E">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f6fa; color: #2d3436; line-height: 1.6; }
-    .topnav { background: #2d3436; color: #fff; padding: 0 24px; display: flex; align-items: center; height: 56px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .topnav .brand { font-weight: 700; font-size: 18px; margin-right: 32px; color: #00b894; }
-    .topnav a { color: #b2bec3; text-decoration: none; padding: 16px 12px; font-size: 14px; transition: color 0.2s; }
-    .topnav a:hover, .topnav a.active { color: #fff; border-bottom: 2px solid #00b894; }
-    .topnav .nav-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
-    .topnav .nav-right .user-badge { background: #636e72; padding: 4px 12px; border-radius: 20px; font-size: 13px; }
-    .layout { display: flex; min-height: calc(100vh - 56px); }
-    .sidebar { width: 220px; background: #fff; border-right: 1px solid #dfe6e9; padding: 20px 0; flex-shrink: 0; }
-    .sidebar a { display: block; padding: 10px 24px; color: #636e72; text-decoration: none; font-size: 14px; transition: all 0.2s; border-left: 3px solid transparent; }
-    .sidebar a:hover { background: #f5f6fa; color: #2d3436; border-left-color: #00b894; }
-    .sidebar a.active { background: #f0fff4; color: #00b894; border-left-color: #00b894; font-weight: 500; }
-    .sidebar .section-label { padding: 20px 24px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #b2bec3; font-weight: 600; }
-    .main-content { flex: 1; padding: 24px 32px; max-width: 1200px; }
-    .breadcrumbs { font-size: 13px; color: #b2bec3; margin-bottom: 20px; }
-    .breadcrumbs a { color: #0984e3; text-decoration: none; }
-    .breadcrumbs a:hover { text-decoration: underline; }
-    h1, h2, h3 { color: #2d3436; }
-    h1 { font-size: 24px; margin-bottom: 16px; }
-    h2 { font-size: 18px; margin: 24px 0 12px; }
-    h3 { font-size: 15px; margin: 16px 0 8px; }
-    a { color: #0984e3; text-decoration: none; }
+    :root {
+      --brand-primary: #1a73e8;
+      --brand-dark: #1557b0;
+      --brand-light: #e8f0fe;
+      --nav-bg: #1e293b;
+      --nav-hover: #334155;
+      --sidebar-bg: #f8fafc;
+      --sidebar-border: #e2e8f0;
+      --sidebar-hover: #f1f5f9;
+      --sidebar-active-bg: #e8f0fe;
+      --sidebar-active-text: #1a73e8;
+      --content-bg: #ffffff;
+      --page-bg: #f1f5f9;
+      --text-primary: #1e293b;
+      --text-secondary: #475569;
+      --text-muted: #94a3b8;
+      --border-light: #e2e8f0;
+      --border-medium: #cbd5e1;
+      --success: #059669;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --info: #0284c7;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+      --radius: 6px;
+      --radius-lg: 8px;
+    }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: var(--page-bg); color: var(--text-primary); line-height: 1.6; font-size: 14px; -webkit-font-smoothing: antialiased; }
+
+    /* ---- Top Navigation ---- */
+    .topnav { background: var(--nav-bg); color: #fff; padding: 0 24px; display: flex; align-items: center; height: 52px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); position: sticky; top: 0; z-index: 100; }
+    .topnav .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; margin-right: 36px; color: #fff; text-decoration: none; letter-spacing: -0.3px; }
+    .topnav .brand .brand-icon { width: 28px; height: 28px; background: var(--brand-primary); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; color: #fff; }
+    .topnav .nav-links { display: flex; align-items: center; height: 100%%; gap: 2px; }
+    .topnav .nav-links a { color: #94a3b8; text-decoration: none; padding: 0 14px; font-size: 13px; font-weight: 500; height: 52px; display: flex; align-items: center; transition: color 0.15s, background 0.15s; border-bottom: 2px solid transparent; position: relative; }
+    .topnav .nav-links a:hover { color: #e2e8f0; background: var(--nav-hover); }
+    .topnav .nav-links a.active { color: #fff; border-bottom-color: var(--brand-primary); }
+    .topnav .nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    .topnav .nav-right .nav-icon { color: #94a3b8; padding: 6px; border-radius: 6px; cursor: pointer; position: relative; transition: color 0.15s, background 0.15s; }
+    .topnav .nav-right .nav-icon:hover { color: #e2e8f0; background: var(--nav-hover); }
+    .topnav .nav-right .nav-icon .badge { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%%; border: 2px solid var(--nav-bg); }
+    .topnav .user-menu { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; border-radius: 6px; cursor: pointer; transition: background 0.15s; position: relative; }
+    .topnav .user-menu:hover { background: var(--nav-hover); }
+    .topnav .user-menu .avatar { width: 30px; height: 30px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border-radius: 50%%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #fff; }
+    .topnav .user-menu .user-info { line-height: 1.3; }
+    .topnav .user-menu .user-name { font-size: 13px; color: #e2e8f0; font-weight: 500; }
+    .topnav .user-menu .user-role { font-size: 11px; color: #94a3b8; }
+    .topnav .user-dropdown { display: none; position: absolute; top: 100%%; right: 0; background: #fff; border: 1px solid var(--border-light); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); min-width: 200px; padding: 4px 0; z-index: 200; }
+    .topnav .user-menu:hover .user-dropdown { display: block; }
+    .topnav .user-dropdown a { display: flex; align-items: center; gap: 8px; padding: 8px 16px; color: var(--text-secondary); font-size: 13px; text-decoration: none; transition: background 0.1s; }
+    .topnav .user-dropdown a:hover { background: var(--sidebar-hover); color: var(--text-primary); }
+    .topnav .user-dropdown .divider { height: 1px; background: var(--border-light); margin: 4px 0; }
+    .topnav .user-dropdown a.danger { color: var(--danger); }
+    .topnav .user-dropdown a.danger:hover { background: #fef2f2; }
+
+    /* ---- Layout ---- */
+    .layout { display: flex; min-height: calc(100vh - 52px); }
+
+    /* ---- Sidebar ---- */
+    .sidebar { width: 240px; background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); padding: 16px 0; flex-shrink: 0; overflow-y: auto; }
+    .sidebar .section-label { padding: 18px 20px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); font-weight: 600; }
+    .sidebar .section-label:first-child { padding-top: 4px; }
+    .sidebar .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 20px; color: var(--text-secondary); text-decoration: none; font-size: 13px; font-weight: 450; transition: all 0.12s; border-left: 3px solid transparent; margin: 1px 0; }
+    .sidebar .nav-item:hover { background: var(--sidebar-hover); color: var(--text-primary); }
+    .sidebar .nav-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); border-left-color: var(--brand-primary); font-weight: 550; }
+    .sidebar .nav-item .icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 14px; opacity: 0.7; }
+    .sidebar .nav-item .item-badge { margin-left: auto; background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; }
+    .sidebar .nav-item .item-badge.info { background: #dbeafe; color: #1e40af; }
+    .sidebar .nav-item .item-badge.success { background: #d1fae5; color: #065f46; }
+
+    /* ---- Main Content ---- */
+    .main-content { flex: 1; padding: 24px 32px; min-width: 0; }
+    .breadcrumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
+    .breadcrumbs a { color: var(--text-secondary); text-decoration: none; transition: color 0.1s; }
+    .breadcrumbs a:hover { color: var(--brand-primary); text-decoration: underline; }
+    .breadcrumbs .sep { color: var(--border-medium); font-size: 11px; }
+    .page-header { margin-bottom: 24px; }
+    .page-header h1 { font-size: 22px; font-weight: 650; color: var(--text-primary); letter-spacing: -0.3px; }
+    .page-header .subtitle { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ---- Typography ---- */
+    h1, h2, h3, h4 { color: var(--text-primary); }
+    h1 { font-size: 22px; font-weight: 650; margin-bottom: 16px; letter-spacing: -0.3px; }
+    h2 { font-size: 17px; font-weight: 600; margin: 24px 0 12px; }
+    h3 { font-size: 15px; font-weight: 600; margin: 18px 0 8px; }
+    a { color: var(--brand-primary); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    table { width: 100%%; border-collapse: collapse; margin: 12px 0; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-    td, th { border: none; border-bottom: 1px solid #f1f2f6; padding: 10px 14px; text-align: left; font-size: 14px; }
-    th { background: #f5f6fa; color: #636e72; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-    tr:hover { background: #f8f9fa; }
-    pre, code { background: #f5f6fa; padding: 2px 6px; border-radius: 4px; font-size: 13px; overflow-x: auto; font-family: 'SF Mono', 'Fira Code', monospace; }
-    pre { padding: 16px; display: block; border: 1px solid #dfe6e9; border-radius: 8px; }
-    .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 16px; margin: 12px 0; border-radius: 0 6px 6px 0; color: #856404; }
-    .admin-bar { background: #fff; padding: 12px 16px; margin: 12px 0; border: 1px solid #dfe6e9; border-radius: 8px; }
-    .error-detail { background: #fff; padding: 16px; border: 1px solid #dfe6e9; border-radius: 8px; }
-    .stacktrace { color: #d63031; font-size: 12px; white-space: pre-wrap; }
-    .result { border-bottom: 1px solid #f1f2f6; padding: 12px 0; }
+    p { margin-bottom: 12px; color: var(--text-secondary); }
+
+    /* ---- Tables ---- */
+    table { width: 100%%; border-collapse: collapse; margin: 12px 0; background: var(--content-bg); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid var(--border-light); }
+    td, th { border: none; border-bottom: 1px solid var(--border-light); padding: 10px 14px; text-align: left; font-size: 13px; }
+    th { background: var(--sidebar-bg); color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8fafc; }
+
+    /* ---- Code ---- */
+    pre, code { background: #f8fafc; padding: 2px 6px; border-radius: 4px; font-size: 12.5px; overflow-x: auto; font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace; color: var(--text-primary); }
+    pre { padding: 16px; display: block; border: 1px solid var(--border-light); border-radius: var(--radius-lg); line-height: 1.7; }
+
+    /* ---- Cards ---- */
+    .card { background: var(--content-bg); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); border: 1px solid var(--border-light); margin-bottom: 16px; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border-light); }
+    .card-header h3 { margin: 0; font-size: 14px; font-weight: 600; }
+
+    /* ---- Alerts ---- */
+    .warning { background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid var(--warning); padding: 12px 16px; margin: 12px 0; border-radius: 0 var(--radius) var(--radius) 0; color: #92400e; font-size: 13px; }
+    .admin-bar { background: var(--content-bg); padding: 12px 16px; margin: 12px 0; border: 1px solid var(--border-light); border-radius: var(--radius-lg); }
+    .error-detail { background: var(--content-bg); padding: 16px; border: 1px solid var(--border-light); border-radius: var(--radius-lg); }
+    .stacktrace { color: var(--danger); font-size: 12px; white-space: pre-wrap; }
+
+    /* ---- Misc ---- */
+    .result { border-bottom: 1px solid var(--border-light); padding: 12px 0; }
     ul { line-height: 1.8; padding-left: 20px; }
-    .card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px; }
-    .footer { background: #2d3436; color: #b2bec3; padding: 24px 32px; font-size: 13px; margin-top: 40px; }
-    .footer a { color: #74b9ff; }
-    .footer .footer-links { display: flex; gap: 24px; margin-bottom: 12px; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .tag-success { background: #d1fae5; color: #065f46; }
+    .tag-warning { background: #fef3c7; color: #92400e; }
+    .tag-danger { background: #fee2e2; color: #991b1b; }
+    .tag-info { background: #dbeafe; color: #1e40af; }
+
+    /* ---- Footer ---- */
+    .footer { background: var(--nav-bg); color: #94a3b8; padding: 20px 32px; font-size: 12px; }
+    .footer-inner { max-width: 1280px; }
+    .footer-top { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 16px; border-bottom: 1px solid #334155; margin-bottom: 12px; }
+    .footer-brand { font-size: 14px; font-weight: 600; color: #e2e8f0; margin-bottom: 4px; }
+    .footer-tagline { font-size: 12px; color: #64748b; }
+    .footer-links { display: flex; gap: 20px; flex-wrap: wrap; }
+    .footer-links a { color: #94a3b8; text-decoration: none; font-size: 12px; transition: color 0.1s; }
+    .footer-links a:hover { color: #e2e8f0; }
+    .footer-bottom { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .footer-copy { color: #64748b; }
+    .footer-version { color: #475569; font-family: monospace; font-size: 11px; }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 1024px) {
+      .sidebar { width: 200px; }
+      .main-content { padding: 20px 24px; }
+    }
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .main-content { padding: 16px; }
+      .topnav .nav-links a { padding: 0 8px; font-size: 12px; }
+    }
   </style>
 </head>
 <body>
-  <div class="topnav">
-    <span class="brand">Acme Corp</span>
-    <a href="/">Home</a>
-    <a href="/vuln/dashboard/">Dashboard</a>
-    <a href="/vuln/a01/">Users</a>
-    <a href="/vuln/settings/">Settings</a>
-    <a href="/search">Search</a>
-    <a href="/vuln/">All Modules</a>
-    <div class="nav-right">
-      <a href="/vuln/settings/audit">Audit Log</a>
-      <span class="user-badge">admin@acme</span>
-    </div>
-  </div>
-  <div class="layout">
-    <div class="sidebar">
-      <div class="section-label">Main</div>
+  <!-- Top Navigation -->
+  <nav class="topnav">
+    <a href="/vuln/" class="brand">
+      <span class="brand-icon">A</span>
+      Acme Corp
+    </a>
+    <div class="nav-links">
       <a href="/vuln/dashboard/">Dashboard</a>
-      <a href="/vuln/a01/">User Management</a>
-      <a href="/vuln/a03/">Data Browser</a>
-      <a href="/vuln/a04/">System Design</a>
-      <div class="section-label">Security</div>
-      <a href="/vuln/a02/">Credentials</a>
-      <a href="/vuln/a05/">Configuration</a>
-      <a href="/vuln/a07/">Authentication</a>
-      <a href="/vuln/a09/">Audit Logs</a>
-      <div class="section-label">Settings</div>
-      <a href="/vuln/settings/">General</a>
-      <a href="/vuln/settings/database">Database</a>
-      <a href="/vuln/settings/email">Email</a>
-      <a href="/vuln/settings/integrations">Integrations</a>
-    </div>
-    <div class="main-content">
-      <div class="breadcrumbs"><a href="/">Home</a> / <a href="/vuln/">Modules</a> / %s</div>
-      <h1>%s</h1>
-      %s
-    </div>
-  </div>
-  <div class="footer">
-    <div class="footer-links">
-      <a href="/vuln/">Module Index</a>
-      <a href="/vuln/dashboard/">Dashboard</a>
+      <a href="/vuln/a01/">Users</a>
       <a href="/vuln/settings/">Settings</a>
-      <a href="/vuln/dashboard/debug">Debug</a>
-      <a href="/help">Help Center</a>
-      <a href="/about">About</a>
+      <a href="/vuln/a09/">Reports</a>
+      <a href="/vuln/dashboard/api-keys">API Docs</a>
     </div>
-    <div>&copy; 2026 Acme Corporation. Internal use only. Build v3.14.159</div>
+    <div class="nav-right">
+      <span class="nav-icon" title="Notifications">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+        <span class="badge"></span>
+      </span>
+      <span class="nav-icon" title="Help">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </span>
+      <div class="user-menu">
+        <span class="avatar">AD</span>
+        <div class="user-info">
+          <div class="user-name">admin@acme.com</div>
+          <div class="user-role">Administrator</div>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        <div class="user-dropdown">
+          <a href="/vuln/a01/users/1">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            My Profile
+          </a>
+          <a href="/vuln/settings/">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            Account Settings
+          </a>
+          <a href="/vuln/settings/audit">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            Audit Log
+          </a>
+          <div class="divider"></div>
+          <a href="/vuln/a07/" class="danger">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign Out
+          </a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Layout -->
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="section-label">Management</div>
+      <a href="/vuln/a01/" class="nav-item">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></span>
+        Users
+        <span class="item-badge">248</span>
+      </a>
+      <a href="/vuln/a01/admin-panel" class="nav-item">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+        Roles
+      </a>
+      <a href="/vuln/a04/" class="nav-item">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg></span>
+        Departments
+      </a>
+
+      <div class="section-label">System</div>
+      <a href="/vuln/a05/" class="nav-item">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span>
+        Configuration
+      </a>
+      <a href="/vuln/settings/integrations" class="nav-item">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>
+        Integrations
+        <span class="item-badge info">3</span>
+      </a>
+      <a href="/vuln/settings/audit" class="nav-item">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
+        Audit Log
+        <span class="item-badge success">New</span>
+      </a>
+
+      <div class="section-label">Security</div>
+      <a href="/vuln/settings/certificates" class="nav-item">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></span>
+        Certificates
+      </a>
+      <a href="/vuln/dashboard/api-keys" class="nav-item">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
+        API Keys
+      </a>
+      <a href="/vuln/a02/" class="nav-item">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+        Access Control
+      </a>
+    </aside>
+
+    <!-- Content Area -->
+    <main class="main-content">
+      <div class="breadcrumbs">
+        <a href="/vuln/">Home</a>
+        <span class="sep">/</span>
+        <a href="/vuln/">Portal</a>
+        <span class="sep">/</span>
+        <span>%s</span>
+      </div>
+      <div class="page-header">
+        <h1>%s</h1>
+      </div>
+      %s
+    </main>
   </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-top">
+        <div>
+          <div class="footer-brand">Acme Corporation</div>
+          <div class="footer-tagline">Enterprise Management Portal</div>
+        </div>
+        <div class="footer-links">
+          <a href="/vuln/a08/">Terms of Service</a>
+          <a href="/vuln/a03/">Privacy Policy</a>
+          <a href="/vuln/dashboard/api-keys">API Documentation</a>
+          <a href="/vuln/dashboard/server-status">System Status</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span class="footer-copy">&copy; 2024 Acme Corporation. All rights reserved.</span>
+        <span class="footer-version">v3.2.1-build.4521</span>
+      </div>
+    </div>
+  </footer>
 </body>
 </html>`, title, title, title, body)
 }

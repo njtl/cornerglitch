@@ -16,7 +16,7 @@ spec:
       port: 8765
       targetPort: http
       protocol: TCP
-    - name: dashboard
+    - name: admin
       port: 8766
-      targetPort: dashboard
+      targetPort: admin
       protocol: TCP
