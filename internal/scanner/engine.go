@@ -144,17 +144,31 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 	startedAt := time.Now()
 
 	// ---- Phase 1: optional crawl ----
+	// Give crawl at most 30% of the remaining time so attacks get the rest.
 	var crawlResults []CrawlResult
 	if e.config.CrawlFirst {
-		var err error
-		crawlResults, err = e.crawler.Crawl(ctx, e.config.Target)
-		if err != nil && ctx.Err() != nil {
-			return nil, ctx.Err()
+		crawlBudget := 15 * time.Second // default
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining := time.Until(deadline)
+			crawlBudget = time.Duration(float64(remaining) * 0.3)
+			if crawlBudget < 5*time.Second {
+				crawlBudget = 5 * time.Second
+			}
 		}
+		crawlCtx, crawlCancel := context.WithTimeout(ctx, crawlBudget)
+		var err error
+		crawlResults, err = e.crawler.Crawl(crawlCtx, e.config.Target)
+		crawlCancel()
 		// Errors during crawl are non-fatal; we continue with whatever we got.
-		if err != nil {
+		if err != nil && crawlCtx.Err() == nil {
 			e.reporter.AddError("crawl error: " + err.Error())
 		}
+	}
+
+	// Check if the parent context was cancelled (not just crawl budget).
+	if ctx.Err() != nil {
+		completedAt := time.Now()
+		return e.reporter.BuildReport(e.config, startedAt, completedAt), ctx.Err()
 	}
 
 	// ---- Phase 2: generate attack requests ----
@@ -171,9 +185,8 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 	// ---- Phase 3: execute via worker pool with rate limiting ----
 	err := e.executeAll(ctx, requests)
 	if err != nil && ctx.Err() != nil {
-		// Scan was cancelled; build partial report.
+		// Scan was cancelled or duration expired; build partial report.
 		completedAt := time.Now()
-		e.reporter.AddError("scan cancelled: " + ctx.Err().Error())
 		return e.reporter.BuildReport(e.config, startedAt, completedAt), ctx.Err()
 	}
 

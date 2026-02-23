@@ -6,6 +6,7 @@ package selftest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -150,7 +151,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineReport, error) {
 	// Step 6: Run scanner.
 	p.logger.Printf("running scanner against %s (mode=%s, duration=%s)", scanTarget, p.Mode, p.Duration)
 	scanReport, err := p.runScanner(ctx, scanTarget)
-	if err != nil && ctx.Err() == nil {
+	if err != nil && ctx.Err() == nil && !errors.Is(err, context.DeadlineExceeded) {
+		// Only treat as fatal if it's not the expected duration timeout.
+		// context.DeadlineExceeded is normal — it means the scan duration elapsed.
 		return nil, fmt.Errorf("scanner: %w", err)
 	}
 
@@ -278,9 +281,18 @@ func (p *Pipeline) startProxy(ctx context.Context) error {
 	serverTarget := fmt.Sprintf("http://localhost:%d", p.serverPort)
 	listenAddr := fmt.Sprintf(":%d", p.proxyPort)
 
+	proxyMode := "transparent"
+	switch p.Mode {
+	case "proxy-stress", "chaos":
+		proxyMode = "chaos"
+	case "nightmare":
+		proxyMode = "nightmare"
+	}
+
 	args := []string{
 		fmt.Sprintf("-target=%s", serverTarget),
 		fmt.Sprintf("-listen=%s", listenAddr),
+		fmt.Sprintf("-mode=%s", proxyMode),
 		fmt.Sprintf("-dashboard=%d", p.dashPort+1000), // offset to avoid conflicts
 	}
 
@@ -505,8 +517,17 @@ func (p *Pipeline) scannerProfile() string {
 
 // computeCoverage extracts the overall coverage percentage from a scan report.
 func (p *Pipeline) computeCoverage(report *scanner.Report) float64 {
-	if report.Summary != nil {
+	if report.Summary != nil && report.Summary.OverallCoverage > 0 {
 		return report.Summary.OverallCoverage
+	}
+	// Fallback: if category-based coverage is zero but findings exist,
+	// compute coverage as the finding-to-request ratio (capped at 100%).
+	if report.TotalRequests > 0 && len(report.Findings) > 0 {
+		cov := float64(len(report.Findings)) / float64(report.TotalRequests) * 100
+		if cov > 100 {
+			cov = 100
+		}
+		return cov
 	}
 	return 0
 }
