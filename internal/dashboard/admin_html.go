@@ -605,7 +605,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <option value="realistic">Realistic</option>
           <option value="verbose">Verbose</option>
           <option value="minimal">Minimal</option>
+          <option value="aggressive">Aggressive</option>
           <option value="deceptive">Deceptive</option>
+          <option value="tarpit">Tarpit</option>
         </select>
       </div>
       <div>
@@ -630,11 +632,16 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         <div class="slider-label"><span>Content Theme</span></div>
         <select id="ctrl-theme" class="ctrl-select" onchange="setConfigKey('content_theme', this.value)">
           <option value="default">Default</option>
-          <option value="corporate">Corporate</option>
-          <option value="blog">Blog</option>
+          <option value="saas">SaaS</option>
           <option value="ecommerce">E-Commerce</option>
+          <option value="social">Social Media</option>
           <option value="news">News Portal</option>
-          <option value="forum">Forum</option>
+          <option value="docs">Documentation</option>
+          <option value="corporate">Corporate</option>
+          <option value="startup">Startup</option>
+          <option value="govt">Government</option>
+          <option value="university">University</option>
+          <option value="banking">Banking</option>
         </select>
       </div>
       <div>
@@ -1278,11 +1285,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   };
 
   const ERROR_TYPES = [
-    'none','500','502','503','504','404','403','429','408',
-    'redirect_loop','empty_body','truncated','garbage',
-    'slow_drip','delay_short','delay_long','header_only',
-    'content_mismatch','encoding_mess','double_encode',
-    'infinite_redirect','partial_content',
+    'none',
+    '500_internal','502_bad_gateway','503_unavailable','504_timeout',
+    '404_not_found','403_forbidden','429_rate_limit','408_timeout',
+    'slow_drip','connection_reset','partial_body','wrong_content_type',
+    'garbage_body','empty_body','huge_headers',
+    'delay_1s','delay_3s','delay_10s','delay_random',
+    'redirect_loop','double_encoding','flip_flop',
     'packet_drop','tcp_reset','stream_corrupt','session_timeout',
     'keepalive_abuse','tls_half_close','slow_headers','accept_then_fin'
   ];
@@ -1556,28 +1565,31 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var p = profile.profile || profile;
       vulnData = p.vulnerabilities || p.vulns || [];
 
-      var ebt = p.endpoints_by_type || {};
-      var cats = {owasp: 0, advanced: 0, dashboard: 0};
-      vulnData.forEach(function(v) {
-        if (v.owasp) cats.owasp++;
-        else if (v.id && v.id.startsWith('dashboard')) cats.dashboard++;
-        else cats.advanced++;
-      });
+      var catCounts = p.category_counts || {};
       const sev = p.by_severity || p.severity_counts || {};
       document.getElementById('vuln-overview-cards').innerHTML =
-        card('OWASP Top 10', cats.owasp || 0, 'v-err') +
-        card('Advanced Vulns', cats.advanced || 0, 'v-warn') +
-        card('Dashboard Vulns', cats.dashboard || 0, 'v-info') +
         card('Total Vulns', p.total_vulns || 0, 'v-ok') +
-        card('Total Endpoints', p.total_endpoints || 0, 'v-info');
+        card('Total Endpoints', p.total_endpoints || 0, 'v-info') +
+        card('Groups Active', Object.values(vc.groups || {}).filter(v => v).length + '/' + Object.keys(vc.groups || {}).length, 'v-ok');
 
       // Group toggles
       var groups = vc.groups || {};
+      var VULN_GROUPS = {
+        owasp: 'OWASP Top 10',
+        api_security: 'API Security',
+        advanced: 'Advanced',
+        modern: 'Modern (LLM/CI-CD/Cloud)',
+        infrastructure: 'Infrastructure',
+        iot_desktop: 'IoT / Desktop',
+        mobile_privacy: 'Mobile / Privacy',
+        specialized: 'Specialized',
+        dashboard: 'Dashboard'
+      };
       document.getElementById('vuln-group-toggles').innerHTML =
-        ['owasp', 'advanced', 'dashboard'].map(g => {
+        Object.keys(VULN_GROUPS).map(g => {
           var on = groups[g] !== false ? 'checked' : '';
           return '<div class="group-toggle">' +
-            '<div class="toggle-name">' + g.toUpperCase() + '</div>' +
+            '<div class="toggle-name">' + VULN_GROUPS[g] + '</div>' +
             '<label class="toggle-sw">' +
             '<input type="checkbox" ' + on + ' onchange="toggleVulnGroup(\'' + g + '\', this.checked)">' +
             '<div class="toggle-track"></div>' +
