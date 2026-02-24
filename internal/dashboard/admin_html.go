@@ -3209,7 +3209,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         '<td class="' + gradeClass + '" style="font-weight:bold;font-size:1.1em">' + escapeHtml(c.grade || '?') + '</td>' +
         '<td>' + ((c.detection_rate || 0) * 100).toFixed(1) + '%%</td>' +
         '<td>' + ((c.false_positive_rate || 0) * 100).toFixed(1) + '%%</td>' +
-        '<td>' + ((c.accuracy || 0) * 100).toFixed(1) + '%%</td>' +
+        '<td>' + (c.accuracy || 0).toFixed(1) + '%%</td>' +
         '<td style="color:' + (c.scanner_crashed ? '#ff4444' : '#00ff88') + '">' + (c.scanner_crashed ? 'YES' : 'No') + '</td>' +
         '</tr>';
     });
@@ -3311,7 +3311,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var gradeClass = 'grade-' + grade.toLowerCase();
     var detPct = ((report.detection_rate || 0) * 100).toFixed(1);
     var fpPct = ((report.false_positive_rate || 0) * 100).toFixed(1);
-    var accPct = ((report.accuracy || 0) * 100).toFixed(1);
+    var accPct = (report.accuracy || 0).toFixed(1);
     var displayName = scannerName || report.scanner || 'Scanner';
 
     var html = '<div style="margin-bottom:10px;display:flex;align-items:center;gap:10px">' +

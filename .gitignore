@@ -23,6 +23,9 @@ package-lock.json
 test-results/
 playwright-report/
 
+# Secrets
+.env
+
 # OS
 .DS_Store
 Thumbs.db
