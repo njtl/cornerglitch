@@ -266,8 +266,12 @@ func (l *Labyrinth) serveJSON(w http.ResponseWriter, r *http.Request, rng *rand.
 	numItems := rng.Intn(25) + 5
 	items := make([]map[string]interface{}, numItems)
 	for i := range items {
+		pathHex := hex.EncodeToString([]byte(r.URL.Path))
+		if len(pathHex) > 6 {
+			pathHex = pathHex[:6]
+		}
 		items[i] = map[string]interface{}{
-			"id":         fmt.Sprintf("%s-%d", hex.EncodeToString([]byte(r.URL.Path))[:6], i),
+			"id":         fmt.Sprintf("%s-%d", pathHex, i),
 			"title":      l.generateTitle(rng),
 			"content":    l.generateParagraphText(rng),
 			"category":   l.topics[rng.Intn(len(l.topics))],
