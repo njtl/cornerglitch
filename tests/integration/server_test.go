@@ -98,12 +98,24 @@ func doRequest(h http.Handler, method, path string, body string, headers map[str
 
 func TestRootPath(t *testing.T) {
 	h := newTestHandler()
-	rr := doRequest(h, "GET", "/", "", nil)
-	if rr.Code < 200 || rr.Code >= 600 {
-		t.Errorf("root path returned invalid status: %d", rr.Code)
+	// The error generator may randomly select error types that produce empty bodies
+	// (slow_headers, missing_crlf, etc.), so retry a few times before failing.
+	var gotBody bool
+	var lastCode int
+	for i := 0; i < 10; i++ {
+		rr := doRequest(h, "GET", "/", "", nil)
+		lastCode = rr.Code
+		if rr.Code < 200 || rr.Code >= 600 {
+			t.Errorf("root path returned invalid status: %d", rr.Code)
+			return
+		}
+		if rr.Body.Len() > 0 {
+			gotBody = true
+			break
+		}
 	}
-	if rr.Body.Len() == 0 {
-		t.Error("root path returned empty body")
+	if !gotBody {
+		t.Errorf("root path returned empty body on all 10 attempts (last status: %d)", lastCode)
 	}
 }
 
