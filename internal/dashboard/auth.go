@@ -251,6 +251,17 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/login", http.StatusFound)
 }
 
+// ChangePassword validates the current password and sets a new one.
+func ChangePassword(current, newPassword string) error {
+	if !checkPassword(current) {
+		return fmt.Errorf("current password is incorrect")
+	}
+	SetAdminPassword(newPassword)
+	// Invalidate all existing sessions
+	sessions = sync.Map{}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Login page HTML
 // ---------------------------------------------------------------------------

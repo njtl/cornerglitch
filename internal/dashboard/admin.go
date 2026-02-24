@@ -943,3 +943,87 @@ func sortedKV(m map[string]int, top int) []kvPair {
 	}
 	return pairs
 }
+
+// SetAll sets all feature flags to the given value.
+func (f *FeatureFlags) SetAll(enabled bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.labyrinth = enabled
+	f.errorInject = enabled
+	f.captcha = enabled
+	f.honeypot = enabled
+	f.vuln = enabled
+	f.analytics = enabled
+	f.cdn = enabled
+	f.oauth = enabled
+	f.headerCorrupt = enabled
+	f.cookieTraps = enabled
+	f.jsTraps = enabled
+	f.botDetection = enabled
+	f.randomBlocking = enabled
+	f.frameworkEmul = enabled
+	f.search = enabled
+	f.email = enabled
+	f.i18n = enabled
+	f.recorder = enabled
+	f.websocket = enabled
+	f.privacy = enabled
+	f.health = enabled
+	f.spider = enabled
+}
+
+// ---------------------------------------------------------------------------
+// Nightmare Mode — cross-mode extreme chaos state
+// ---------------------------------------------------------------------------
+
+// NightmareState tracks the activation of nightmare mode across subsystems.
+type NightmareState struct {
+	mu               sync.RWMutex
+	ServerActive     bool
+	ScannerActive    bool
+	ProxyActive      bool
+	PreviousConfig   map[string]interface{} // snapshot before server nightmare
+	PreviousFeatures map[string]bool        // snapshot before server nightmare
+}
+
+var globalNightmare = &NightmareState{}
+
+// GetNightmareState returns the global NightmareState instance.
+func GetNightmareState() *NightmareState {
+	return globalNightmare
+}
+
+// Snapshot returns a map of nightmare subsystem -> active status.
+func (n *NightmareState) Snapshot() map[string]bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return map[string]bool{
+		"server":  n.ServerActive,
+		"scanner": n.ScannerActive,
+		"proxy":   n.ProxyActive,
+	}
+}
+
+// IsAnyActive returns true if any nightmare subsystem is active.
+func (n *NightmareState) IsAnyActive() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.ServerActive || n.ScannerActive || n.ProxyActive
+}
+
+// ActiveModes returns a list of active nightmare subsystem names.
+func (n *NightmareState) ActiveModes() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	var modes []string
+	if n.ServerActive {
+		modes = append(modes, "Server")
+	}
+	if n.ScannerActive {
+		modes = append(modes, "Scanner")
+	}
+	if n.ProxyActive {
+		modes = append(modes, "Proxy")
+	}
+	return modes
+}

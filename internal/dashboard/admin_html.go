@@ -504,27 +504,95 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   .severity-badge.sev-medium { background:#a80;color:#fff }
   .severity-badge.sev-low { background:#069;color:#fff }
   .severity-badge.sev-info { background:#333;color:#aaa }
+
+  /* Collapsible server sections */
+  .srv-section { margin-bottom: 2px; }
+  .srv-section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #111; border: 1px solid #1a1a1a; border-radius: 6px;
+    padding: 10px 16px; cursor: pointer; transition: all 0.2s; user-select: none;
+  }
+  .srv-section-header:hover { background: #161616; border-color: #333; }
+  .srv-section-header .srv-title { color: #00ccaa; font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; }
+  .srv-section-header .srv-arrow { color: #555; transition: transform 0.2s; font-size: 0.9em; }
+  .srv-section.open .srv-section-header { border-color: #00ff8844; }
+  .srv-section.open .srv-arrow { transform: rotate(90deg); color: #00ff88; }
+  .srv-section-body { display: none; padding: 16px; border: 1px solid #1a1a1a; border-top: none; border-radius: 0 0 6px 6px; background: #0d0d0d; }
+  .srv-section.open .srv-section-body { display: block; }
+
+  /* Mode status cards */
+  .mode-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px; }
+  .mode-card { background: #111; border: 1px solid #222; border-radius: 10px; padding: 16px; position: relative; overflow: hidden; }
+  .mode-card .mode-label { font-size: 0.7em; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 6px; font-weight: bold; }
+  .mode-card .mode-status { font-size: 1.1em; margin-bottom: 4px; }
+  .mode-card .mode-detail { color: #888; font-size: 0.78em; }
+  .mode-card.mc-server { border-color: #00ff8833; }
+  .mode-card.mc-server .mode-label { color: #00ff88; }
+  .mode-card.mc-scanner { border-color: #00ccff33; }
+  .mode-card.mc-scanner .mode-label { color: #00ccff; }
+  .mode-card.mc-proxy { border-color: #ffaa0033; }
+  .mode-card.mc-proxy .mode-label { color: #ffaa00; }
+
+  /* Nightmare indicator */
+  .nightmare-bar { display: flex; align-items: center; justify-content: space-between; padding: 6px 16px; margin-bottom: 10px; border-radius: 6px; font-size: 0.82em; transition: all 0.3s; }
+  .nightmare-bar.off { background: #111; border: 1px solid #1a1a1a; color: #555; }
+  .nightmare-bar.on { background: #ff000015; border: 1px solid #ff4444; color: #ff4444; animation: nightmare-pulse 2s infinite; }
+  @keyframes nightmare-pulse { 0%%,100%% { box-shadow: 0 0 5px #ff000033; } 50%% { box-shadow: 0 0 20px #ff000066; } }
+
+  /* Quick action buttons */
+  .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .quick-action-btn { background: #1a1a1a; border: 1px solid #333; color: #ccc; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 0.82em; transition: all 0.2s; }
+  .quick-action-btn:hover { border-color: #00ff88; color: #00ff88; }
+
+  /* Scanner sub-tab buttons - override */
+  .scanner-subtab-btn { background: #111; border: 1px solid #222; color: #888; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 0.82em; transition: all 0.2s; border-bottom: none; }
+  .scanner-subtab-btn:hover { color: #00ccff; border-color: #00ccff44; }
+  .scanner-subtab-btn.active { color: #00ccff; border-color: #00ccff; background: #00ccff11; }
+
+  /* Settings panel */
+  .settings-input { background: #0d0d0d; color: #00ff88; border: 1px solid #333; padding: 8px 12px; border-radius: 4px; font-family: inherit; font-size: 0.85em; width: 100%%; outline: none; }
+  .settings-input:focus { border-color: #00ff8866; }
 </style>
 </head>
 <body>
 
+<div class="nightmare-bar off" id="nightmare-bar">
+  <span id="nightmare-label">NIGHTMARE: OFF</span>
+  <span id="nightmare-modes" style="font-size:0.8em"></span>
+</div>
+
 <h1>// GLITCH ADMIN PANEL</h1>
-<div class="subtitle">Control center for the glitch web server</div>
+<div class="subtitle">Control center for the glitch web server &middot; <span id="header-uptime" style="color:#00ccff">uptime: --</span></div>
 
 <div class="tabs">
   <button class="tab active" onclick="showTab('dashboard')">Dashboard</button>
-  <button class="tab" onclick="showTab('sessions')">Sessions</button>
-  <button class="tab" onclick="showTab('traffic')">Traffic</button>
-  <button class="tab" onclick="showTab('controls')">Controls</button>
-  <button class="tab" onclick="showTab('log')">Request Log</button>
-  <button class="tab" onclick="showTab('vulns')">Vulnerabilities</button>
+  <button class="tab" onclick="showTab('server')">Server</button>
   <button class="tab" onclick="showTab('scanner')">Scanner</button>
   <button class="tab" onclick="showTab('proxy')">Proxy</button>
-  <button class="tab" onclick="showTab('replay')">Replay</button>
+  <button class="tab" onclick="showTab('settings')">Settings</button>
 </div>
 
 <!-- ==================== DASHBOARD TAB ==================== -->
 <div id="panel-dashboard" class="panel active">
+  <!-- Mode Status Cards -->
+  <div class="mode-cards">
+    <div class="mode-card mc-server" id="dash-mode-server">
+      <div class="mode-label">Server</div>
+      <div class="mode-status" id="dash-server-status">RUNNING</div>
+      <div class="mode-detail" id="dash-server-detail">Loading...</div>
+    </div>
+    <div class="mode-card mc-scanner" id="dash-mode-scanner">
+      <div class="mode-label">Scanner</div>
+      <div class="mode-status" id="dash-scanner-status">IDLE</div>
+      <div class="mode-detail" id="dash-scanner-detail">No active scans</div>
+    </div>
+    <div class="mode-card mc-proxy" id="dash-mode-proxy">
+      <div class="mode-label">Proxy</div>
+      <div class="mode-status" id="dash-proxy-status">--</div>
+      <div class="mode-detail" id="dash-proxy-detail">Loading...</div>
+    </div>
+  </div>
+
   <div class="grid" id="dash-metrics"></div>
 
   <div class="section">
@@ -556,12 +624,160 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       </div>
     </div>
   </div>
+
+  <!-- Quick Actions -->
+  <div class="quick-actions">
+    <button class="quick-action-btn" onclick="toggleNightmareAll()" id="dash-nightmare-btn">Enable Nightmare</button>
+    <button class="quick-action-btn" onclick="showTab('server');setTimeout(function(){toggleServerSection('log')},100)">View Server Logs</button>
+    <button class="quick-action-btn" onclick="showTab('scanner');switchScannerSubtab('builtin')">Run Scanner</button>
+    <button class="quick-action-btn" onclick="showTab('proxy')">View Proxy</button>
+  </div>
 </div>
 
-<!-- ==================== SESSIONS TAB ==================== -->
-<div id="panel-sessions" class="panel">
-  <div class="section">
-    <h2>// Active Client Sessions</h2>
+<div id="panel-server" class="panel">
+
+  <!-- ====== Feature Toggles ====== -->
+  <div class="srv-section open" id="srv-features">
+    <div class="srv-section-header" onclick="toggleServerSection('features')">
+      <span class="srv-title">Feature Toggles</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Enable or disable individual server subsystems. Disabled features return normal responses instead.</p>
+      <div class="toggle-grid" id="toggles"></div>
+    </div>
+  </div>
+
+  <!-- ====== Error Configuration ====== -->
+  <div class="srv-section" id="srv-errors">
+    <div class="srv-section-header" onclick="toggleServerSection('errors')">
+      <span class="srv-title">Error Configuration</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <div style="margin-bottom:16px">
+        <h2 style="font-size:0.9em;margin-bottom:8px">// Behavior Tuning</h2>
+        <p style="color:#666;font-size:0.8em;margin-bottom:8px">Adjust thresholds, rates, and timing parameters that control server behavior.</p>
+        <div id="sliders"></div>
+      </div>
+      <div style="margin-bottom:16px">
+        <h2 style="font-size:0.9em;margin-bottom:8px">// HTTP Error Weights</h2>
+        <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each HTTP error response. Higher weight = more frequent.</p>
+        <div class="ew-grid" id="http-error-grid"></div>
+        <button class="cfg-btn" onclick="resetErrorWeights()" style="margin-top:8px">Reset All to Default</button>
+      </div>
+      <div>
+        <h2 style="font-size:0.9em;margin-bottom:8px">// TCP / Network Error Weights</h2>
+        <p style="color:#666;font-size:0.8em;margin-bottom:8px">Low-level network errors that bypass HTTP entirely.</p>
+        <div class="ew-grid" id="tcp-error-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== Content & Presentation ====== -->
+  <div class="srv-section" id="srv-content">
+    <div class="srv-section-header" onclick="toggleServerSection('content')">
+      <span class="srv-title">Content &amp; Presentation</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <div style="margin-bottom:16px">
+        <h2 style="font-size:0.9em;margin-bottom:8px">// Page Type Distribution</h2>
+        <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each response content type.</p>
+        <div class="ew-grid" id="page-type-grid"></div>
+        <button class="cfg-btn" onclick="resetPageTypeWeights()" style="margin-top:8px">Reset to Default</button>
+      </div>
+      <div>
+        <h2 style="font-size:0.9em;margin-bottom:8px">// Response &amp; Content Settings</h2>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div class="has-tip">
+            <div class="slider-label"><span>Honeypot Response Style</span><span class="tip-icon">?</span></div>
+            <div class="tip-box">How honeypot trap endpoints respond. Realistic mimics real apps; Tarpit adds delays; Aggressive sends fake server headers.</div>
+            <select id="ctrl-honeypot-style" class="ctrl-select" onchange="setConfigKey('honeypot_response_style', this.value)">
+              <option value="realistic">Realistic</option><option value="verbose">Verbose</option><option value="minimal">Minimal</option>
+              <option value="aggressive">Aggressive</option><option value="deceptive">Deceptive</option><option value="tarpit">Tarpit</option>
+            </select>
+          </div>
+          <div class="has-tip">
+            <div class="slider-label"><span>Active Framework Emulation</span><span class="tip-icon">?</span></div>
+            <div class="tip-box">Which web framework to emulate in response headers and error pages.</div>
+            <select id="ctrl-framework" class="ctrl-select" onchange="setConfigKey('active_framework', this.value)">
+              <option value="auto">Auto (rotate)</option><option value="express">Express.js</option><option value="django">Django</option>
+              <option value="rails">Ruby on Rails</option><option value="laravel">Laravel</option><option value="spring">Spring Boot</option>
+              <option value="aspnet">ASP.NET</option><option value="flask">Flask</option><option value="fastapi">FastAPI</option>
+              <option value="next">Next.js</option><option value="nginx">nginx</option><option value="apache">Apache</option><option value="caddy">Caddy</option>
+            </select>
+          </div>
+          <div class="has-tip">
+            <div class="slider-label"><span>Content Theme</span><span class="tip-icon">?</span></div>
+            <div class="tip-box">Visual theme for generated HTML pages.</div>
+            <select id="ctrl-theme" class="ctrl-select" onchange="setConfigKey('content_theme', this.value)">
+              <option value="default">Default</option><option value="saas">SaaS</option><option value="ecommerce">E-Commerce</option>
+              <option value="social">Social Media</option><option value="news">News Portal</option><option value="docs">Documentation</option>
+              <option value="corporate">Corporate</option><option value="startup">Startup</option><option value="govt">Government</option>
+              <option value="university">University</option><option value="banking">Banking</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== Behavior & Tuning ====== -->
+  <div class="srv-section" id="srv-behavior">
+    <div class="srv-section-header" onclick="toggleServerSection('behavior')">
+      <span class="srv-title">Behavior &amp; Tuning</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <h2 style="font-size:0.9em;margin-bottom:8px">// Advanced Tuning</h2>
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Fine-grained controls for traps, adaptive behavior, and caching.</p>
+      <div id="advanced-sliders"></div>
+    </div>
+  </div>
+
+  <!-- ====== Spider & Crawl Data ====== -->
+  <div class="srv-section" id="srv-spider">
+    <div class="srv-section-header" onclick="toggleServerSection('spider')">
+      <span class="srv-title">Spider &amp; Crawl Data</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Configure error rates for spider/crawler resource files.</p>
+      <div id="spider-sliders"></div>
+    </div>
+  </div>
+
+  <!-- ====== Vulnerabilities ====== -->
+  <div class="srv-section" id="srv-vulns">
+    <div class="srv-section-header" onclick="toggleServerSection('vulns')">
+      <span class="srv-title">Vulnerabilities</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <div class="grid" id="vuln-overview-cards" style="margin-bottom:14px">
+        <div class="card"><div class="label">Loading...</div><div class="value v-info">--</div></div>
+      </div>
+      <div class="group-toggles" id="vuln-group-toggles" style="margin-bottom:14px"></div>
+      <div id="vuln-severity-badges" style="margin-bottom:14px"></div>
+      <input type="text" class="search-box" id="vuln-filter" placeholder="Filter by name, severity, CWE, category..." oninput="filterVulns()">
+      <div class="tbl-scroll" style="max-height: 500px;">
+        <table>
+          <thead><tr><th>Name</th><th>Severity</th><th>CWE</th><th>Category</th><th>Endpoints</th><th>Status</th></tr></thead>
+          <tbody id="vuln-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== Sessions & Clients ====== -->
+  <div class="srv-section" id="srv-sessions">
+    <div class="srv-section-header" onclick="toggleServerSection('sessions')">
+      <span class="srv-title">Sessions &amp; Clients</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <h2 style="font-size:0.9em;margin-bottom:8px">// Active Client Sessions</h2>
     <p style="color:#666;font-size:0.8em;margin-bottom:10px">Click a client ID to view details and set behavior overrides.</p>
     <div class="tbl-scroll">
       <table>
@@ -601,233 +817,74 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
     <div id="detail-paths" style="max-height:200px;overflow-y:auto"></div>
   </div>
-</div>
-
-<!-- ==================== TRAFFIC TAB ==================== -->
-<div id="panel-traffic" class="panel">
-  <div class="grid" id="overview-cards"></div>
-
-  <div class="section">
-    <h2>// Requests/sec (last 60s)</h2>
-    <div class="sparkline-wrap" id="sparkline"></div>
-  </div>
-
-  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
-    <div class="section">
-      <h2>// Status Code Distribution</h2>
-      <div class="pie-wrap">
-        <canvas class="pie-canvas" id="pie-status" width="140" height="140"></canvas>
-        <div class="pie-legend" id="pie-legend"></div>
-      </div>
-    </div>
-    <div class="section">
-      <h2>// Response Type Distribution</h2>
-      <div id="resp-type-bars"></div>
     </div>
   </div>
 
-  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
-    <div class="section">
-      <h2>// Top 10 Paths</h2>
-      <div id="top-paths"></div>
+  <!-- ====== Request Log ====== -->
+  <div class="srv-section" id="srv-log">
+    <div class="srv-section-header" onclick="toggleServerSection('log')">
+      <span class="srv-title">Request Log</span>
+      <span class="srv-arrow">&#9654;</span>
     </div>
-    <div class="section">
-      <h2>// Top 10 User Agents</h2>
-      <div id="top-ua"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ==================== CONTROLS TAB ==================== -->
-<div id="panel-controls" class="panel">
-  <div class="section">
-    <h2>// Feature Toggles</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Enable or disable individual server subsystems. Disabled features return normal responses instead.</p>
-    <div class="toggle-grid" id="toggles"></div>
-  </div>
-
-  <div class="section">
-    <h2>// Behavior Tuning</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Adjust thresholds, rates, and timing parameters that control server behavior.</p>
-    <div id="sliders"></div>
-  </div>
-
-  <div class="section">
-    <h2>// HTTP Error Weights</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each HTTP error response. Higher weight = more frequent. Weights are normalized automatically.</p>
-    <div class="ew-grid" id="http-error-grid"></div>
-    <button class="cfg-btn" onclick="resetErrorWeights()" style="margin-top:8px">Reset All to Default</button>
-  </div>
-
-  <div class="section">
-    <h2>// TCP / Network Error Weights</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Low-level network errors that bypass HTTP entirely. These use raw socket manipulation (hijack, RST, slow-drip).</p>
-    <div class="ew-grid" id="tcp-error-grid"></div>
-  </div>
-
-  <div class="section">
-    <h2>// Page Type Distribution</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each response content type. Set to OFF to disable a format entirely.</p>
-    <div class="ew-grid" id="page-type-grid"></div>
-    <button class="cfg-btn" onclick="resetPageTypeWeights()" style="margin-top:8px">Reset to Default</button>
-  </div>
-
-  <div class="section">
-    <h2>// Response &amp; Content Settings</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Configure how the server presents itself and generates content.</p>
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-      <div class="has-tip">
-        <div class="slider-label"><span>Honeypot Response Style</span><span class="tip-icon">?</span></div>
-        <div class="tip-box">How honeypot trap endpoints respond. Realistic mimics real apps; Tarpit adds delays; Aggressive sends fake server headers.</div>
-        <select id="ctrl-honeypot-style" class="ctrl-select" onchange="setConfigKey('honeypot_response_style', this.value)">
-          <option value="realistic">Realistic</option>
-          <option value="verbose">Verbose</option>
-          <option value="minimal">Minimal</option>
-          <option value="aggressive">Aggressive</option>
-          <option value="deceptive">Deceptive</option>
-          <option value="tarpit">Tarpit</option>
-        </select>
-      </div>
-      <div class="has-tip">
-        <div class="slider-label"><span>Active Framework Emulation</span><span class="tip-icon">?</span></div>
-        <div class="tip-box">Which web framework to emulate in response headers and error pages. Auto rotates between frameworks per request.</div>
-        <select id="ctrl-framework" class="ctrl-select" onchange="setConfigKey('active_framework', this.value)">
-          <option value="auto">Auto (rotate)</option>
-          <option value="express">Express.js</option>
-          <option value="django">Django</option>
-          <option value="rails">Ruby on Rails</option>
-          <option value="laravel">Laravel</option>
-          <option value="spring">Spring Boot</option>
-          <option value="aspnet">ASP.NET</option>
-          <option value="flask">Flask</option>
-          <option value="fastapi">FastAPI</option>
-          <option value="next">Next.js</option>
-          <option value="nginx">nginx</option>
-          <option value="apache">Apache</option>
-          <option value="caddy">Caddy</option>
-        </select>
-      </div>
-      <div class="has-tip">
-        <div class="slider-label"><span>Content Theme</span><span class="tip-icon">?</span></div>
-        <div class="tip-box">Visual theme for generated HTML pages. Affects page titles, navigation text, branding, and overall look to match a specific industry.</div>
-        <select id="ctrl-theme" class="ctrl-select" onchange="setConfigKey('content_theme', this.value)">
-          <option value="default">Default</option>
-          <option value="saas">SaaS</option>
-          <option value="ecommerce">E-Commerce</option>
-          <option value="social">Social Media</option>
-          <option value="news">News Portal</option>
-          <option value="docs">Documentation</option>
-          <option value="corporate">Corporate</option>
-          <option value="startup">Startup</option>
-          <option value="govt">Government</option>
-          <option value="university">University</option>
-          <option value="banking">Banking</option>
-        </select>
-      </div>
-      <div class="has-tip">
-        <div class="slider-label"><span>Traffic Recording Format</span><span class="tip-icon">?</span></div>
-        <div class="tip-box">File format for recorded traffic captures. JSONL is human-readable; PCAP is compatible with Wireshark and replay tools.</div>
-        <select id="ctrl-recorder-format" class="ctrl-select" onchange="setConfigKey('recorder_format', this.value)">
-          <option value="jsonl">JSONL</option>
-          <option value="pcap">PCAP</option>
-        </select>
+    <div class="srv-section-body">
+      <input type="text" class="search-box" id="log-filter" placeholder="Filter by status, client, path, type..." oninput="filterLog()">
+      <div class="tbl-scroll" style="max-height: 600px;">
+        <table>
+          <thead><tr><th>Time</th><th>Client</th><th>Method</th><th>Path</th><th>Status</th><th>Latency</th><th>Type</th><th>Mode</th><th>User Agent</th></tr></thead>
+          <tbody id="log-body"></tbody>
+        </table>
       </div>
     </div>
   </div>
 
-  <div class="section">
-    <h2>// Advanced Tuning</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Fine-grained controls for traps, adaptive behavior, and caching.</p>
-    <div id="advanced-sliders"></div>
-  </div>
-
-  <div class="section">
-    <h2>// Spider &amp; Crawl Data</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Configure error rates for spider/crawler resource files (robots.txt, sitemap.xml, favicon.ico, etc.).</p>
-    <div id="spider-sliders"></div>
-  </div>
-
-  <div class="section">
-    <h2>// Configuration Import / Export</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Save or restore the entire server configuration as a JSON file. Use for CI/CD, sharing profiles, or backup.</p>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-      <button class="cfg-btn primary" onclick="exportConfig()">Export Config</button>
-      <button class="cfg-btn" onclick="document.getElementById('cfg-import-file').click()">Import Config</button>
-      <input type="file" id="cfg-import-file" accept=".json" style="display:none" onchange="importConfigFile(this)">
+  <!-- ====== Traffic Analytics ====== -->
+  <div class="srv-section" id="srv-traffic">
+    <div class="srv-section-header" onclick="toggleServerSection('traffic')">
+      <span class="srv-title">Traffic Analytics</span>
+      <span class="srv-arrow">&#9654;</span>
     </div>
-    <div id="cfg-import-status" style="color:#555;font-size:0.82em">Select a JSON config file to restore server settings</div>
-  </div>
-</div>
-
-<!-- ==================== REQUEST LOG TAB ==================== -->
-<div id="panel-log" class="panel">
-  <div class="section">
-    <h2>// Request Log (last 200)</h2>
-    <input type="text" class="search-box" id="log-filter" placeholder="Filter by status, client, path, type..." oninput="filterLog()">
-    <div class="tbl-scroll" style="max-height: 600px;">
-      <table>
-        <thead><tr>
-          <th>Time</th>
-          <th>Client</th>
-          <th>Method</th>
-          <th>Path</th>
-          <th>Status</th>
-          <th>Latency</th>
-          <th>Type</th>
-          <th>Mode</th>
-          <th>User Agent</th>
-        </tr></thead>
-        <tbody id="log-body"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
-<!-- ==================== VULNERABILITIES TAB ==================== -->
-<div id="panel-vulns" class="panel">
-  <div class="section">
-    <h2>// Vulnerability Profile Overview</h2>
-    <div class="grid" id="vuln-overview-cards">
-      <div class="card"><div class="label">Loading...</div><div class="value v-info">--</div></div>
+    <div class="srv-section-body">
+      <div class="grid" id="overview-cards"></div>
+      <div style="margin-bottom:16px">
+        <h2 style="font-size:0.9em;margin-bottom:8px">// Requests/sec (last 60s)</h2>
+        <div class="sparkline-wrap" id="sparkline"></div>
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom:16px">
+        <div>
+          <h2 style="font-size:0.9em;margin-bottom:8px">// Status Code Distribution</h2>
+          <div class="pie-wrap">
+            <canvas class="pie-canvas" id="pie-status" width="140" height="140"></canvas>
+            <div class="pie-legend" id="pie-legend"></div>
+          </div>
+        </div>
+        <div>
+          <h2 style="font-size:0.9em;margin-bottom:8px">// Response Type Distribution</h2>
+          <div id="resp-type-bars"></div>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
+        <div>
+          <h2 style="font-size:0.9em;margin-bottom:8px">// Top 10 Paths</h2>
+          <div id="top-paths"></div>
+        </div>
+        <div>
+          <h2 style="font-size:0.9em;margin-bottom:8px">// Top 10 User Agents</h2>
+          <div id="top-ua"></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <div class="section">
-    <h2>// Group Toggles</h2>
-    <div class="group-toggles" id="vuln-group-toggles"></div>
-  </div>
-
-  <div class="section">
-    <h2>// Severity Breakdown</h2>
-    <div id="vuln-severity-badges" style="margin-bottom:12px"></div>
-  </div>
-
-  <div class="section">
-    <h2>// All Vulnerability Endpoints</h2>
-    <input type="text" class="search-box" id="vuln-filter" placeholder="Filter by name, severity, CWE, category..." oninput="filterVulns()">
-    <div class="tbl-scroll" style="max-height: 600px;">
-      <table>
-        <thead><tr>
-          <th>Name</th>
-          <th>Severity</th>
-          <th>CWE</th>
-          <th>Category</th>
-          <th>Endpoints</th>
-          <th>Status</th>
-        </tr></thead>
-        <tbody id="vuln-body"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
+</div> <!-- end panel-server -->
 
 <!-- ==================== SCANNER TAB ==================== -->
 <div id="panel-scanner" class="panel">
 
   <!-- Sub-tab navigation -->
   <div style="display:flex;gap:8px;margin-bottom:16px">
-    <button class="tab-btn scanner-subtab-btn active" onclick="switchScannerSubtab('eval')">Evaluate External Scanners</button>
-    <button class="tab-btn scanner-subtab-btn" onclick="switchScannerSubtab('builtin')">Built-in Scanner</button>
+    <button class="scanner-subtab-btn active" onclick="switchScannerSubtab('eval')">Evaluate External</button>
+    <button class="scanner-subtab-btn" onclick="switchScannerSubtab('builtin')">Built-in Scanner</button>
+    <button class="scanner-subtab-btn" onclick="switchScannerSubtab('replay')">PCAP Replay</button>
   </div>
 
   <!-- ====== Sub-tab A: Evaluate External Scanners ====== -->
@@ -1036,6 +1093,145 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
 
   </div>
+
+  <!-- ====== Sub-tab C: PCAP Replay ====== -->
+  <div id="scanner-replay-panel" style="display:none">
+
+    <!-- Upload Section -->
+    <div class="section">
+      <h2>// Upload Capture</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="card">
+          <div class="label" style="margin-bottom:8px">Upload File</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="file" id="replay-upload-file" accept=".pcap,.jsonl"
+              style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px;border-radius:4px;font-family:inherit;font-size:0.82em;flex:1">
+            <button class="scanner-btn" onclick="replayUpload()" style="white-space:nowrap">Upload</button>
+          </div>
+          <div style="color:#555;font-size:0.72em;margin-top:4px">Accepts .pcap and .jsonl files (max 100 MB)</div>
+        </div>
+        <div class="card">
+          <div class="label" style="margin-bottom:8px">Load from URL</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="replay-fetch-url" placeholder="https://example.com/capture.pcap"
+              style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;flex:1">
+            <button class="scanner-btn" onclick="replayFetchURL()" style="white-space:nowrap">Fetch</button>
+          </div>
+          <div style="color:#555;font-size:0.72em;margin-top:4px">Download a .pcap or .jsonl from a remote URL</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <div class="label" style="white-space:nowrap">Cleanup:</div>
+        <input type="number" id="replay-cleanup-size" value="500" min="1" max="10000" step="10"
+          style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100px">
+        <span style="color:#555;font-size:0.78em">MB limit</span>
+        <button class="cfg-btn" onclick="replayCleanup()" title="Remove oldest capture files until total size is under the MB limit">Trim to Size Limit</button>
+      </div>
+    </div>
+
+    <!-- Capture Files List -->
+    <div class="section">
+      <h2>// Capture Files</h2>
+      <div style="margin-bottom:12px">
+        <button class="scanner-btn" onclick="refreshReplayFiles()">Refresh</button>
+      </div>
+      <div class="tbl-scroll" style="max-height:300px">
+        <table>
+          <thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Action</th></tr></thead>
+          <tbody id="replay-files-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PCAP Metadata -->
+    <div class="section" id="replay-metadata-section" style="display:none">
+      <h2>// Capture Metadata</h2>
+      <div class="grid" id="replay-metadata-cards"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div id="replay-meta-methods" style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px"></div>
+        <div id="replay-meta-paths" style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px"></div>
+      </div>
+      <div id="replay-meta-protocols" style="margin-top:8px;background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px;font-size:0.82em;color:#888"></div>
+    </div>
+
+    <!-- Replay Target -->
+    <div class="section">
+      <h2>// Replay Target</h2>
+      <div style="margin-bottom:8px;color:#888;font-size:0.82em">Requests will be replayed against this URL</div>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
+        <span class="label" style="white-space:nowrap">Target URL</span>
+        <input type="text" id="replay-target" placeholder="http://localhost:8765" value="http://localhost:8765"
+          style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.85em;flex:1">
+      </div>
+      <div id="replay-target-display" style="font-size:0.82em;color:#555"></div>
+    </div>
+
+    <!-- Playback Controls -->
+    <div class="section">
+      <h2>// Playback Controls</h2>
+      <div class="grid">
+        <div class="card">
+          <div class="label">Timing Mode</div>
+          <select id="replay-timing" class="ctrl-select" style="margin-top:6px">
+            <option value="burst">Burst (all at once)</option>
+            <option value="exact">Exact (original timing)</option>
+            <option value="scaled">Scaled (adjustable speed)</option>
+          </select>
+        </div>
+        <div class="card">
+          <div class="label">Speed</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+            <input type="range" id="replay-speed" min="0.1" max="10" step="0.1" value="1.0"
+              oninput="document.getElementById('replay-speed-val').textContent=this.value+'x'"
+              style="flex:1;accent-color:#00ff88;">
+            <span id="replay-speed-val" style="color:#00ffcc;font-weight:bold;min-width:36px">1x</span>
+          </div>
+          <div style="display:flex;gap:4px;margin-top:6px">
+            <button class="cfg-btn" onclick="setReplaySpeed(1)" style="padding:4px 10px;font-size:0.75em">1x</button>
+            <button class="cfg-btn" onclick="setReplaySpeed(2)" style="padding:4px 10px;font-size:0.75em">2x</button>
+            <button class="cfg-btn" onclick="setReplaySpeed(5)" style="padding:4px 10px;font-size:0.75em">5x</button>
+            <button class="cfg-btn" onclick="document.getElementById('replay-timing').value='burst'" style="padding:4px 10px;font-size:0.75em">Burst</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="label">Filter Path</div>
+          <input type="text" id="replay-filter" placeholder="/api/ (substring match)" style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%;margin-top:6px">
+        </div>
+        <div class="card">
+          <div class="label">Loop</div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer">
+            <input type="checkbox" id="replay-loop" style="accent-color:#00ff88;width:18px;height:18px">
+            <span style="color:#888;font-size:0.82em">Repeat when finished</span>
+          </label>
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button class="scanner-btn" onclick="replayStart()" id="replay-play-btn">Play</button>
+        <button class="cfg-btn" onclick="replayStop()" style="background:#662222;color:#ff6666" id="replay-stop-btn">Stop</button>
+      </div>
+    </div>
+
+    <!-- Playback Status -->
+    <div class="section">
+      <h2>// Playback Status</h2>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div id="replay-state-badge" style="background:#222;color:#666;padding:6px 16px;border-radius:20px;font-size:0.85em;font-weight:bold;letter-spacing:0.5px">STOPPED</div>
+        <div id="replay-state-detail" style="color:#888;font-size:0.82em"></div>
+      </div>
+      <div style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;height:28px;overflow:hidden;position:relative;margin-bottom:12px">
+        <div id="replay-progress-bar" style="height:100%%;background:linear-gradient(90deg,#00aa66,#00ff88);width:0%%;transition:width 0.5s;border-radius:6px"></div>
+        <div id="replay-progress-text" style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:0.78em;color:#ccc;font-weight:bold">0 / 0 packets</div>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="label">Packets Loaded</div><div class="value v-info" id="replay-loaded">0</div></div>
+        <div class="card"><div class="label">Packets Played</div><div class="value v-ok" id="replay-played">0</div></div>
+        <div class="card"><div class="label">Errors</div><div class="value v-err" id="replay-errors">0</div></div>
+        <div class="card"><div class="label">Elapsed</div><div class="value v-info" id="replay-elapsed">0ms</div></div>
+        <div class="card"><div class="label">Loaded File</div><div class="value" id="replay-loaded-file" style="font-size:0.85em;color:#888">None</div></div>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <!-- ==================== PROXY TAB ==================== -->
@@ -1166,148 +1362,52 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   </div>
 </div>
 
-<!-- ==================== REPLAY TAB ==================== -->
-<div id="panel-replay" class="panel">
-
-  <!-- Upload Section -->
+<!-- ==================== SETTINGS TAB ==================== -->
+<div id="panel-settings" class="panel">
   <div class="section">
-    <h2>// Upload Capture</h2>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-      <div class="card">
-        <div class="label" style="margin-bottom:8px">Upload File</div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="file" id="replay-upload-file" accept=".pcap,.jsonl"
-            style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px;border-radius:4px;font-family:inherit;font-size:0.82em;flex:1">
-          <button class="scanner-btn" onclick="replayUpload()" style="white-space:nowrap">Upload</button>
-        </div>
-        <div style="color:#555;font-size:0.72em;margin-top:4px">Accepts .pcap and .jsonl files (max 100 MB)</div>
+    <h2>// Admin Password</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:12px">Change the admin panel password. Current password is required.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:600px">
+      <div>
+        <div class="label" style="margin-bottom:4px">Current Password</div>
+        <input type="password" id="settings-current-pw" class="settings-input" placeholder="Current password">
       </div>
-      <div class="card">
-        <div class="label" style="margin-bottom:8px">Load from URL</div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" id="replay-fetch-url" placeholder="https://example.com/capture.pcap"
-            style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;flex:1">
-          <button class="scanner-btn" onclick="replayFetchURL()" style="white-space:nowrap">Fetch</button>
-        </div>
-        <div style="color:#555;font-size:0.72em;margin-top:4px">Download a .pcap or .jsonl from a remote URL</div>
+      <div>
+        <div class="label" style="margin-bottom:4px">New Password</div>
+        <input type="password" id="settings-new-pw" class="settings-input" placeholder="New password (min 4 chars)">
       </div>
     </div>
-    <div style="display:flex;gap:12px;align-items:center">
-      <div class="label" style="white-space:nowrap">Cleanup:</div>
-      <input type="number" id="replay-cleanup-size" value="500" min="1" max="10000" step="10"
-        style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100px">
-      <span style="color:#555;font-size:0.78em">MB limit</span>
-      <button class="cfg-btn" onclick="replayCleanup()" title="Remove oldest capture files until total size is under the MB limit">Trim to Size Limit</button>
-    </div>
+    <button class="scanner-btn" onclick="changePassword()" style="margin-top:12px">Change Password</button>
+    <div id="settings-pw-status" style="font-size:0.82em;margin-top:8px;color:#555"></div>
   </div>
 
-  <!-- Capture Files List -->
   <div class="section">
-    <h2>// Capture Files</h2>
-    <div style="margin-bottom:12px">
-      <button class="scanner-btn" onclick="refreshReplayFiles()">Refresh</button>
+    <h2>// Configuration Import / Export</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Save or restore the entire server configuration as a JSON file.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="cfg-btn primary" onclick="exportConfig()">Export Config</button>
+      <button class="cfg-btn" onclick="document.getElementById('cfg-import-file').click()">Import Config</button>
+      <input type="file" id="cfg-import-file" accept=".json" style="display:none" onchange="importConfigFile(this)">
     </div>
-    <div class="tbl-scroll" style="max-height:300px">
-      <table>
-        <thead><tr>
-          <th>File</th>
-          <th>Size</th>
-          <th>Modified</th>
-          <th>Action</th>
-        </tr></thead>
-        <tbody id="replay-files-body"></tbody>
-      </table>
-    </div>
+    <div id="cfg-import-status" style="color:#555;font-size:0.82em">Select a JSON config file to restore server settings</div>
   </div>
 
-  <!-- PCAP Metadata -->
-  <div class="section" id="replay-metadata-section" style="display:none">
-    <h2>// Capture Metadata</h2>
-    <div class="grid" id="replay-metadata-cards"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-      <div id="replay-meta-methods" style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px"></div>
-      <div id="replay-meta-paths" style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px"></div>
-    </div>
-    <div id="replay-meta-protocols" style="margin-top:8px;background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;padding:12px;font-size:0.82em;color:#888"></div>
+  <div class="section">
+    <h2>// Recording Format</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">File format for recorded traffic captures.</p>
+    <select id="ctrl-recorder-format" class="ctrl-select" style="max-width:200px" onchange="setConfigKey('recorder_format', this.value)">
+      <option value="jsonl">JSONL</option>
+      <option value="pcap">PCAP</option>
+    </select>
   </div>
 
-  <!-- Replay Target Configuration -->
   <div class="section">
-    <h2>// Replay Target</h2>
-    <div style="margin-bottom:8px;color:#888;font-size:0.82em">Requests will be replayed against this URL</div>
-    <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
-      <span class="label" style="white-space:nowrap">Target URL</span>
-      <input type="text" id="replay-target" placeholder="http://localhost:8765" value="http://localhost:8765"
-        style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.85em;flex:1">
-    </div>
-    <div id="replay-target-display" style="font-size:0.82em;color:#555"></div>
-  </div>
-
-  <!-- Playback Controls -->
-  <div class="section">
-    <h2>// Playback Controls</h2>
-    <div class="grid">
-      <div class="card">
-        <div class="label">Timing Mode</div>
-        <select id="replay-timing" class="ctrl-select" style="margin-top:6px">
-          <option value="burst">Burst (all at once)</option>
-          <option value="exact">Exact (original timing)</option>
-          <option value="scaled">Scaled (adjustable speed)</option>
-        </select>
-      </div>
-      <div class="card">
-        <div class="label">Speed</div>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
-          <input type="range" id="replay-speed" min="0.1" max="10" step="0.1" value="1.0"
-            oninput="document.getElementById('replay-speed-val').textContent=this.value+'x'"
-            style="flex:1;accent-color:#00ff88;">
-          <span id="replay-speed-val" style="color:#00ffcc;font-weight:bold;min-width:36px">1x</span>
-        </div>
-        <div style="display:flex;gap:4px;margin-top:6px">
-          <button class="cfg-btn" onclick="setReplaySpeed(1)" style="padding:4px 10px;font-size:0.75em" title="Original speed">1x</button>
-          <button class="cfg-btn" onclick="setReplaySpeed(2)" style="padding:4px 10px;font-size:0.75em" title="2x faster than original">2x</button>
-          <button class="cfg-btn" onclick="setReplaySpeed(5)" style="padding:4px 10px;font-size:0.75em" title="5x faster than original">5x</button>
-          <button class="cfg-btn" onclick="document.getElementById('replay-timing').value='burst';document.getElementById('replay-speed-val').textContent='Burst'" style="padding:4px 10px;font-size:0.75em" title="Send all requests at once, ignoring original timing">Burst</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="label">Filter Path</div>
-        <input type="text" id="replay-filter" placeholder="/api/ (substring match)" style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%;margin-top:6px">
-        <div style="color:#555;font-size:0.72em;margin-top:3px">Only replay requests whose path contains this text</div>
-      </div>
-      <div class="card">
-        <div class="label">Loop</div>
-        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer">
-          <input type="checkbox" id="replay-loop" style="accent-color:#00ff88;width:18px;height:18px">
-          <span style="color:#888;font-size:0.82em">Repeat when finished</span>
-        </label>
-      </div>
-    </div>
-    <div style="margin-top:14px;display:flex;gap:8px">
-      <button class="scanner-btn" onclick="replayStart()" id="replay-play-btn">Play</button>
-      <button class="cfg-btn" onclick="replayPause()" id="replay-pause-btn" style="display:none">Pause</button>
-      <button class="cfg-btn" onclick="replayStop()" style="background:#662222;color:#ff6666" id="replay-stop-btn">Stop</button>
-    </div>
-  </div>
-
-  <!-- Playback Status -->
-  <div class="section">
-    <h2>// Playback Status</h2>
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-      <div id="replay-state-badge" style="background:#222;color:#666;padding:6px 16px;border-radius:20px;font-size:0.85em;font-weight:bold;letter-spacing:0.5px">STOPPED</div>
-      <div id="replay-state-detail" style="color:#888;font-size:0.82em"></div>
-    </div>
-    <!-- Progress bar -->
-    <div style="background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;height:28px;overflow:hidden;position:relative;margin-bottom:12px">
-      <div id="replay-progress-bar" style="height:100%%;background:linear-gradient(90deg,#00aa66,#00ff88);width:0%%;transition:width 0.5s;border-radius:6px"></div>
-      <div id="replay-progress-text" style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:0.78em;color:#ccc;font-weight:bold">0 / 0 packets</div>
-    </div>
-    <div class="grid" id="replay-stats">
-      <div class="card"><div class="label">Packets Loaded</div><div class="value v-info" id="replay-loaded">0</div></div>
-      <div class="card"><div class="label">Packets Played</div><div class="value v-ok" id="replay-played">0</div></div>
-      <div class="card"><div class="label">Errors</div><div class="value v-err" id="replay-errors">0</div></div>
-      <div class="card"><div class="label">Elapsed</div><div class="value v-info" id="replay-elapsed">0ms</div></div>
-      <div class="card"><div class="label">Loaded File</div><div class="value" id="replay-loaded-file" style="font-size:0.85em;color:#888">None</div></div>
+    <h2>// Server Info</h2>
+    <div class="grid" id="settings-info">
+      <div class="card"><div class="label">Server Port</div><div class="value v-info" style="font-size:1em" id="settings-server-port">--</div></div>
+      <div class="card"><div class="label">Dashboard Port</div><div class="value v-info" style="font-size:1em" id="settings-dash-port">--</div></div>
+      <div class="card"><div class="label">Uptime</div><div class="value v-ok" style="font-size:1em" id="settings-uptime">--</div></div>
+      <div class="card"><div class="label">Go Version</div><div class="value" style="font-size:1em;color:#888">1.24+</div></div>
     </div>
   </div>
 </div>
@@ -1323,8 +1423,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   window.showTab = function(name, pushHash) {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.getElementById('panel-' + name).classList.add('active');
-    document.querySelector('.tab[onclick*="' + name + '"]').classList.add('active');
+    var panel = document.getElementById('panel-' + name);
+    if (panel) panel.classList.add('active');
+    var tabBtn = document.querySelector('.tab[onclick*="' + name + '"]');
+    if (tabBtn) tabBtn.classList.add('active');
     if (pushHash !== false) window.location.hash = '#' + name;
   };
 
@@ -1332,6 +1434,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var tab = window.location.hash.replace('#', '');
     if (tab && document.getElementById('panel-' + tab)) showTab(tab, false);
   });
+
+  // ------ Server section toggle ------
+  window.toggleServerSection = function(name) {
+    var sec = document.getElementById('srv-' + name);
+    if (sec) sec.classList.toggle('open');
+  };
+
+  // ------ Scanner sub-tab switch (3 tabs now) ------
 
   // ------ Toast ------
   function toast(msg) {
@@ -1408,6 +1518,41 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         card('Labyrinth Hits', (m.total_labyrinth||0).toLocaleString(), 'v-info') +
         card('Unique Clients', m.unique_clients||0, 'v-info') +
         card('Uptime', fmtUptime(m.uptime_seconds), 'v-ok');
+
+      // Uptime in header
+      var uptimeEl = document.getElementById('header-uptime');
+      if (uptimeEl && m.uptime_seconds) uptimeEl.textContent = 'uptime: ' + fmtUptime(m.uptime_seconds);
+
+      // Mode cards
+      var srvStatus = document.getElementById('dash-server-status');
+      var srvDetail = document.getElementById('dash-server-detail');
+      if (srvStatus) srvStatus.textContent = 'RUNNING';
+      if (srvDetail) srvDetail.textContent = (m.total_requests||0).toLocaleString() + ' reqs | ' + ((m.error_rate_pct||0).toFixed(1)) + '%% err | ' + (m.unique_clients||0) + ' clients';
+
+      // Scanner mode card
+      try {
+        var scanData = await api('/admin/api/scanner/builtin/status');
+        var scanStatus = document.getElementById('dash-scanner-status');
+        var scanDetail = document.getElementById('dash-scanner-detail');
+        if (scanData.running) {
+          if (scanStatus) scanStatus.textContent = 'SCANNING';
+          if (scanDetail) scanDetail.textContent = (scanData.progress||0) + '%% complete';
+        } else {
+          if (scanStatus) scanStatus.textContent = 'IDLE';
+          if (scanDetail) scanDetail.textContent = scanData.last_profile ? 'Last: ' + scanData.last_profile : 'No active scans';
+        }
+      } catch(se) {}
+
+      // Proxy mode card
+      try {
+        var proxyData = await api('/admin/api/proxy/status');
+        var proxyStatus = document.getElementById('dash-proxy-status');
+        var proxyDetail = document.getElementById('dash-proxy-detail');
+        var pMode = (proxyData.mode || 'transparent').toUpperCase();
+        if (proxyStatus) proxyStatus.textContent = pMode;
+        var pStats = proxyData.pipeline_stats || {};
+        if (proxyDetail) proxyDetail.textContent = (pStats.requests_processed||0) + ' fwd | ' + (pStats.requests_blocked||0) + ' blocked';
+      } catch(pe) {}
 
       // Sparkline
       const series = ts.series || [];
@@ -2538,10 +2683,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   window.switchScannerSubtab = function(tab) {
     document.getElementById('scanner-eval-panel').style.display = tab === 'eval' ? '' : 'none';
     document.getElementById('scanner-builtin-panel').style.display = tab === 'builtin' ? '' : 'none';
+    var replayPanel = document.getElementById('scanner-replay-panel');
+    if (replayPanel) replayPanel.style.display = tab === 'replay' ? '' : 'none';
     document.querySelectorAll('.scanner-subtab-btn').forEach(function(b) { b.classList.remove('active'); });
-    event.target.classList.add('active');
+    if (event && event.target) event.target.classList.add('active');
+    else document.querySelectorAll('.scanner-subtab-btn').forEach(function(b) { if (b.textContent.toLowerCase().indexOf(tab) >= 0) b.classList.add('active'); });
     if (tab === 'eval') refreshScannerTab();
-    else refreshBuiltinScanner();
+    else if (tab === 'builtin') refreshBuiltinScanner();
+    else if (tab === 'replay') refreshReplay();
   };
 
   window.selectBuiltinProfile = function(el, profile) {
@@ -3259,23 +3408,133 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) { console.error('replayStop:', e); }
   };
 
+  // ------ Nightmare mode ------
+  window.toggleNightmareAll = async function() {
+    try {
+      var d = await api('/admin/api/nightmare');
+      var anyActive = d.server || d.scanner || d.proxy;
+      var resp = await fetch(API + '/admin/api/nightmare', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: 'all', enabled: !anyActive})
+      }).then(r => r.json());
+      if (resp.ok) {
+        toast(!anyActive ? 'NIGHTMARE MODE ACTIVATED' : 'Nightmare mode deactivated');
+        refreshNightmareBar();
+        refresh();
+      }
+    } catch(e) { console.error('nightmare:', e); }
+  };
+
+  window.toggleNightmareMode = async function(mode) {
+    try {
+      var d = await api('/admin/api/nightmare');
+      var current = d[mode] || false;
+      await fetch(API + '/admin/api/nightmare', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: mode, enabled: !current})
+      });
+      refreshNightmareBar();
+      refresh();
+    } catch(e) { console.error('nightmare:', e); }
+  };
+
+  async function refreshNightmareBar() {
+    try {
+      var d = await api('/admin/api/nightmare');
+      var bar = document.getElementById('nightmare-bar');
+      var label = document.getElementById('nightmare-label');
+      var modes = document.getElementById('nightmare-modes');
+      var anyActive = d.server || d.scanner || d.proxy;
+      bar.className = 'nightmare-bar ' + (anyActive ? 'on' : 'off');
+      if (anyActive) {
+        var active = [];
+        if (d.server) active.push('Server');
+        if (d.scanner) active.push('Scanner');
+        if (d.proxy) active.push('Proxy');
+        label.textContent = 'NIGHTMARE MODE ACTIVE';
+        modes.textContent = active.join(' + ');
+      } else {
+        label.textContent = 'NIGHTMARE: OFF';
+        modes.textContent = '';
+      }
+      var btn = document.getElementById('dash-nightmare-btn');
+      if (btn) btn.textContent = anyActive ? 'Disable Nightmare' : 'Enable Nightmare';
+    } catch(e) {}
+  }
+
+  // ------ Password change ------
+  window.changePassword = async function() {
+    var current = document.getElementById('settings-current-pw').value;
+    var newPw = document.getElementById('settings-new-pw').value;
+    var status = document.getElementById('settings-pw-status');
+    if (!current || !newPw) { status.style.color = '#ff4444'; status.textContent = 'Both fields required'; return; }
+    try {
+      var resp = await fetch(API + '/admin/api/password', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({current: current, new: newPw})
+      }).then(r => r.json());
+      if (resp.ok) {
+        status.style.color = '#00ff88';
+        status.textContent = 'Password changed. You may need to re-login.';
+        document.getElementById('settings-current-pw').value = '';
+        document.getElementById('settings-new-pw').value = '';
+      } else {
+        status.style.color = '#ff4444';
+        status.textContent = resp.error || 'Failed';
+      }
+    } catch(e) {
+      status.style.color = '#ff4444';
+      status.textContent = 'Error: ' + e.message;
+    }
+  };
+
+  // ------ Server panel refresh ------
+  async function refreshServer() {
+    // Only refresh the open sections to avoid unnecessary API calls
+    var sections = document.querySelectorAll('.srv-section.open');
+    for (var i = 0; i < sections.length; i++) {
+      var id = sections[i].id;
+      if (id === 'srv-features' || id === 'srv-errors' || id === 'srv-content' || id === 'srv-behavior' || id === 'srv-spider') await refreshControls();
+      else if (id === 'srv-vulns') await refreshVulns();
+      else if (id === 'srv-sessions') await refreshSessions();
+      else if (id === 'srv-log') await refreshLog();
+      else if (id === 'srv-traffic') await refreshTraffic();
+    }
+  }
+
+  // ------ Settings refresh ------
+  async function refreshSettings() {
+    try {
+      var d = await api('/api/metrics');
+      var upEl = document.getElementById('settings-uptime');
+      if (upEl && d.uptime) upEl.textContent = d.uptime;
+      // Set port info from current location
+      var dashPort = document.getElementById('settings-dash-port');
+      if (dashPort) dashPort.textContent = window.location.port || '8766';
+      var srvPort = document.getElementById('settings-server-port');
+      if (srvPort) srvPort.textContent = (parseInt(window.location.port || '8766') - 1) + '';
+    } catch(e) {}
+  }
+
   // ------ Main loop ------
   async function refresh() {
+    refreshNightmareBar();
     const active = document.querySelector('.panel.active');
     if (!active) return;
     const id = active.id;
     if (id === 'panel-dashboard') await refreshDashboard();
-    else if (id === 'panel-sessions') await refreshSessions();
-    else if (id === 'panel-traffic') await refreshTraffic();
-    else if (id === 'panel-controls') await refreshControls();
-    else if (id === 'panel-log') await refreshLog();
-    else if (id === 'panel-vulns') await refreshVulns();
+    else if (id === 'panel-server') await refreshServer();
     else if (id === 'panel-scanner') {
-      if (document.getElementById('scanner-builtin-panel').style.display !== 'none') await refreshBuiltinScanner();
+      var replayPanel = document.getElementById('scanner-replay-panel');
+      if (replayPanel && replayPanel.style.display !== 'none') await refreshReplay();
+      else if (document.getElementById('scanner-builtin-panel').style.display !== 'none') await refreshBuiltinScanner();
       else await refreshScannerTab();
     }
     else if (id === 'panel-proxy') await refreshProxy();
-    else if (id === 'panel-replay') await refreshReplay();
+    else if (id === 'panel-settings') await refreshSettings();
   }
 
   // Initial load — restore tab from URL hash

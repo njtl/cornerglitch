@@ -233,6 +233,20 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/admin/api/replay/cleanup", func(w http.ResponseWriter, r *http.Request) {
 		adminAPIReplayCleanup(w, r)
 	})
+
+	// Nightmare mode
+	mux.HandleFunc("/admin/api/nightmare", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			adminAPINightmarePost(w, r, s)
+		} else {
+			adminAPINightmareGet(w, r)
+		}
+	})
+
+	// Password change
+	mux.HandleFunc("/admin/api/password", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIPasswordChange(w, r)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1812,5 +1826,208 @@ func adminAPIReplayCleanup(w http.ResponseWriter, r *http.Request) {
 		"ok":       true,
 		"deleted":  deletedCount,
 		"freed_mb": float64(freedBytes) / (1 << 20),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// API handler: GET /admin/api/nightmare
+// ---------------------------------------------------------------------------
+
+func adminAPINightmareGet(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(globalNightmare.Snapshot())
+}
+
+// ---------------------------------------------------------------------------
+// API handler: POST /admin/api/nightmare
+// ---------------------------------------------------------------------------
+
+func adminAPINightmarePost(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Mode    string `json:"mode"`    // "all", "server", "scanner", "proxy"
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	globalNightmare.mu.Lock()
+	defer globalNightmare.mu.Unlock()
+
+	switch req.Mode {
+	case "all":
+		if req.Enabled {
+			// Activate all modes
+			if !globalNightmare.ServerActive {
+				applyServerNightmare()
+			}
+			globalNightmare.ServerActive = true
+			globalNightmare.ScannerActive = true
+			globalNightmare.ProxyActive = true
+			applyProxyNightmare(s)
+		} else {
+			// Deactivate all modes
+			if globalNightmare.ServerActive {
+				restoreServerNightmare()
+			}
+			globalNightmare.ServerActive = false
+			globalNightmare.ScannerActive = false
+			globalNightmare.ProxyActive = false
+			restoreProxyNightmare(s)
+		}
+	case "server":
+		if req.Enabled && !globalNightmare.ServerActive {
+			applyServerNightmare()
+		} else if !req.Enabled && globalNightmare.ServerActive {
+			restoreServerNightmare()
+		}
+		globalNightmare.ServerActive = req.Enabled
+	case "scanner":
+		globalNightmare.ScannerActive = req.Enabled
+	case "proxy":
+		if req.Enabled {
+			applyProxyNightmare(s)
+		} else {
+			restoreProxyNightmare(s)
+		}
+		globalNightmare.ProxyActive = req.Enabled
+	default:
+		http.Error(w, `{"error":"invalid mode, use: all, server, scanner, proxy"}`, http.StatusBadRequest)
+		return
+	}
+
+	state := map[string]bool{
+		"server":  globalNightmare.ServerActive,
+		"scanner": globalNightmare.ScannerActive,
+		"proxy":   globalNightmare.ProxyActive,
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":    true,
+		"state": state,
+	})
+}
+
+// applyServerNightmare snapshots current config and applies extreme values.
+// Must be called with globalNightmare.mu held.
+func applyServerNightmare() {
+	// Snapshot current state
+	globalNightmare.PreviousConfig = globalConfig.Get()
+	globalNightmare.PreviousFeatures = globalFlags.Snapshot()
+
+	// Enable all features
+	globalFlags.SetAll(true)
+
+	// Apply extreme config values
+	globalConfig.Set("error_rate_multiplier", 5.0)
+	globalConfig.Set("header_corrupt_level", 4)
+	globalConfig.Set("block_chance", 0.15)
+	globalConfig.Set("delay_min_ms", 500)
+	globalConfig.Set("delay_max_ms", 10000)
+	globalConfig.Set("max_labyrinth_depth", 100)
+	globalConfig.Set("labyrinth_link_density", 20)
+	globalConfig.Set("captcha_trigger_thresh", 10)
+	globalConfig.Set("cookie_trap_frequency", 15)
+	globalConfig.Set("js_trap_difficulty", 5)
+	globalConfig.Set("bot_score_threshold", 20)
+	globalConfig.Set("adaptive_aggressive_rps", 2)
+}
+
+// restoreServerNightmare restores the config snapshot.
+// Must be called with globalNightmare.mu held.
+func restoreServerNightmare() {
+	if globalNightmare.PreviousFeatures != nil {
+		for name, enabled := range globalNightmare.PreviousFeatures {
+			globalFlags.Set(name, enabled)
+		}
+	}
+	if globalNightmare.PreviousConfig != nil {
+		for key, val := range globalNightmare.PreviousConfig {
+			switch v := val.(type) {
+			case float64:
+				globalConfig.Set(key, v)
+			case int:
+				globalConfig.Set(key, float64(v))
+			case string:
+				globalConfig.SetString(key, v)
+			}
+		}
+	}
+}
+
+// applyProxyNightmare sets proxy to nightmare mode.
+func applyProxyNightmare(s *Server) {
+	globalProxyConfig.SetMode("nightmare")
+}
+
+// restoreProxyNightmare sets proxy back to transparent.
+func restoreProxyNightmare(s *Server) {
+	globalProxyConfig.SetMode("transparent")
+}
+
+// ---------------------------------------------------------------------------
+// API handler: POST /admin/api/password
+// ---------------------------------------------------------------------------
+
+func adminAPIPasswordChange(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Current string `json:"current"`
+		New     string `json:"new"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.New == "" {
+		http.Error(w, `{"error":"new password cannot be empty"}`, http.StatusBadRequest)
+		return
+	}
+	if len(req.New) < 4 {
+		http.Error(w, `{"error":"password must be at least 4 characters"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := ChangePassword(req.Current, req.New); err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "Password changed successfully",
 	})
 }
