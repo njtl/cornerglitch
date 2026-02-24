@@ -41,6 +41,18 @@ type captureRecord struct {
 	LatencyMs       float64           `json:"latency_ms"`
 }
 
+// RecorderStatus describes the current state of the recorder.
+type RecorderStatus struct {
+	Recording   bool    `json:"recording"`
+	Format      string  `json:"format"`
+	FileName    string  `json:"file_name"`
+	Records     int64   `json:"records"`
+	SizeBytes   int64   `json:"size_bytes"`
+	ElapsedSec  float64 `json:"elapsed_sec"`
+	MaxDuration int     `json:"max_duration_sec"`
+	MaxRequests int64   `json:"max_requests"`
+}
+
 // Recorder handles HTTP traffic capture to JSONL or PCAP files.
 type Recorder struct {
 	capturesDir string
@@ -54,6 +66,12 @@ type Recorder struct {
 	fileStart   time.Time
 	fileSize    int64
 	recordCount atomic.Int64
+
+	// Recording limits
+	maxDuration time.Duration // 0 = unlimited
+	maxRequests int64         // 0 = unlimited
+	stopTimer   *time.Timer
+	startedAt   time.Time
 }
 
 // NewRecorder creates a new Recorder that stores captures in capturesDir.
@@ -99,17 +117,86 @@ func (rec *Recorder) Start() {
 	}
 	rec.openNewFile()
 	rec.recording = true
+	rec.startedAt = time.Now()
 }
 
 // Stop ends the current capture session. If not recording, this is a no-op.
 func (rec *Recorder) Stop() {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
+	rec.stopLocked()
+}
+
+// stopLocked performs the actual stop while mu is held.
+func (rec *Recorder) stopLocked() {
 	if !rec.recording {
 		return
 	}
+	if rec.stopTimer != nil {
+		rec.stopTimer.Stop()
+		rec.stopTimer = nil
+	}
 	rec.closeFile()
 	rec.recording = false
+	rec.maxDuration = 0
+	rec.maxRequests = 0
+}
+
+// StartWithLimits begins a new capture session with optional limits.
+// maxDurationSec <= 0 means no duration limit; maxRequests <= 0 means no request limit.
+// If already recording, this is a no-op.
+func (rec *Recorder) StartWithLimits(maxDurationSec int, maxRequests int64) {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.recording {
+		return
+	}
+
+	if maxDurationSec > 0 {
+		rec.maxDuration = time.Duration(maxDurationSec) * time.Second
+	} else {
+		rec.maxDuration = 0
+	}
+	if maxRequests > 0 {
+		rec.maxRequests = maxRequests
+	} else {
+		rec.maxRequests = 0
+	}
+
+	rec.openNewFile()
+	rec.recording = true
+	rec.startedAt = time.Now()
+
+	if rec.maxDuration > 0 {
+		rec.stopTimer = time.AfterFunc(rec.maxDuration, func() {
+			rec.Stop()
+		})
+	}
+}
+
+// GetStatus returns the current status of the recorder.
+func (rec *Recorder) GetStatus() RecorderStatus {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+
+	status := RecorderStatus{
+		Recording: rec.recording,
+		Format:    rec.format,
+		FileName:  rec.fileName,
+		Records:   rec.recordCount.Load(),
+		SizeBytes: rec.fileSize,
+	}
+
+	if rec.recording && !rec.startedAt.IsZero() {
+		status.ElapsedSec = time.Since(rec.startedAt).Seconds()
+	}
+
+	if rec.maxDuration > 0 {
+		status.MaxDuration = int(rec.maxDuration.Seconds())
+	}
+	status.MaxRequests = rec.maxRequests
+
+	return status
 }
 
 // RecordRequest captures an incoming HTTP request. It is safe for concurrent use.
@@ -146,7 +233,10 @@ func (rec *Recorder) RecordResponse(statusCode int, headers http.Header, body []
 		}
 		_ = rec.pcapWriter.WriteHTTPResponse(statusCode, respHeaders, int64(len(body)))
 		rec.fileSize = rec.pcapWriter.Size()
-		rec.recordCount.Add(1)
+		newCount := rec.recordCount.Add(1)
+		if rec.maxRequests > 0 && newCount >= rec.maxRequests {
+			rec.stopLocked()
+		}
 		return
 	}
 
@@ -183,7 +273,10 @@ func (rec *Recorder) RecordResponse(statusCode int, headers http.Header, body []
 		return
 	}
 	rec.fileSize += int64(n)
-	rec.recordCount.Add(1)
+	newCount := rec.recordCount.Add(1)
+	if rec.maxRequests > 0 && newCount >= rec.maxRequests {
+		rec.stopLocked()
+	}
 }
 
 // RecordFull writes a complete request+response record with all fields populated.
@@ -222,7 +315,10 @@ func (rec *Recorder) RecordFull(method, path, clientID string, reqHeaders map[st
 		_ = rec.pcapWriter.WriteHTTPResponse(statusCode, rh, respBodySize)
 
 		rec.fileSize = rec.pcapWriter.Size()
-		rec.recordCount.Add(1)
+		newCount := rec.recordCount.Add(1)
+		if rec.maxRequests > 0 && newCount >= rec.maxRequests {
+			rec.stopLocked()
+		}
 		return
 	}
 
@@ -265,7 +361,10 @@ func (rec *Recorder) RecordFull(method, path, clientID string, reqHeaders map[st
 		return
 	}
 	rec.fileSize += int64(n)
-	rec.recordCount.Add(1)
+	newCount := rec.recordCount.Add(1)
+	if rec.maxRequests > 0 && newCount >= rec.maxRequests {
+		rec.stopLocked()
+	}
 }
 
 // ShouldHandle returns true if the request path is a captures management endpoint.

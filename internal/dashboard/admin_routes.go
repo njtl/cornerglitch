@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/replay"
 	"github.com/glitchWebServer/internal/scaneval"
 )
@@ -126,6 +127,11 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		json.NewEncoder(w).Encode(globalProxyConfig.Snapshot())
 	})
 
+	// Proxy runtime lifecycle control
+	mux.HandleFunc("/admin/api/proxy/runtime", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIProxyRuntime(w, r)
+	})
+
 	mux.HandleFunc("/admin/api/proxy/mode", func(w http.ResponseWriter, r *http.Request) {
 		setCORS(w)
 		w.Header().Set("Content-Type", "application/json")
@@ -232,6 +238,20 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 	})
 	mux.HandleFunc("/admin/api/replay/cleanup", func(w http.ResponseWriter, r *http.Request) {
 		adminAPIReplayCleanup(w, r)
+	})
+
+	// Recorder controls
+	mux.HandleFunc("/admin/api/recorder/status", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIRecorderStatus(w, r)
+	})
+	mux.HandleFunc("/admin/api/recorder/start", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIRecorderStart(w, r)
+	})
+	mux.HandleFunc("/admin/api/recorder/stop", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIRecorderStop(w, r)
+	})
+	mux.HandleFunc("/admin/api/recorder/files", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIRecorderFiles(w, r)
 	})
 
 	// Nightmare mode
@@ -1827,6 +1847,192 @@ func adminAPIReplayCleanup(w http.ResponseWriter, r *http.Request) {
 		"deleted":  deletedCount,
 		"freed_mb": float64(freedBytes) / (1 << 20),
 	})
+}
+
+// ---------------------------------------------------------------------------
+// API handler: GET/POST /admin/api/proxy/runtime
+// ---------------------------------------------------------------------------
+
+func adminAPIProxyRuntime(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == http.MethodGet {
+		json.NewEncoder(w).Encode(globalProxyManager.Status())
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"GET or POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"`
+		Port   int    `json:"port"`
+		Target string `json:"target"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Apply defaults
+	if req.Port == 0 {
+		req.Port = 8080
+	}
+	if req.Target == "" {
+		req.Target = "http://localhost:8765"
+	}
+
+	switch req.Action {
+	case "start":
+		if err := globalProxyManager.Start(req.Port, req.Target); err != nil {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+	case "stop":
+		if err := globalProxyManager.Stop(); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+	case "restart":
+		if err := globalProxyManager.Restart(); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+	default:
+		http.Error(w, `{"error":"invalid action, use: start, stop, restart"}`, http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(globalProxyManager.Status())
+}
+
+// ---------------------------------------------------------------------------
+// Recorder API handlers
+// ---------------------------------------------------------------------------
+
+func adminAPIRecorderStatus(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	rec := globalRecorder
+	if rec == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "recorder not initialized",
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(rec.GetStatus())
+}
+
+func adminAPIRecorderStart(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	rec := globalRecorder
+	if rec == nil {
+		http.Error(w, `{"error":"recorder not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Format         string `json:"format"`
+		MaxDurationSec int    `json:"max_duration_sec"`
+		MaxRequests    int64  `json:"max_requests"`
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Set format before starting
+	if req.Format == "pcap" || req.Format == "jsonl" {
+		rec.SetFormat(req.Format)
+	}
+
+	if req.MaxDurationSec > 0 || req.MaxRequests > 0 {
+		rec.StartWithLimits(req.MaxDurationSec, req.MaxRequests)
+	} else {
+		rec.Start()
+	}
+
+	status := rec.GetStatus()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":     true,
+		"status": status,
+	})
+}
+
+func adminAPIRecorderStop(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	rec := globalRecorder
+	if rec == nil {
+		http.Error(w, `{"error":"recorder not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	rec.Stop()
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "recording stopped",
+	})
+}
+
+func adminAPIRecorderFiles(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	rec := globalRecorder
+	if rec == nil {
+		json.NewEncoder(w).Encode([]interface{}{})
+		return
+	}
+
+	captures := rec.GetCaptures()
+	if captures == nil {
+		captures = []recorder.CaptureInfo{}
+	}
+
+	json.NewEncoder(w).Encode(captures)
 }
 
 // ---------------------------------------------------------------------------
