@@ -605,7 +605,38 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Global Metrics -->
   <div class="grid" id="dash-metrics"></div>
+
+  <!-- Three-Column Mode Sections -->
+  <p style="color:#555;font-size:0.72em;margin-bottom:8px">Per-subsystem metrics. Click any card heading to jump to that tab.</p>
+  <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-bottom: 18px;">
+    <!-- Server Column -->
+    <div class="section" style="border-left: 3px solid #00ff88;">
+      <h2 style="color:#00ff88; font-size:0.9em; margin-bottom:10px">// Server</h2>
+      <div class="grid" style="grid-template-columns:1fr 1fr;" id="dash-srv-cards"></div>
+      <div style="margin-top:10px">
+        <div style="font-size:0.75em;color:#888;text-transform:uppercase;margin-bottom:4px">Status Codes</div>
+        <div id="dash-status-bars"></div>
+      </div>
+      <div style="margin-top:10px">
+        <div style="font-size:0.75em;color:#888;text-transform:uppercase;margin-bottom:4px">Response Types</div>
+        <div id="dash-resp-types"></div>
+      </div>
+    </div>
+    <!-- Scanner Column -->
+    <div class="section" style="border-left: 3px solid #00ccff;">
+      <h2 style="color:#00ccff; font-size:0.9em; margin-bottom:10px">// Scanner</h2>
+      <div class="grid" style="grid-template-columns:1fr 1fr;" id="dash-scan-cards"></div>
+      <div id="dash-scan-detail" style="margin-top:10px;font-size:0.82em;color:#888"></div>
+    </div>
+    <!-- Proxy Column -->
+    <div class="section" style="border-left: 3px solid #ffaa00;">
+      <h2 style="color:#ffaa00; font-size:0.9em; margin-bottom:10px">// Proxy</h2>
+      <div class="grid" style="grid-template-columns:1fr 1fr;" id="dash-proxy-cards"></div>
+      <div id="dash-proxy-detail-ext" style="margin-top:10px;font-size:0.82em;color:#888"></div>
+    </div>
+  </div>
 
   <!-- Performance Metrics -->
   <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
@@ -622,47 +653,75 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <!-- Calculated Stats -->
   <div class="grid" id="dash-calc-stats"></div>
 
-  <!-- Status Code Breakdown -->
-  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
-    <div class="section">
-      <h2>// Status Code Distribution</h2>
-      <div id="dash-status-bars"></div>
-    </div>
-    <div class="section">
-      <h2>// Response Types</h2>
-      <div id="dash-resp-types"></div>
+  <!-- Connected Clients (clickable) -->
+  <div class="section">
+    <h2>// Connected Clients</h2>
+    <p style="color:#555;font-size:0.72em;margin-bottom:8px">Click any client to view details and override adaptive behavior mode.</p>
+    <div class="tbl-scroll" style="max-height:300px">
+      <table>
+        <thead><tr>
+          <th>Client</th><th>Requests</th><th>Req/s</th><th>Errors</th><th>Mode</th><th>Last Seen</th>
+        </tr></thead>
+        <tbody id="dash-clients-body"></tbody>
+      </table>
     </div>
   </div>
 
+  <!-- Client Detail Panel (shared - works from dashboard and server) -->
+  <div class="section" id="dash-client-detail" style="display:none">
+    <h2>// Client Detail: <span id="dash-detail-cid" style="color:#00ffcc"></span>
+      <span style="float:right;cursor:pointer;color:#666;font-size:0.8em" onclick="document.getElementById('dash-client-detail').style.display='none'">[close]</span>
+    </h2>
+    <div class="grid" id="dash-detail-cards"></div>
+    <div style="margin:12px 0">
+      <label style="color:#aaa;font-size:0.85em">Override Mode:</label>
+      <select id="dash-override-mode" style="background:#0d0d0d;color:#00ff88;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;margin:0 8px">
+        <option value="">-- auto --</option>
+        <option value="normal">Normal</option>
+        <option value="cooperative">Cooperative</option>
+        <option value="aggressive">Aggressive</option>
+        <option value="labyrinth">Labyrinth</option>
+        <option value="escalating">Escalating</option>
+        <option value="intermittent">Intermittent</option>
+        <option value="mirror">Mirror</option>
+        <option value="blocked">Blocked</option>
+      </select>
+      <button onclick="dashApplyOverride()" style="background:#00aa66;color:#000;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:bold">Apply</button>
+      <button onclick="dashClearOverride()" style="background:#333;color:#ccc;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-family:inherit;margin-left:4px">Clear</button>
+    </div>
+    <div id="dash-detail-paths" style="max-height:200px;overflow-y:auto"></div>
+  </div>
+
+  <!-- Traffic Analytics -->
   <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
     <div class="section">
-      <h2>// Connected Clients</h2>
-      <div class="tbl-scroll" style="max-height:300px">
-        <table>
-          <thead><tr>
-            <th>Client</th><th>Requests</th><th>Req/s</th><th>Errors</th><th>Mode</th>
-          </tr></thead>
-          <tbody id="dash-clients-body"></tbody>
-        </table>
-      </div>
+      <h2>// Top 10 Paths</h2>
+      <p style="color:#555;font-size:0.72em;margin-bottom:6px">Most frequently requested URL paths.</p>
+      <div id="dash-top-paths"></div>
     </div>
     <div class="section">
-      <h2>// Recent Requests</h2>
-      <div class="tbl-scroll" style="max-height:300px">
-        <table>
-          <thead><tr>
-            <th>Time</th><th>Client</th><th>Path</th><th>Status</th><th>Type</th>
-          </tr></thead>
-          <tbody id="dash-recent-body"></tbody>
-        </table>
-      </div>
+      <h2>// Top 10 User Agents</h2>
+      <p style="color:#555;font-size:0.72em;margin-bottom:6px">Most common User-Agent strings seen in traffic.</p>
+      <div id="dash-top-ua"></div>
+    </div>
+  </div>
+
+  <!-- Request Log -->
+  <div class="section">
+    <h2>// Request Log</h2>
+    <p style="color:#555;font-size:0.72em;margin-bottom:6px">Live feed of recent requests. Use the filter to narrow by status code, client, path, type, or user agent.</p>
+    <input type="text" class="search-box" id="dash-log-filter" placeholder="Filter by status, client, path, type..." oninput="filterDashLog()">
+    <div class="tbl-scroll" style="max-height: 500px;">
+      <table>
+        <thead><tr><th>Time</th><th>Client</th><th>Method</th><th>Path</th><th>Status</th><th>Latency</th><th>Type</th><th>Mode</th><th>User Agent</th></tr></thead>
+        <tbody id="dash-log-body"></tbody>
+      </table>
     </div>
   </div>
 
   <!-- Quick Actions -->
   <div class="quick-actions">
     <button class="nightmare-btn" onclick="toggleNightmareAll()" id="dash-nightmare-btn">Enable Nightmare</button>
-    <button class="quick-action-btn" onclick="showTab('server');setTimeout(function(){toggleServerSection('log')},100)">View Server Logs</button>
     <button class="quick-action-btn" onclick="showTab('scanner');switchScannerSubtab('builtin')">Run Scanner</button>
     <button class="quick-action-btn" onclick="showTab('proxy')">View Proxy</button>
   </div>
@@ -731,6 +790,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
     <div class="srv-section-body">
       <p style="color:#666;font-size:0.8em;margin-bottom:8px">Enable or disable individual server subsystems. Disabled features return normal responses instead.</p>
+      <div style="margin-bottom:10px;display:flex;gap:6px">
+        <button class="cfg-btn" onclick="setAllFeatures(true)" style="font-size:0.78em;padding:4px 12px">All On</button>
+        <button class="cfg-btn" onclick="setAllFeatures(false)" style="font-size:0.78em;padding:4px 12px">All Off</button>
+      </div>
       <div class="toggle-grid" id="toggles"></div>
     </div>
   </div>
@@ -750,12 +813,26 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div style="margin-bottom:16px">
         <h2 style="font-size:0.9em;margin-bottom:8px">// HTTP Error Weights</h2>
         <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each HTTP error response. Higher weight = more frequent.</p>
+        <div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap">
+          <button class="cfg-btn" onclick="setAllErrorWeights('http','off')" style="font-size:0.72em;padding:3px 10px">All OFF</button>
+          <button class="cfg-btn" onclick="setAllErrorWeights('http','low')" style="font-size:0.72em;padding:3px 10px">All LOW</button>
+          <button class="cfg-btn" onclick="setAllErrorWeights('http','med')" style="font-size:0.72em;padding:3px 10px">All MED</button>
+          <button class="cfg-btn" onclick="setAllErrorWeights('http','high')" style="font-size:0.72em;padding:3px 10px">All HIGH</button>
+          <button class="cfg-btn" onclick="setAllErrorWeights('http','max')" style="font-size:0.72em;padding:3px 10px">All MAX</button>
+          <button class="cfg-btn" onclick="resetErrorWeights()" style="font-size:0.72em;padding:3px 10px">Reset Default</button>
+        </div>
         <div class="ew-grid" id="http-error-grid"></div>
-        <button class="cfg-btn" onclick="resetErrorWeights()" style="margin-top:8px">Reset All to Default</button>
       </div>
       <div>
         <h2 style="font-size:0.9em;margin-bottom:8px">// TCP / Network Error Weights</h2>
         <p style="color:#666;font-size:0.8em;margin-bottom:8px">Low-level network errors that bypass HTTP entirely.</p>
+        <div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap">
+          <button class="cfg-btn" onclick="setAllErrorWeights('tcp','off')" style="font-size:0.72em;padding:3px 10px">All OFF</button>
+          <button class="cfg-btn" onclick="setAllErrorWeights('tcp','low')" style="font-size:0.72em;padding:3px 10px">All LOW</button>
+          <button class="cfg-btn" onclick="setAllErrorWeights('tcp','med')" style="font-size:0.72em;padding:3px 10px">All MED</button>
+          <button class="cfg-btn" onclick="setAllErrorWeights('tcp','high')" style="font-size:0.72em;padding:3px 10px">All HIGH</button>
+          <button class="cfg-btn" onclick="setAllErrorWeights('tcp','max')" style="font-size:0.72em;padding:3px 10px">All MAX</button>
+        </div>
         <div class="ew-grid" id="tcp-error-grid"></div>
       </div>
     </div>
@@ -771,8 +848,15 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div style="margin-bottom:16px">
         <h2 style="font-size:0.9em;margin-bottom:8px">// Page Type Distribution</h2>
         <p style="color:#666;font-size:0.8em;margin-bottom:8px">Control the probability of each response content type.</p>
+        <div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap">
+          <button class="cfg-btn" onclick="setAllPageTypeWeights('off')" style="font-size:0.72em;padding:3px 10px">All OFF</button>
+          <button class="cfg-btn" onclick="setAllPageTypeWeights('low')" style="font-size:0.72em;padding:3px 10px">All LOW</button>
+          <button class="cfg-btn" onclick="setAllPageTypeWeights('med')" style="font-size:0.72em;padding:3px 10px">All MED</button>
+          <button class="cfg-btn" onclick="setAllPageTypeWeights('high')" style="font-size:0.72em;padding:3px 10px">All HIGH</button>
+          <button class="cfg-btn" onclick="setAllPageTypeWeights('max')" style="font-size:0.72em;padding:3px 10px">All MAX</button>
+          <button class="cfg-btn" onclick="resetPageTypeWeights()" style="font-size:0.72em;padding:3px 10px">Reset Default</button>
+        </div>
         <div class="ew-grid" id="page-type-grid"></div>
-        <button class="cfg-btn" onclick="resetPageTypeWeights()" style="margin-top:8px">Reset to Default</button>
       </div>
       <div>
         <h2 style="font-size:0.9em;margin-bottom:8px">// Response &amp; Content Settings</h2>
@@ -868,6 +952,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div class="grid" id="vuln-overview-cards" style="margin-bottom:14px">
         <div class="card"><div class="label">Loading...</div><div class="value v-info">--</div></div>
       </div>
+      <div style="margin-bottom:8px;display:flex;gap:6px">
+        <button class="cfg-btn" onclick="setAllVulnGroups(true)" style="font-size:0.72em;padding:3px 10px">All Groups On</button>
+        <button class="cfg-btn" onclick="setAllVulnGroups(false)" style="font-size:0.72em;padding:3px 10px">All Groups Off</button>
+      </div>
       <div class="group-toggles" id="vuln-group-toggles" style="margin-bottom:14px"></div>
       <div id="vuln-severity-badges" style="margin-bottom:14px"></div>
       <input type="text" class="search-box" id="vuln-filter" placeholder="Filter by name, severity, CWE, category..." oninput="filterVulns()">
@@ -930,60 +1018,6 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- ====== Request Log ====== -->
-  <div class="srv-section" id="srv-log">
-    <div class="srv-section-header" onclick="toggleServerSection('log')">
-      <span class="srv-title">Request Log</span>
-      <span class="srv-arrow">&#9654;</span>
-    </div>
-    <div class="srv-section-body">
-      <input type="text" class="search-box" id="log-filter" placeholder="Filter by status, client, path, type..." oninput="filterLog()">
-      <div class="tbl-scroll" style="max-height: 600px;">
-        <table>
-          <thead><tr><th>Time</th><th>Client</th><th>Method</th><th>Path</th><th>Status</th><th>Latency</th><th>Type</th><th>Mode</th><th>User Agent</th></tr></thead>
-          <tbody id="log-body"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- ====== Traffic Analytics ====== -->
-  <div class="srv-section" id="srv-traffic">
-    <div class="srv-section-header" onclick="toggleServerSection('traffic')">
-      <span class="srv-title">Traffic Analytics</span>
-      <span class="srv-arrow">&#9654;</span>
-    </div>
-    <div class="srv-section-body">
-      <div class="grid" id="overview-cards"></div>
-      <div style="margin-bottom:16px">
-        <h2 style="font-size:0.9em;margin-bottom:8px">// Requests/sec (last 60s)</h2>
-        <div class="sparkline-wrap" id="sparkline"></div>
-      </div>
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom:16px">
-        <div>
-          <h2 style="font-size:0.9em;margin-bottom:8px">// Status Code Distribution</h2>
-          <div class="pie-wrap">
-            <canvas class="pie-canvas" id="pie-status" width="140" height="140"></canvas>
-            <div class="pie-legend" id="pie-legend"></div>
-          </div>
-        </div>
-        <div>
-          <h2 style="font-size:0.9em;margin-bottom:8px">// Response Type Distribution</h2>
-          <div id="resp-type-bars"></div>
-        </div>
-      </div>
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
-        <div>
-          <h2 style="font-size:0.9em;margin-bottom:8px">// Top 10 Paths</h2>
-          <div id="top-paths"></div>
-        </div>
-        <div>
-          <h2 style="font-size:0.9em;margin-bottom:8px">// Top 10 User Agents</h2>
-          <div id="top-ua"></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
 </div> <!-- end panel-server -->
 
@@ -1380,6 +1414,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <!-- Runtime Controls -->
   <div class="section" style="border-color:#ffaa0033">
     <h2>// Runtime Controls</h2>
+    <p style="color:#555;font-size:0.72em;margin-bottom:8px">Start/stop the proxy process. Set the listen port and backend target before starting.</p>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:end">
       <div>
         <div class="label" style="margin-bottom:4px">Listen Port</div>
@@ -1413,6 +1448,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <!-- Proxy Recording -->
   <div class="section" style="border-color:#ffaa0033">
     <h2>// Proxy Traffic Recording</h2>
+    <p style="color:#555;font-size:0.72em;margin-bottom:8px">Record proxy traffic to JSONL or PCAP files. Set limits to auto-stop, or leave at 0 for unlimited.</p>
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       <select id="proxy-rec-format" class="ctrl-select" style="min-width:80px">
         <option value="jsonl">JSONL</option>
@@ -1490,8 +1526,26 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         </div>
         <input type="radio" name="proxy-mode" value="nightmare" onchange="setProxyMode(this.value)" style="accent-color:#00ff88;">
       </label>
+      <label class="toggle-row" style="cursor:pointer;">
+        <div>
+          <div class="toggle-name">MIRROR SERVER</div>
+          <div style="color:#555;font-size:0.72em;margin-top:2px;">Copy server behavior settings</div>
+        </div>
+        <input type="radio" name="proxy-mode" value="mirror" onchange="setProxyMode(this.value)" style="accent-color:#00ff88;">
+      </label>
     </div>
     <div id="proxy-mode-desc" style="margin-top:10px;padding:10px 14px;background:#0d0d0d;border:1px solid #1a1a1a;border-radius:6px;font-size:0.82em;color:#888"></div>
+  </div>
+
+  <!-- Mirror Server Settings -->
+  <div class="section" id="proxy-mirror-section" style="display:none">
+    <h2>// Mirrored Server Settings</h2>
+    <div style="margin-bottom:10px;color:#888;font-size:0.82em">
+      The proxy is mirroring the server's behavior settings. Responses will use the same error types, page types, and chaos parameters as the server.
+    </div>
+    <button class="quick-action-btn" onclick="refreshMirror()" style="margin-bottom:12px">Refresh from Server</button>
+    <div id="proxy-mirror-info" class="grid"></div>
+    <div id="proxy-mirror-time" style="color:#555;font-size:0.72em;margin-top:8px"></div>
   </div>
 
   <!-- WAF Settings -->
@@ -1525,12 +1579,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <!-- Chaos Configuration -->
   <div class="section">
     <h2>// Chaos Configuration</h2>
+    <p style="color:#555;font-size:0.72em;margin-bottom:8px">Probability of injecting latency, corruption, drops, or resets into proxied traffic. Only applies in Chaos, Gateway, and Nightmare modes.</p>
     <div id="proxy-chaos-sliders"></div>
   </div>
 
   <!-- Connection Info -->
   <div class="section">
     <h2>// Connection Info</h2>
+    <p style="color:#555;font-size:0.72em;margin-bottom:8px">Live proxy connection statistics.</p>
     <div class="grid" id="proxy-connection-info">
       <div class="card"><div class="label">Active Connections</div><div class="value v-info" id="proxy-active-conns">0</div></div>
       <div class="card"><div class="label">Requests Forwarded</div><div class="value v-ok" id="proxy-fwd-reqs">0</div></div>
@@ -1541,6 +1597,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <!-- Pipeline Stats -->
   <div class="section">
     <h2>// Pipeline Stats</h2>
+    <p style="color:#555;font-size:0.72em;margin-bottom:8px">Per-interceptor request/response counts and block rates in the proxy pipeline.</p>
     <div class="tbl-scroll" style="max-height:300px">
       <table>
         <thead><tr>
@@ -1829,31 +1886,171 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         }).join('') || '<div style="color:#555">No data</div>';
       } catch(oe) {}
 
-      // Clients table
+      // Three-column mode cards
+      var srvCards = document.getElementById('dash-srv-cards');
+      if (srvCards) srvCards.innerHTML =
+        card('Requests', (m.total_requests||0).toLocaleString(), 'v-ok') +
+        card('Error Rate', ((m.error_rate_pct||0).toFixed(1)) + '%%', (m.error_rate_pct||0) > 10 ? 'v-err' : 'v-ok') +
+        card('2xx/4xx/5xx', (m.total_2xx||0) + '/' + (m.total_4xx||0) + '/' + (m.total_5xx||0), 'v-info') +
+        card('Labyrinth', (m.total_labyrinth||0).toLocaleString(), 'v-info');
+
+      // Scanner column cards
+      try {
+        var scanData2 = await api('/admin/api/scanner/builtin/status');
+        var scanCards = document.getElementById('dash-scan-cards');
+        var scanDetailExt = document.getElementById('dash-scan-detail');
+        if (scanCards) {
+          if (scanData2.running) {
+            scanCards.innerHTML = card('Status', 'SCANNING', 'v-warn') + card('Progress', (scanData2.progress||0) + '%%', 'v-info');
+            if (scanDetailExt) scanDetailExt.textContent = 'Profile: ' + (scanData2.profile||'default') + ' | Target: ' + (scanData2.target||'-');
+          } else {
+            scanCards.innerHTML = card('Status', 'IDLE', 'v-ok') + card('Last', scanData2.last_profile||'none', 'v-info');
+            if (scanDetailExt) scanDetailExt.textContent = scanData2.last_profile ? 'Completed: ' + (scanData2.last_profile||'') : 'No scans run';
+          }
+        }
+      } catch(se2) {}
+
+      // Proxy column cards
+      try {
+        var proxyCards = document.getElementById('dash-proxy-cards');
+        var proxyDetailExt = document.getElementById('dash-proxy-detail-ext');
+        try {
+          var rtData2 = await api('/admin/api/proxy/runtime');
+          if (proxyCards) {
+            if (rtData2.running) {
+              proxyCards.innerHTML = card('Mode', (rtData2.mode||'transparent').toUpperCase(), 'v-ok') + card('Requests', (rtData2.requests||0).toLocaleString(), 'v-info');
+              if (proxyDetailExt) proxyDetailExt.textContent = 'Port: ' + (rtData2.port||8080) + ' | Target: ' + (rtData2.target||'-');
+            } else {
+              proxyCards.innerHTML = card('Status', 'STOPPED', 'v-warn') + card('Requests', '0', 'v-info');
+              if (proxyDetailExt) proxyDetailExt.textContent = 'Proxy not running';
+            }
+          }
+        } catch(rte2) {
+          var proxyData2 = await api('/admin/api/proxy/status');
+          var pStats2 = proxyData2.pipeline_stats || {};
+          if (proxyCards) proxyCards.innerHTML = card('Mode', (proxyData2.mode||'transparent').toUpperCase(), 'v-ok') + card('Forwarded', (pStats2.requests_processed||0).toLocaleString(), 'v-info');
+          if (proxyDetailExt) proxyDetailExt.textContent = (pStats2.requests_blocked||0) + ' blocked';
+        }
+      } catch(pe2) {}
+
+      // Traffic analytics (top paths + top UAs)
+      try {
+        var ov2 = await api('/admin/api/overview');
+        var topPaths = ov2.top_paths || [];
+        var maxP = topPaths.length > 0 ? topPaths[0].count : 1;
+        document.getElementById('dash-top-paths').innerHTML = topPaths.slice(0, 10).map(function(p) {
+          return '<div class="bar-row"><div class="bar-label" title="' + escapeHtml(p.key) + '">' + escapeHtml(p.key.substring(0, 30)) + '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + (p.count/maxP*100) + '%%"></div></div>' +
+            '<div class="bar-count">' + p.count + '</div></div>';
+        }).join('') || '<div style="color:#555">No data yet</div>';
+
+        var topUA = ov2.top_user_agents || [];
+        var maxUA = topUA.length > 0 ? topUA[0].count : 1;
+        document.getElementById('dash-top-ua').innerHTML = topUA.slice(0, 10).map(function(u) {
+          return '<div class="bar-row"><div class="bar-label" title="' + escapeHtml(u.key) + '">' + escapeHtml(u.key.substring(0, 30)) + '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + (u.count/maxUA*100) + '%%"></div></div>' +
+            '<div class="bar-count">' + u.count + '</div></div>';
+        }).join('') || '<div style="color:#555">No data yet</div>';
+      } catch(oe2) {}
+
+      // Clickable clients table
       const clients = (cl.clients || []).sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
-      document.getElementById('dash-clients-body').innerHTML = clients.slice(0, 10).map(c =>
-        '<tr>' +
-        '<td>' + escapeHtml(shortID(c.client_id)) + '</td>' +
+      document.getElementById('dash-clients-body').innerHTML = clients.slice(0, 20).map(function(c) {
+        var cid = escapeHtml(c.client_id);
+        var short = escapeHtml(shortID(c.client_id));
+        var ago = timeSince(c.last_seen);
+        return '<tr style="cursor:pointer" onclick="dashViewClient(\'' + cid + '\')">' +
+        '<td><a href="#" onclick="event.stopPropagation();dashViewClient(\'' + cid + '\');return false" style="color:#44aaff">' + short + '</a></td>' +
         '<td>' + c.total_requests + '</td>' +
         '<td>' + (c.requests_per_sec||0).toFixed(1) + '</td>' +
-        '<td>' + c.errors_received + '</td>' +
+        '<td class="' + (c.errors_received > 0 ? 's5' : '') + '">' + c.errors_received + '</td>' +
         '<td class="' + mClass(c.adaptive_mode) + '">' + (c.adaptive_mode||'pending') + '</td>' +
-        '</tr>'
-      ).join('');
+        '<td style="color:#888">' + ago + '</td>' +
+        '</tr>';
+      }).join('');
 
-      // Recent requests
-      const records = (rc.records || []).slice(0, 30);
-      document.getElementById('dash-recent-body').innerHTML = records.map(r =>
-        '<tr class="log-row">' +
-        '<td>' + new Date(r.timestamp).toLocaleTimeString() + '</td>' +
-        '<td>' + escapeHtml(shortID(r.client_id)) + '</td>' +
-        '<td title="' + escapeHtml(r.path) + '">' + escapeHtml(r.path.substring(0, 30)) + '</td>' +
-        '<td class="' + sClass(r.status_code) + '">' + r.status_code + '</td>' +
-        '<td>' + escapeHtml(r.response_type) + '</td>' +
-        '</tr>'
-      ).join('');
+      // Request log (dashboard)
+      try {
+        var logResp = await api('/admin/api/log?limit=200');
+        dashLogData = logResp.records || [];
+        renderDashLog(dashLogData);
+      } catch(le) {}
     } catch(e) { console.error('dashboard:', e); }
   }
+
+  // ------ Dashboard Log + Client Detail ------
+  var dashLogData = [];
+
+  function renderDashLog(records) {
+    var tbody = document.getElementById('dash-log-body');
+    if (!tbody) return;
+    tbody.innerHTML = records.map(function(r) {
+      return '<tr class="log-row" data-search="' + escapeHtml((r.status_code + ' ' + r.client_id + ' ' + r.path + ' ' + r.response_type + ' ' + r.user_agent + ' ' + r.mode).toLowerCase()) + '">' +
+        '<td>' + new Date(r.timestamp).toLocaleTimeString() + '</td>' +
+        '<td><a href="#" onclick="event.stopPropagation();dashViewClient(\'' + escapeHtml(r.client_id) + '\');return false" style="color:#44aaff">' + escapeHtml(shortID(r.client_id)) + '</a></td>' +
+        '<td>' + r.method + '</td>' +
+        '<td title="' + escapeHtml(r.path) + '">' + escapeHtml(r.path.substring(0, 45)) + '</td>' +
+        '<td class="' + sClass(r.status_code) + '">' + r.status_code + '</td>' +
+        '<td>' + r.latency_ms + 'ms</td>' +
+        '<td>' + escapeHtml(r.response_type) + '</td>' +
+        '<td class="' + mClass(r.mode) + '">' + (r.mode || '-') + '</td>' +
+        '<td title="' + escapeHtml(r.user_agent || '') + '">' + escapeHtml(shortUA(r.user_agent)) + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  window.filterDashLog = function() {
+    var q = document.getElementById('dash-log-filter').value.toLowerCase().trim();
+    if (!q) { renderDashLog(dashLogData); return; }
+    var filtered = dashLogData.filter(function(r) {
+      var haystack = (r.status_code + ' ' + r.client_id + ' ' + r.path + ' ' + r.response_type + ' ' + r.user_agent + ' ' + r.mode).toLowerCase();
+      return haystack.indexOf(q) !== -1;
+    });
+    renderDashLog(filtered);
+  };
+
+  window.dashViewClient = async function(clientID) {
+    try {
+      var detail = await api('/admin/api/client/' + encodeURIComponent(clientID));
+      var panel = document.getElementById('dash-client-detail');
+      panel.style.display = 'block';
+      document.getElementById('dash-detail-cid').textContent = shortID(clientID);
+      document.getElementById('dash-detail-cards').innerHTML =
+        card('Total Requests', detail.total_requests, 'v-ok') +
+        card('Req/s', (detail.requests_per_sec||0).toFixed(1), 'v-info') +
+        card('Errors', detail.errors_received, detail.errors_received > 0 ? 'v-err' : 'v-ok') +
+        card('Unique Paths', detail.unique_paths, 'v-info') +
+        card('Mode', detail.adaptive_mode || 'pending', 'v-warn') +
+        card('Bot Score', (detail.bot_score||0).toFixed(1), detail.bot_score > 60 ? 'v-err' : 'v-ok') +
+        card('Escalation', detail.escalation_level, 'v-warn') +
+        card('Labyrinth Depth', detail.labyrinth_depth||0, 'v-info');
+      document.getElementById('dash-override-mode').value = detail.override_mode || '';
+      var paths = detail.recent_paths || [];
+      document.getElementById('dash-detail-paths').innerHTML = paths.length > 0
+        ? '<div style="font-size:0.8em;color:#888;margin-bottom:6px">Recent paths:</div>' +
+          paths.map(function(p) { return '<div style="color:#555;font-size:0.78em;padding:1px 0">' + escapeHtml(p) + '</div>'; }).join('')
+        : '<div style="color:#555;font-size:0.8em">No path data</div>';
+      panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+    } catch(e) { console.error('dash client detail:', e); }
+  };
+
+  window.dashApplyOverride = async function() {
+    var mode = document.getElementById('dash-override-mode').value;
+    var cid = document.getElementById('dash-detail-cid').textContent;
+    if (!cid) return;
+    try {
+      await fetch('/admin/api/client/override', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({client_id_prefix: cid, mode: mode})});
+    } catch(e) { console.error('override:', e); }
+  };
+
+  window.dashClearOverride = async function() {
+    var cid = document.getElementById('dash-detail-cid').textContent;
+    if (!cid) return;
+    try {
+      await fetch('/admin/api/client/override', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({client_id_prefix: cid, mode: ''})});
+      document.getElementById('dash-override-mode').value = '';
+    } catch(e) { console.error('clear override:', e); }
+  };
 
   // ------ Sessions ------
   let selectedClient = null;
@@ -2451,6 +2648,49 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }).then(() => toast(name + (enabled ? ' enabled' : ' disabled')));
   };
 
+  window.setAllFeatures = async function(enabled) {
+    var keys = Object.keys(FEATURE_LABELS);
+    for (var i = 0; i < keys.length; i++) {
+      await api('/admin/api/features', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({feature: keys[i], enabled: enabled})
+      });
+    }
+    toast('All features ' + (enabled ? 'enabled' : 'disabled'));
+    refreshControls();
+  };
+
+  window.setAllErrorWeights = async function(group, level) {
+    var types = group === 'tcp' ? TCP_ERROR_TYPES : HTTP_ERROR_TYPES;
+    var valMap = {off: 0, low: 0.01, med: 0.05, high: 0.15, max: 0.5};
+    var val = valMap[level] || 0;
+    for (var i = 0; i < types.length; i++) {
+      if (types[i] === 'none') continue;
+      await api('/admin/api/error-weights', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({error_type: types[i], weight: val})
+      });
+    }
+    toast(group.toUpperCase() + ' errors: ' + level.toUpperCase());
+    refreshErrorWeights();
+  };
+
+  window.setAllPageTypeWeights = async function(level) {
+    var valMap = {off: 0, low: 0.05, med: 0.15, high: 0.3, max: 0.5};
+    var val = valMap[level] || 0;
+    for (var i = 0; i < PAGE_TYPES.length; i++) {
+      await api('/admin/api/page-type-weights', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({page_type: PAGE_TYPES[i], weight: val})
+      });
+    }
+    toast('Page types: ' + level.toUpperCase());
+    refreshPageTypeWeights();
+  };
+
   // ------ Request Log ------
   async function refreshLog() {
     try {
@@ -2578,6 +2818,19 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({group: group, enabled: enabled})
     }).then(() => { toast(group + (enabled ? ' enabled' : ' disabled')); refreshVulns(); });
+  };
+
+  window.setAllVulnGroups = async function(enabled) {
+    var groups = ['owasp','api_security','advanced','modern','infrastructure','iot_desktop','mobile_privacy','specialized','dashboard'];
+    for (var i = 0; i < groups.length; i++) {
+      await api('/admin/api/vulns/group', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({group: groups[i], enabled: enabled})
+      });
+    }
+    toast('All vuln groups ' + (enabled ? 'enabled' : 'disabled'));
+    refreshVulns();
   };
 
   window.toggleVulnCat = function(id, enabled) {
@@ -3599,7 +3852,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     waf: 'Web Application Firewall mode. Inspects requests for SQL injection, XSS, path traversal, and other attack patterns. Matching requests are handled according to the configured block action.',
     chaos: 'Chaos engineering mode. Randomly injects latency, corrupts responses, drops connections, and resets sockets based on configured probabilities. Useful for resilience testing.',
     gateway: 'API gateway mode. Combines WAF filtering with rate limiting. Requests exceeding the rate limit are throttled or rejected.',
-    nightmare: 'Maximum chaos mode. Activates WAF, chaos injection, and all glitch behaviors simultaneously. Every request is subjected to the full gauntlet of unreliability.'
+    nightmare: 'Maximum chaos mode. Activates WAF, chaos injection, and all glitch behaviors simultaneously. Every request is subjected to the full gauntlet of unreliability.',
+    mirror: 'Mirror server mode. The proxy copies the server\'s behavior settings (error weights, page types, delays, corruption level) and applies them to proxied responses. Use "Refresh from Server" to re-snapshot.'
   };
 
   async function refreshProxy() {
@@ -3610,8 +3864,17 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       const mode = data.mode || 'transparent';
 
       // Mode badge color
-      var modeColors = {transparent:'#00ff88',waf:'#ffaa00',chaos:'#ff4444',gateway:'#4488ff',nightmare:'#ff44ff'};
+      var modeColors = {transparent:'#00ff88',waf:'#ffaa00',chaos:'#ff4444',gateway:'#4488ff',nightmare:'#ff44ff',mirror:'#44ddff'};
       var modeColor = modeColors[mode] || '#888';
+
+      // Show/hide mirror settings section
+      var mirrorSection = document.getElementById('proxy-mirror-section');
+      if (mirrorSection) {
+        mirrorSection.style.display = (mode === 'mirror') ? '' : 'none';
+        if (mode === 'mirror' && data.mirror) {
+          renderMirrorInfo(data.mirror);
+        }
+      }
 
       // Update metric cards with colored mode badge
       document.getElementById('proxy-metrics').innerHTML =
@@ -3737,6 +4000,39 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       toast('Proxy mode: ' + mode.toUpperCase());
       refreshProxy();
     } catch(e) { console.error('setProxyMode:', e); }
+  };
+
+  function renderMirrorInfo(mirror) {
+    var infoEl = document.getElementById('proxy-mirror-info');
+    var timeEl = document.getElementById('proxy-mirror-time');
+    if (!infoEl) return;
+    var ewCount = mirror.error_weights ? Object.keys(mirror.error_weights).length : 0;
+    var pwCount = mirror.page_type_weights ? Object.keys(mirror.page_type_weights).length : 0;
+    infoEl.innerHTML =
+      card('Error Rate Multiplier', (mirror.error_rate_multiplier || 0).toFixed(1) + 'x', 'v-warn') +
+      card('Error Weights', ewCount + ' types', 'v-info') +
+      card('Page Type Weights', pwCount + ' types', 'v-info') +
+      card('Header Corrupt Level', mirror.header_corrupt_level || 0, 'v-warn') +
+      card('Protocol Glitch', (mirror.protocol_glitch_enabled ? 'ON L' + mirror.protocol_glitch_level : 'OFF'), mirror.protocol_glitch_enabled ? 'v-warn' : 'v-ok') +
+      card('Delay Range', (mirror.delay_min_ms || 0) + '-' + (mirror.delay_max_ms || 0) + ' ms', 'v-info') +
+      card('Content Theme', mirror.content_theme || 'default', 'v-info');
+    if (timeEl && mirror.snapshot_time) {
+      timeEl.textContent = 'Snapshot taken: ' + new Date(mirror.snapshot_time).toLocaleString();
+    }
+  }
+
+  window.refreshMirror = async function() {
+    try {
+      var resp = await fetch(API + '/admin/api/proxy/mirror/refresh', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+      });
+      var data = await resp.json();
+      if (data.mirror) {
+        renderMirrorInfo(data.mirror);
+        toast('Mirror settings refreshed from server');
+      }
+    } catch(e) { console.error('refreshMirror:', e); }
   };
 
   window.setWafBlockAction = async function(action) {
@@ -4305,8 +4601,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       if (id === 'srv-features' || id === 'srv-errors' || id === 'srv-content' || id === 'srv-labyrinth' || id === 'srv-adaptive' || id === 'srv-traps' || id === 'srv-spider') await refreshControls();
       else if (id === 'srv-vulns') await refreshVulns();
       else if (id === 'srv-sessions') await refreshSessions();
-      else if (id === 'srv-log') await refreshLog();
-      else if (id === 'srv-traffic') await refreshTraffic();
+      // srv-log and srv-traffic moved to dashboard
       else if (id === 'srv-recording') await refreshRecorderUI();
     }
   }

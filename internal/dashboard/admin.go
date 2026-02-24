@@ -799,7 +799,21 @@ func ImportConfig(export *ConfigExport) {
 // ---------------------------------------------------------------------------
 
 // ProxyModes lists all valid proxy modes.
-var ProxyModes = []string{"transparent", "waf", "chaos", "gateway", "nightmare"}
+var ProxyModes = []string{"transparent", "waf", "chaos", "gateway", "nightmare", "mirror"}
+
+// MirrorConfig holds a snapshot of server settings that the proxy mirrors.
+type MirrorConfig struct {
+	ErrorWeights         map[string]float64 `json:"error_weights"`
+	ErrorRateMultiplier  float64            `json:"error_rate_multiplier"`
+	PageTypeWeights      map[string]float64 `json:"page_type_weights"`
+	HeaderCorruptLevel   int                `json:"header_corrupt_level"`
+	ProtocolGlitchEnabled bool              `json:"protocol_glitch_enabled"`
+	ProtocolGlitchLevel  int                `json:"protocol_glitch_level"`
+	DelayMinMs           int                `json:"delay_min_ms"`
+	DelayMaxMs           int                `json:"delay_max_ms"`
+	ContentTheme         string             `json:"content_theme"`
+	SnapshotTime         string             `json:"snapshot_time"`
+}
 
 // ProxyConfig holds the current proxy configuration.
 type ProxyConfig struct {
@@ -811,6 +825,7 @@ type ProxyConfig struct {
 	CorruptProb    float64 `json:"corrupt_prob"`
 	DropProb       float64 `json:"drop_prob"`
 	ResetProb      float64 `json:"reset_prob"`
+	Mirror         *MirrorConfig `json:"mirror,omitempty"`
 }
 
 // NewProxyConfig returns a ProxyConfig with transparent defaults.
@@ -839,6 +854,15 @@ func (pc *ProxyConfig) SetMode(mode string) bool {
 			switch mode {
 			case "waf", "gateway", "nightmare":
 				pc.WAFEnabled = true
+			case "mirror":
+				pc.WAFEnabled = false
+				// Snapshot server settings when entering mirror mode
+				if pc.Mirror == nil {
+					pc.mu.Unlock()
+					mc := SnapshotMirrorFromServer()
+					pc.mu.Lock()
+					pc.Mirror = mc
+				}
 			default:
 				pc.WAFEnabled = false
 			}
@@ -852,7 +876,7 @@ func (pc *ProxyConfig) SetMode(mode string) bool {
 func (pc *ProxyConfig) Snapshot() map[string]interface{} {
 	pc.mu.RLock()
 	defer pc.mu.RUnlock()
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"mode": pc.Mode,
 		"pipeline_stats": map[string]int64{
 			"requests_processed":  0,
@@ -874,6 +898,75 @@ func (pc *ProxyConfig) Snapshot() map[string]interface{} {
 		},
 		"interceptors": []interface{}{},
 	}
+	if pc.Mirror != nil {
+		result["mirror"] = pc.Mirror
+	}
+	return result
+}
+
+// SnapshotMirrorFromServer creates a MirrorConfig by reading current server settings.
+func SnapshotMirrorFromServer() *MirrorConfig {
+	cfg := globalConfig
+	cfg.mu.RLock()
+	ew := make(map[string]float64, len(cfg.ErrorWeights))
+	for k, v := range cfg.ErrorWeights {
+		ew[k] = v
+	}
+	pw := make(map[string]float64, len(cfg.PageTypeWeights))
+	for k, v := range cfg.PageTypeWeights {
+		pw[k] = v
+	}
+	mc := &MirrorConfig{
+		ErrorWeights:          ew,
+		ErrorRateMultiplier:   cfg.ErrorRateMultiplier,
+		PageTypeWeights:       pw,
+		HeaderCorruptLevel:    cfg.HeaderCorruptLevel,
+		ProtocolGlitchEnabled: cfg.ProtocolGlitchEnabled,
+		ProtocolGlitchLevel:   cfg.ProtocolGlitchLevel,
+		DelayMinMs:            cfg.DelayMinMs,
+		DelayMaxMs:            cfg.DelayMaxMs,
+		ContentTheme:          cfg.ContentTheme,
+		SnapshotTime:          time.Now().UTC().Format(time.RFC3339),
+	}
+	cfg.mu.RUnlock()
+	return mc
+}
+
+// GetMirror returns a copy of the current mirror config (nil if not set).
+func (pc *ProxyConfig) GetMirror() *MirrorConfig {
+	pc.mu.RLock()
+	defer pc.mu.RUnlock()
+	if pc.Mirror == nil {
+		return nil
+	}
+	// Return a copy
+	ew := make(map[string]float64, len(pc.Mirror.ErrorWeights))
+	for k, v := range pc.Mirror.ErrorWeights {
+		ew[k] = v
+	}
+	pw := make(map[string]float64, len(pc.Mirror.PageTypeWeights))
+	for k, v := range pc.Mirror.PageTypeWeights {
+		pw[k] = v
+	}
+	return &MirrorConfig{
+		ErrorWeights:          ew,
+		ErrorRateMultiplier:   pc.Mirror.ErrorRateMultiplier,
+		PageTypeWeights:       pw,
+		HeaderCorruptLevel:    pc.Mirror.HeaderCorruptLevel,
+		ProtocolGlitchEnabled: pc.Mirror.ProtocolGlitchEnabled,
+		ProtocolGlitchLevel:   pc.Mirror.ProtocolGlitchLevel,
+		DelayMinMs:            pc.Mirror.DelayMinMs,
+		DelayMaxMs:            pc.Mirror.DelayMaxMs,
+		ContentTheme:          pc.Mirror.ContentTheme,
+		SnapshotTime:          pc.Mirror.SnapshotTime,
+	}
+}
+
+// SetMirror sets the mirror config.
+func (pc *ProxyConfig) SetMirror(mc *MirrorConfig) {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	pc.Mirror = mc
 }
 
 // ---------------------------------------------------------------------------

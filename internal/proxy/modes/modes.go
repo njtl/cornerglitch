@@ -177,6 +177,17 @@ var registry = map[string]*Mode{
 			pipeline.Add(&headerInterceptor{})
 		},
 	},
+
+	"mirror": {
+		Name:        "mirror",
+		Description: "Mirror server mode — copies the server's behavior settings to the proxy",
+		Configure: func(pipeline *proxy.Pipeline, chaosCfg *ChaosConfig, wafCfg *WAFConfig) {
+			// No WAF in mirror mode; the proxy mirrors server error/page behavior
+			// which is handled by ReverseProxy.applyGlitchTreatment via MirrorSettings
+			*chaosCfg = ChaosConfig{}
+			*wafCfg = WAFConfig{}
+		},
+	},
 }
 
 // Get returns a mode by name, or an error if the mode doesn't exist.
@@ -190,7 +201,7 @@ func Get(name string) (*Mode, error) {
 
 // List returns the names of all available modes.
 func List() []string {
-	return []string{"transparent", "waf", "chaos", "gateway", "nightmare"}
+	return []string{"transparent", "waf", "chaos", "gateway", "nightmare", "mirror"}
 }
 
 // wafInterceptor adapts the WAF SignatureDetector into a proxy.Interceptor.

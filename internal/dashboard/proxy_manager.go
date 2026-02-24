@@ -67,6 +67,26 @@ func (pm *ProxyManager) Start(port int, target string) error {
 	selectedMode.Configure(pipeline, &chaosCfg, &wafCfg)
 	rp.Pipeline = pipeline
 
+	// If mirror mode, apply the server's mirrored settings to the proxy
+	if modeName == "mirror" {
+		mc := globalProxyConfig.GetMirror()
+		if mc == nil {
+			mc = SnapshotMirrorFromServer()
+			globalProxyConfig.SetMirror(mc)
+		}
+		rp.SetMirrorSettings(&proxy.MirrorSettings{
+			ErrorWeights:          mc.ErrorWeights,
+			ErrorRateMultiplier:   mc.ErrorRateMultiplier,
+			PageTypeWeights:       mc.PageTypeWeights,
+			HeaderCorruptLevel:    mc.HeaderCorruptLevel,
+			ProtocolGlitchEnabled: mc.ProtocolGlitchEnabled,
+			ProtocolGlitchLevel:   mc.ProtocolGlitchLevel,
+			DelayMinMs:            mc.DelayMinMs,
+			DelayMaxMs:            mc.DelayMaxMs,
+			ContentTheme:          mc.ContentTheme,
+		})
+	}
+
 	// Wrap the proxy handler to count requests
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pm.reqCount.Add(1)
