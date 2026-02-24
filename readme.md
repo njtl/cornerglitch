@@ -95,7 +95,7 @@ go build -o glitch-scanner ./cmd/glitch-scanner
 - Adaptive behavior engine -- fingerprints clients and adjusts hostility per-client in real time
 - Bot detection with multi-signal scoring, JS traps, cookie traps, and CAPTCHA challenges
 - Multiple content formats, visual themes, and framework emulation personalities
-- Full admin panel with feature toggles, tunable parameters, and config import/export
+- Full admin panel with 5-tab mode-based layout (Dashboard, Server, Scanner, Proxy, Settings), per-mode nightmare toggles, feature flags, tunable parameters, and config import/export
 
 ### Glitch Scanner (client emulator)
 
@@ -110,7 +110,7 @@ go build -o glitch-scanner ./cmd/glitch-scanner
 - Interception pipeline for request and response manipulation
 - Chaos injection: latency spikes, body corruption, connection resets, header rewriting
 - WAF mode with signature-based blocking and rate limiting
-- Configurable modes: transparent, WAF, chaos, nightmare
+- Configurable modes: transparent, WAF, chaos, gateway, nightmare
 
 ---
 

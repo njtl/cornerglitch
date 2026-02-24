@@ -55,7 +55,7 @@ internal/
   fingerprint/engine.go          Client ID via headers, UA classification, IP
   adaptive/engine.go             Behavior modes, re-evaluates per client periodically
   metrics/collector.go           Ring buffer, time series, per-client profiles
-  dashboard/                     Admin panel + unified dashboard (7 tabs, all controls)
+  dashboard/                     Admin panel + unified dashboard (5 tabs, nightmare mode, all controls)
   vuln/                          All vulnerability endpoints (all OWASP Top 10 lists)
   api/                           REST API emulation (users, products, CMS, forms, infra)
   honeypot/                      Honeypot lure paths and response generation
@@ -106,7 +106,7 @@ tests/
 - **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0.
 - **Labyrinth pages are deterministic** — seeded from path via SHA-256 so the same URL always yields the same page.
 - **Adaptive behavior** is per-client (keyed by fingerprint ID) and mode transitions happen in `adaptive/engine.go:evaluate()`.
-- **Admin panel runs on a separate port** (default 8766) with tabs: Dashboard, Sessions, Traffic, Controls, Request Log, Vulnerabilities, Scanner, Proxy.
+- **Admin panel runs on a separate port** (default 8766) with 5 tabs: Dashboard, Server (green), Scanner (cyan), Proxy (orange), Settings. Server tab uses collapsible sections. Scanner has 3 sub-tabs (Evaluate External, Built-in Scanner, PCAP Replay).
 - **Vuln pages use "Acme Corp Portal" layout** — corporate-looking nav bar, sidebar, breadcrumbs, footer.
 - **Content pages include JS API calls** — `fetch()` calls, `<link rel="prefetch">` hints, and hidden `<a>` tags so scanners discover API endpoints.
 - **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag.
