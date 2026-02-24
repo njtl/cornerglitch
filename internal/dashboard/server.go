@@ -111,7 +111,12 @@ func (s *Server) apiClients(w http.ResponseWriter, r *http.Request) {
 		for path, count := range snap.PathsVisited {
 			topPaths = append(topPaths, pathCount{path, count})
 		}
-		sort.Slice(topPaths, func(i, j int) bool { return topPaths[i].Count > topPaths[j].Count })
+		sort.Slice(topPaths, func(i, j int) bool {
+			if topPaths[i].Count != topPaths[j].Count {
+				return topPaths[i].Count > topPaths[j].Count
+			}
+			return topPaths[i].Path < topPaths[j].Path // stable tie-break
+		})
 		if len(topPaths) > 10 {
 			topPaths = topPaths[:10]
 		}

@@ -1954,7 +1954,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       } catch(oe2) {}
 
       // Clickable clients table
-      const clients = (cl.clients || []).sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
+      const clients = (cl.clients || []).sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen) || (a.client_id || '').localeCompare(b.client_id || ''));
       document.getElementById('dash-clients-body').innerHTML = clients.slice(0, 20).map(function(c) {
         var cid = escapeHtml(c.client_id);
         var short = escapeHtml(shortID(c.client_id));
@@ -2009,12 +2009,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     renderDashLog(filtered);
   };
 
+  var dashSelectedClient = null;
   window.dashViewClient = async function(clientID) {
+    dashSelectedClient = clientID;
     try {
       var detail = await api('/admin/api/client/' + encodeURIComponent(clientID));
       var panel = document.getElementById('dash-client-detail');
       panel.style.display = 'block';
-      document.getElementById('dash-detail-cid').textContent = shortID(clientID);
+      document.getElementById('dash-detail-cid').textContent = shortID(detail.client_id || clientID);
       document.getElementById('dash-detail-cards').innerHTML =
         card('Total Requests', detail.total_requests, 'v-ok') +
         card('Req/s', (detail.requests_per_sec||0).toFixed(1), 'v-info') +
@@ -2024,31 +2026,47 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         card('Bot Score', (detail.bot_score||0).toFixed(1), detail.bot_score > 60 ? 'v-err' : 'v-ok') +
         card('Escalation', detail.escalation_level, 'v-warn') +
         card('Labyrinth Depth', detail.labyrinth_depth||0, 'v-info');
-      document.getElementById('dash-override-mode').value = detail.override_mode || '';
-      var paths = detail.recent_paths || [];
-      document.getElementById('dash-detail-paths').innerHTML = paths.length > 0
-        ? '<div style="font-size:0.8em;color:#888;margin-bottom:6px">Recent paths:</div>' +
-          paths.map(function(p) { return '<div style="color:#555;font-size:0.78em;padding:1px 0">' + escapeHtml(p) + '</div>'; }).join('')
-        : '<div style="color:#555;font-size:0.8em">No path data</div>';
+      dashSelectedClient = detail.client_id || clientID;
+      document.getElementById('dash-override-mode').value = detail.adaptive_mode || '';
+      var paths = (detail.all_paths || []).slice(0, 20);
+      if (paths.length > 0) {
+        var maxC = paths[0].count || 1;
+        document.getElementById('dash-detail-paths').innerHTML = '<div style="font-size:0.8em;color:#888;margin-bottom:6px">Top paths:</div>' +
+          paths.map(function(p) {
+            return '<div class="bar-row">' +
+              '<div class="bar-label" title="' + escapeHtml(p.path) + '">' + escapeHtml(p.path.substring(0,40)) + '</div>' +
+              '<div class="bar-track"><div class="bar-fill" style="width:' + (p.count/maxC*100) + '%%"></div></div>' +
+              '<div class="bar-count">' + p.count + '</div></div>';
+          }).join('');
+      } else {
+        document.getElementById('dash-detail-paths').innerHTML = '<div style="color:#555;font-size:0.8em">No path data</div>';
+      }
+      if (detail.adaptive_reason) {
+        document.getElementById('dash-detail-paths').innerHTML +=
+          '<div style="margin-top:10px;color:#888;font-size:0.85em">Reason: ' + escapeHtml(detail.adaptive_reason) + '</div>';
+      }
       panel.scrollIntoView({behavior:'smooth',block:'nearest'});
     } catch(e) { console.error('dash client detail:', e); }
   };
 
   window.dashApplyOverride = async function() {
     var mode = document.getElementById('dash-override-mode').value;
-    var cid = document.getElementById('dash-detail-cid').textContent;
-    if (!cid) return;
+    if (!dashSelectedClient) return;
+    if (!mode) { toast('Select a mode first'); return; }
     try {
-      await fetch('/admin/api/client/override', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({client_id_prefix: cid, mode: mode})});
+      await api('/admin/api/override', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({client_id: dashSelectedClient, mode: mode})});
+      toast('Override applied: ' + mode);
+      dashViewClient(dashSelectedClient);
     } catch(e) { console.error('override:', e); }
   };
 
   window.dashClearOverride = async function() {
-    var cid = document.getElementById('dash-detail-cid').textContent;
-    if (!cid) return;
+    if (!dashSelectedClient) return;
     try {
-      await fetch('/admin/api/client/override', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({client_id_prefix: cid, mode: ''})});
+      await api('/admin/api/override', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({client_id: dashSelectedClient, clear: true})});
       document.getElementById('dash-override-mode').value = '';
+      toast('Override cleared');
+      dashViewClient(dashSelectedClient);
     } catch(e) { console.error('clear override:', e); }
   };
 
@@ -2058,7 +2076,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     try {
       const data = await api('/api/clients');
       const clients = (data.clients || []);
-      clients.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
+      clients.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen) || (a.client_id || '').localeCompare(b.client_id || ''));
       const tbody = document.getElementById('sess-body');
       tbody.innerHTML = clients.map(c => {
         const ago = timeSince(c.last_seen);
@@ -4183,7 +4201,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
     // Method distribution bar
     var methods = meta.methods || {};
-    var methodKeys = Object.keys(methods).sort(function(a,b) { return methods[b] - methods[a]; });
+    var methodKeys = Object.keys(methods).sort(function(a,b) { return methods[b] - methods[a] || a.localeCompare(b); });
     var totalMethods = methodKeys.reduce(function(s,k) { return s + methods[k]; }, 0) || 1;
     var methodColors = {GET:'#00ff88',POST:'#4488ff',PUT:'#ffaa00',DELETE:'#ff4444',PATCH:'#aa44ff',HEAD:'#44ffaa',OPTIONS:'#888'};
     var methodHtml = '<div style="font-size:0.78em;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Method Distribution</div>';

@@ -1065,7 +1065,12 @@ func sortedKV(m map[string]int, top int) []kvPair {
 	for k, v := range m {
 		pairs = append(pairs, kvPair{k, v})
 	}
-	sort.Slice(pairs, func(i, j int) bool { return pairs[i].Count > pairs[j].Count })
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].Count != pairs[j].Count {
+			return pairs[i].Count > pairs[j].Count
+		}
+		return pairs[i].Key < pairs[j].Key // stable tie-break by key
+	})
 	if len(pairs) > top {
 		pairs = pairs[:top]
 	}
