@@ -184,10 +184,12 @@ func adminAPIBuiltinStatus(w http.ResponseWriter, r *http.Request) {
 
 	if builtinState == "running" && builtinEngine != nil {
 		completed, total, findings := builtinEngine.Progress()
+		phase := builtinEngine.Phase()
 		resp["completed"] = completed
 		resp["total"] = total
 		resp["findings"] = findings
 		resp["elapsed_ms"] = time.Since(builtinStart).Milliseconds()
+		resp["phase"] = phase
 		if total > 0 {
 			resp["progress_pct"] = float64(completed) / float64(total) * 100
 		}
