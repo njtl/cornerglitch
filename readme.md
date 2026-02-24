@@ -114,7 +114,7 @@ make k8s-deploy                             # deploy to Kubernetes
 - OAuth2/SSO flows, CDN emulation, search engine, email/webmail simulation, i18n, health/actuator endpoints, WebSocket streams, analytics tracking, privacy/consent
 - Traffic recording in JSONL and PCAP formats with replay support
 - Spider data generation for crawler discovery
-- Full admin panel with 5-tab mode-based layout (Dashboard, Server, Scanner, Proxy, Settings), per-mode nightmare toggles, feature flags, tunable parameters, and config import/export
+- Full admin panel with 5-tab layout (Dashboard, Server, Scanner, Proxy, Settings), three-column dashboard grouping by subsystem, clickable clients with detail/override, group-level preset buttons (All On/Off, Off/Low/Med/High/Max), per-mode nightmare toggles, feature flags, tunable parameters, and config import/export
 - Password-protected admin panel via `GLITCH_ADMIN_PASSWORD` env var or `-admin-password` flag
 
 ### Glitch Scanner (client emulator)
@@ -132,7 +132,7 @@ make k8s-deploy                             # deploy to Kubernetes
 - Chaos injection: latency spikes, body corruption, connection resets, header rewriting
 - WAF mode with signature-based blocking and rate limiting
 - PCAP replay: load recorded traffic and replay through the proxy pipeline
-- Configurable modes: transparent, WAF, chaos, gateway, nightmare
+- Configurable modes: transparent, WAF, chaos, gateway, nightmare, mirror (copies server settings)
 
 ---
 
