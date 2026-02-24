@@ -1208,6 +1208,18 @@ func (n *NightmareState) Snapshot() map[string]bool {
 	}
 }
 
+// Reset deactivates all nightmare subsystems and clears snapshots.
+func (n *NightmareState) Reset() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.ServerActive = false
+	n.ScannerActive = false
+	n.ProxyActive = false
+	n.PreviousConfig = nil
+	n.PreviousFeatures = nil
+	n.PreviousProxyMode = ""
+}
+
 // IsAnyActive returns true if any nightmare subsystem is active.
 func (n *NightmareState) IsAnyActive() bool {
 	n.mu.RLock()

@@ -1074,6 +1074,19 @@ func adminAPIVulnsGroupPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate group name
+	validGroup := false
+	for _, g := range VulnGroups {
+		if g == req.Group {
+			validGroup = true
+			break
+		}
+	}
+	if !validGroup {
+		http.Error(w, `{"error":"unknown vuln group"}`, http.StatusBadRequest)
+		return
+	}
+
 	globalVulnConfig.SetGroup(req.Group, req.Enabled)
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
