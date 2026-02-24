@@ -331,7 +331,12 @@ func adminAPIOverview(w http.ResponseWriter, r *http.Request, s *Server) {
 	for k, v := range typeCounts {
 		typeArr = append(typeArr, kv{k, v})
 	}
-	sort.Slice(typeArr, func(i, j int) bool { return typeArr[i].Count > typeArr[j].Count })
+	sort.Slice(typeArr, func(i, j int) bool {
+		if typeArr[i].Count != typeArr[j].Count {
+			return typeArr[i].Count > typeArr[j].Count
+		}
+		return typeArr[i].Key < typeArr[j].Key // stable tie-break by key
+	})
 
 	buckets := s.collector.TimeSeries(60)
 	sparkline := make([]map[string]interface{}, 0, len(buckets))
@@ -553,6 +558,17 @@ func adminAPIClientDetail(w http.ResponseWriter, r *http.Request, s *Server) {
 				botScore = behavior.BotScore
 			}
 
+			// Check for active override (may not be reflected in behavior yet)
+			var overrideMode string
+			overrides := s.adapt.GetOverrides()
+			if om, ok := overrides[snap.ClientID]; ok {
+				overrideMode = string(om)
+				if mode == "" {
+					mode = overrideMode
+					reason = "manual override"
+				}
+			}
+
 			pathsList := make([]map[string]interface{}, 0, len(snap.PathsVisited))
 			for path, count := range snap.PathsVisited {
 				pathsList = append(pathsList, map[string]interface{}{
@@ -560,7 +576,11 @@ func adminAPIClientDetail(w http.ResponseWriter, r *http.Request, s *Server) {
 				})
 			}
 			sort.Slice(pathsList, func(i, j int) bool {
-				return pathsList[i]["count"].(int) > pathsList[j]["count"].(int)
+				ci, cj := pathsList[i]["count"].(int), pathsList[j]["count"].(int)
+				if ci != cj {
+					return ci > cj
+				}
+				return pathsList[i]["path"].(string) < pathsList[j]["path"].(string) // stable tie-break
 			})
 
 			recentRecords := s.collector.RecentRecords(1000)
@@ -595,6 +615,7 @@ func adminAPIClientDetail(w http.ResponseWriter, r *http.Request, s *Server) {
 				"adaptive_reason":  reason,
 				"escalation_level": escalation,
 				"bot_score":        botScore,
+				"override_mode":    overrideMode,
 				"recent_requests":  clientRecords,
 			}
 			break
