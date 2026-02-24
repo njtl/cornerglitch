@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -47,18 +48,22 @@ type Runner struct {
 
 // ScanRun tracks a single scanner execution.
 type ScanRun struct {
-	ID          string        `json:"id"`
-	Scanner     string        `json:"scanner"`
-	Status      string        `json:"status"` // pending, running, completed, failed, timeout
-	StartedAt   time.Time     `json:"started_at"`
-	CompletedAt time.Time     `json:"completed_at,omitempty"`
-	Duration    string        `json:"duration,omitempty"`
-	ExitCode    int           `json:"exit_code"`
-	OutputFile  string        `json:"output_file"`
-	ErrorOutput string        `json:"error_output,omitempty"`
-	Result      *ScanResult   `json:"result,omitempty"`
-	Comparison  *ComparisonReport `json:"comparison,omitempty"`
-	cancel      context.CancelFunc
+	ID            string            `json:"id"`
+	Scanner       string            `json:"scanner"`
+	Status        string            `json:"status"` // pending, running, completed, failed, timeout, crashed
+	StartedAt     time.Time         `json:"started_at"`
+	CompletedAt   time.Time         `json:"completed_at,omitempty"`
+	Duration      string            `json:"duration,omitempty"`
+	ExitCode      int               `json:"exit_code"`
+	OutputFile    string            `json:"output_file"`
+	ErrorOutput   string            `json:"error_output,omitempty"`
+	Result        *ScanResult       `json:"result,omitempty"`
+	Comparison    *ComparisonReport `json:"comparison,omitempty"`
+	Crashed       bool              `json:"crashed,omitempty"`
+	CrashSignal   string            `json:"crash_signal,omitempty"`   // "SIGSEGV", "SIGKILL", etc.
+	StderrExcerpt string            `json:"stderr_excerpt,omitempty"` // truncated to 4KB
+	NotInstalled  bool              `json:"not_installed,omitempty"`  // binary not found
+	cancel        context.CancelFunc
 }
 
 // NewRunner creates a new scanner runner.
@@ -266,7 +271,12 @@ func (r *Runner) executeScanner(run *ScanRun, profile *ExpectedProfile) {
 	}
 
 	if cmd == nil || cmd.Path == "" {
-		r.finishRun(run, fmt.Errorf("scanner %q not found on PATH", run.Scanner))
+		run.NotInstalled = true
+		run.Status = "failed"
+		run.ErrorOutput = fmt.Sprintf("Scanner %q not found. Install it to use this feature.", run.Scanner)
+		run.CompletedAt = time.Now()
+		run.Duration = run.CompletedAt.Sub(run.StartedAt).Round(time.Millisecond).String()
+		r.completeRun(run, nil)
 		return
 	}
 
@@ -291,11 +301,32 @@ func (r *Runner) executeScanner(run *ScanRun, profile *ExpectedProfile) {
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			run.ExitCode = exitErr.ExitCode()
+			// Check for signal kill (SIGSEGV, SIGKILL, etc.)
+			if exitErr.ProcessState != nil {
+				if ws, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus); ok {
+					if ws.Signaled() {
+						run.Crashed = true
+						run.CrashSignal = ws.Signal().String()
+					}
+				}
+			}
 		}
-		run.ErrorOutput = stderr.String()
+		// Truncate stderr to 4KB
+		stderrStr := truncateStderr(stderr.String(), 4096)
+		run.ErrorOutput = stderrStr
+		run.StderrExcerpt = stderrStr
+
+		// Detect crash patterns in stderr
+		if detectCrashInStderr(stderrStr) {
+			run.Crashed = true
+		}
+
 		if run.ExitCode != 0 && run.ExitCode != 1 {
 			// Many scanners exit 1 when they find vulns, that's OK
 			run.Status = "failed"
+			if run.Crashed {
+				run.Status = "crashed"
+			}
 		}
 	}
 
@@ -329,7 +360,7 @@ func (r *Runner) executeScanner(run *ScanRun, profile *ExpectedProfile) {
 		}
 	}
 
-	if run.Status != "timeout" && run.Status != "failed" {
+	if run.Status != "timeout" && run.Status != "failed" && run.Status != "crashed" {
 		run.Status = "completed"
 	}
 
@@ -422,6 +453,36 @@ func (r *Runner) generateWordlist() string {
 	content := strings.Join(paths, "\n")
 	os.WriteFile(wordlistFile, []byte(content), 0o644)
 	return wordlistFile
+}
+
+// ---------------------------------------------------------------------------
+// Crash detection helpers
+// ---------------------------------------------------------------------------
+
+// crashPatterns are stderr substrings (lowercase) that indicate a process crash.
+var crashPatterns = []string{
+	"segmentation fault", "panic:", "core dumped",
+	"sigsegv", "fatal error", "stack overflow",
+}
+
+// detectCrashInStderr checks if stderr output contains crash indicators.
+func detectCrashInStderr(stderrStr string) bool {
+	lower := strings.ToLower(stderrStr)
+	for _, pat := range crashPatterns {
+		if strings.Contains(lower, pat) {
+			return true
+		}
+	}
+	return false
+}
+
+// truncateStderr truncates stderr output to maxLen bytes, appending a
+// truncation marker if the output exceeds that limit.
+func truncateStderr(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen] + "\n...[truncated]"
+	}
+	return s
 }
 
 // ---------------------------------------------------------------------------
