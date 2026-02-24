@@ -52,6 +52,20 @@ type clientState struct {
 	totalRequests int64
 }
 
+// MirrorSettings holds server behavior settings that the proxy mirrors.
+// When set, the proxy applies these settings instead of its default profiles.
+type MirrorSettings struct {
+	ErrorWeights         map[string]float64
+	ErrorRateMultiplier  float64
+	PageTypeWeights      map[string]float64
+	HeaderCorruptLevel   int
+	ProtocolGlitchEnabled bool
+	ProtocolGlitchLevel  int
+	DelayMinMs           int
+	DelayMaxMs           int
+	ContentTheme         string
+}
+
 // ReverseProxy is the main proxy handler that sits in front of a real backend,
 // selectively intercepting suspicious traffic and applying glitch defenses.
 type ReverseProxy struct {
@@ -70,6 +84,10 @@ type ReverseProxy struct {
 	lab     *labyrinth.Labyrinth
 	errGen  *errors.Generator
 	pageGen *pages.Generator
+
+	// Mirror mode: when set, applyGlitchTreatment uses these server settings
+	mirrorMu       sync.RWMutex
+	mirrorSettings *MirrorSettings
 
 	// Statistics
 	totalRequests    atomic.Int64
@@ -153,6 +171,21 @@ func NewReverseProxy(target string, opts Options) *ReverseProxy {
 // SetScoreThreshold updates the bot score threshold for interception.
 func (rp *ReverseProxy) SetScoreThreshold(threshold float64) {
 	rp.scoreThreshold.Store(threshold)
+}
+
+// SetMirrorSettings sets (or clears) the mirror settings. When non-nil,
+// applyGlitchTreatment uses these server-mirrored settings.
+func (rp *ReverseProxy) SetMirrorSettings(ms *MirrorSettings) {
+	rp.mirrorMu.Lock()
+	defer rp.mirrorMu.Unlock()
+	rp.mirrorSettings = ms
+}
+
+// GetMirrorSettings returns the current mirror settings (may be nil).
+func (rp *ReverseProxy) GetMirrorSettings() *MirrorSettings {
+	rp.mirrorMu.RLock()
+	defer rp.mirrorMu.RUnlock()
+	return rp.mirrorSettings
 }
 
 // Stats returns current proxy statistics.
@@ -340,8 +373,23 @@ func (rp *ReverseProxy) serveChallenge(w http.ResponseWriter, r *http.Request, c
 }
 
 // applyGlitchTreatment applies the full glitch server experience to a request.
+// When mirror settings are active, it uses the server's error weights and
+// parameters instead of the default profiles.
 func (rp *ReverseProxy) applyGlitchTreatment(w http.ResponseWriter, r *http.Request, score float64) {
 	w.Header().Set("X-Glitch-Score", fmt.Sprintf("%.1f", score))
+
+	ms := rp.GetMirrorSettings()
+
+	// If mirror mode is active, apply server-mirrored delay
+	if ms != nil && ms.DelayMaxMs > 0 {
+		h := sha256.Sum256([]byte(fmt.Sprintf("delay-%s-%d", r.URL.Path, time.Now().UnixNano())))
+		delayRoll := float64(h[1]) / 255.0
+		delayRange := ms.DelayMaxMs - ms.DelayMinMs
+		if delayRange > 0 {
+			delay := ms.DelayMinMs + int(delayRoll*float64(delayRange))
+			time.Sleep(time.Duration(delay) * time.Millisecond)
+		}
+	}
 
 	// Higher scores get more aggressive treatment
 	aggressiveness := (score - rp.scoreThreshold.Load().(float64)) / 50.0
@@ -350,6 +398,14 @@ func (rp *ReverseProxy) applyGlitchTreatment(w http.ResponseWriter, r *http.Requ
 	}
 	if aggressiveness < 0.1 {
 		aggressiveness = 0.1
+	}
+
+	// In mirror mode, scale aggressiveness by the error rate multiplier
+	if ms != nil && ms.ErrorRateMultiplier > 0 {
+		aggressiveness *= ms.ErrorRateMultiplier
+		if aggressiveness > 1.0 {
+			aggressiveness = 1.0
+		}
 	}
 
 	// 30% chance of labyrinth
@@ -365,7 +421,14 @@ func (rp *ReverseProxy) applyGlitchTreatment(w http.ResponseWriter, r *http.Requ
 	// 40% chance of error injection
 	if roll < 0.7*aggressiveness {
 		var profile errors.ErrorProfile
-		if aggressiveness > 0.5 {
+		if ms != nil && len(ms.ErrorWeights) > 0 {
+			// Use mirrored server error weights
+			weights := make(map[errors.ErrorType]float64, len(ms.ErrorWeights))
+			for k, v := range ms.ErrorWeights {
+				weights[errors.ErrorType(k)] = v
+			}
+			profile = errors.ErrorProfile{Weights: weights}
+		} else if aggressiveness > 0.5 {
 			profile = errors.AggressiveProfile()
 		} else {
 			profile = errors.DefaultProfile()

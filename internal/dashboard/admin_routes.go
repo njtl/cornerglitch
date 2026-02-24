@@ -156,9 +156,29 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 			http.Error(w, `{"error":"invalid proxy mode"}`, http.StatusBadRequest)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		resp := map[string]interface{}{
 			"ok":   true,
 			"mode": req.Mode,
+		}
+		if req.Mode == "mirror" {
+			resp["mirror"] = globalProxyConfig.GetMirror()
+		}
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	// Mirror refresh — re-snapshot server settings into proxy mirror config
+	mux.HandleFunc("/admin/api/proxy/mirror/refresh", func(w http.ResponseWriter, r *http.Request) {
+		setCORS(w)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		mc := SnapshotMirrorFromServer()
+		globalProxyConfig.SetMirror(mc)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":     true,
+			"mirror": mc,
 		})
 	})
 
@@ -303,6 +323,9 @@ func adminAPIOverview(w http.ResponseWriter, r *http.Request, s *Server) {
 	for code, cnt := range statusCounts {
 		statusArr = append(statusArr, map[string]interface{}{"code": code, "count": cnt})
 	}
+	sort.Slice(statusArr, func(i, j int) bool {
+		return statusArr[i]["code"].(int) < statusArr[j]["code"].(int)
+	})
 
 	typeArr := make([]kv, 0, len(typeCounts))
 	for k, v := range typeCounts {
@@ -657,6 +680,9 @@ func adminAPIOverrideGet(w http.ResponseWriter, r *http.Request, s *Server) {
 			"mode":      string(mode),
 		})
 	}
+	sort.Slice(data, func(i, j int) bool {
+		return data[i]["client_id"] < data[j]["client_id"]
+	})
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"overrides": data,
@@ -918,6 +944,9 @@ func adminAPIScannerResults(w http.ResponseWriter, r *http.Request, s *Server) {
 			"elapsed":    time.Since(run.StartedAt).Round(time.Second).String(),
 		})
 	}
+	sort.Slice(runningList, func(i, j int) bool {
+		return runningList[i]["scanner"].(string) < runningList[j]["scanner"].(string)
+	})
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"completed": completed,
