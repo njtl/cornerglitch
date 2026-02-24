@@ -84,11 +84,17 @@ func (r *Runner) AvailableScanners() []ScannerInfo {
 		{Name: "ffuf", Description: "Web fuzzer for directory/endpoint discovery", Category: "fuzzer"},
 		{Name: "nikto", Description: "Web server vulnerability scanner", Category: "vuln"},
 		{Name: "nmap", Description: "Network/port scanner with NSE scripts", Category: "network"},
+		{Name: "wapiti", Description: "Web application vulnerability scanner", Category: "vuln"},
 	}
 
 	var available []ScannerInfo
 	for _, s := range scanners {
-		if path := findBinary(s.Name); path != "" {
+		path := findBinary(s.Name)
+		// wapiti may be installed as wapiti3
+		if path == "" && s.Name == "wapiti" {
+			path = findBinary("wapiti3")
+		}
+		if path != "" {
 			s.Installed = true
 			s.Path = path
 			s.Version = getVersion(s.Name, path)
@@ -265,6 +271,24 @@ func (r *Runner) executeScanner(run *ScanRun, profile *ExpectedProfile) {
 		)
 		parseFunc = ParseNmapXML
 
+	case "wapiti":
+		outFile := outputFile + ".json"
+		run.OutputFile = outFile
+		wapitiPath := findBinary("wapiti")
+		if wapitiPath == "" {
+			wapitiPath = findBinary("wapiti3")
+		}
+		cmd = exec.CommandContext(ctx, wapitiPath,
+			"-u", r.config.TargetURL,
+			"-f", "json",
+			"-o", outFile,
+			"--flush-session",
+			"-m", "all",
+			"--scope", "folder",
+			"-t", "10",
+		)
+		parseFunc = ParseWapitiJSON
+
 	default:
 		r.finishRun(run, fmt.Errorf("unknown scanner: %s", run.Scanner))
 		return
@@ -388,65 +412,230 @@ func (r *Runner) completeRun(run *ScanRun, _ error) {
 func (r *Runner) generateWordlist() string {
 	paths := []string{
 		// Standard paths
-		"", "index.html", "robots.txt", "sitemap.xml", ".env", "favicon.ico",
-		// Health
-		"health", "status", "ping", "metrics", "debug/vars",
-		// API
-		"api/users", "api/products", "api/categories", "api/posts",
-		"api/search", "api/graphql", "api/swagger.json", "openapi.json",
-		// Auth
-		"oauth/authorize", "oauth/token", ".well-known/openid-configuration",
-		"saml/metadata",
-		// OWASP vulns
-		"vuln", "vuln/a01", "vuln/a02", "vuln/a03", "vuln/a04", "vuln/a05",
-		"vuln/a06", "vuln/a07", "vuln/a08", "vuln/a09", "vuln/a10",
-		// Advanced vulns
-		"vuln/cors/reflect", "vuln/redirect", "vuln/xxe/parse", "vuln/ssti/render",
-		"vuln/crlf/set", "vuln/host/reset", "vuln/verb/admin", "vuln/hpp/transfer",
-		"vuln/upload/form", "vuln/cmd/ping", "vuln/graphql/introspection",
-		"vuln/jwt/none", "vuln/race/coupon", "vuln/deserialize/java", "vuln/path/traverse",
-		// Dashboard vulns
-		"vuln/dashboard", "vuln/dashboard/debug", "vuln/dashboard/phpinfo",
+		"", "index.html", "index.php", "index.asp", "index.jsp",
+		"robots.txt", "sitemap.xml", "sitemap_index.xml", "crossdomain.xml",
+		".env", ".env.bak", ".env.local", ".env.production",
+		"favicon.ico", "humans.txt", "security.txt", ".well-known/security.txt",
+
+		// Health and status
+		"health", "healthz", "health/live", "health/ready",
+		"status", "ping", "version", "info",
+		"metrics", "metrics/prometheus", "debug/vars", "debug/pprof",
+
+		// API endpoints (versioned)
+		"api", "api/v1", "api/v2", "api/v3",
+		"api/users", "api/v1/users", "api/v2/users",
+		"api/users/1", "api/users/me", "api/users/admin",
+		"api/products", "api/v1/products", "api/products/1",
+		"api/categories", "api/v1/categories",
+		"api/posts", "api/v1/posts", "api/posts/1",
+		"api/search", "api/v1/search",
+		"api/graphql", "graphql", "graphql/console", "graphiql",
+		"api/swagger.json", "api/swagger.yaml", "swagger.json", "swagger-ui",
+		"openapi.json", "openapi.yaml", "api-docs", "api/docs",
+		"api/config", "api/health", "api/status", "api/info",
+		"api/debug", "api/admin", "api/token", "api/auth",
+		"api/login", "api/register", "api/logout",
+		"api/upload", "api/download", "api/export", "api/import",
+		"api/i18n/languages",
+
+		// Auth and OAuth
+		"login", "logout", "register", "signup", "signin",
+		"oauth/authorize", "oauth/token", "oauth/callback",
+		".well-known/openid-configuration", ".well-known/jwks.json",
+		"saml/metadata", "saml/login", "saml/acs",
+		"auth/login", "auth/callback", "auth/token",
+		"sso/login", "sso/callback",
+
+		// OWASP Top 10 vulns (index + sub-paths)
+		"vuln", "vuln/",
+		"vuln/a01", "vuln/a01/", "vuln/a01/admin", "vuln/a01/idor",
+		"vuln/a01/privilege-escalation", "vuln/a01/force-browse",
+		"vuln/a02", "vuln/a02/", "vuln/a02/login", "vuln/a02/default-creds",
+		"vuln/a02/weak-password", "vuln/a02/hardcoded",
+		"vuln/a03", "vuln/a03/", "vuln/a03/sqli", "vuln/a03/xss",
+		"vuln/a03/xss/stored", "vuln/a03/xss/reflected", "vuln/a03/xss/dom",
+		"vuln/a03/inject", "vuln/a03/ldap", "vuln/a03/nosql",
+		"vuln/a04", "vuln/a04/", "vuln/a04/mass-assign", "vuln/a04/insecure-design",
+		"vuln/a05", "vuln/a05/", "vuln/a05/misconfig", "vuln/a05/headers",
+		"vuln/a05/cors", "vuln/a05/debug", "vuln/a05/default",
+		"vuln/a06", "vuln/a06/", "vuln/a06/outdated", "vuln/a06/cve",
+		"vuln/a07", "vuln/a07/", "vuln/a07/auth-bypass", "vuln/a07/session",
+		"vuln/a07/brute-force",
+		"vuln/a08", "vuln/a08/", "vuln/a08/integrity", "vuln/a08/deserialization",
+		"vuln/a09", "vuln/a09/", "vuln/a09/logging", "vuln/a09/monitoring",
+		"vuln/a10", "vuln/a10/", "vuln/a10/ssrf", "vuln/a10/ssrf/fetch",
+
+		// API Security Top 10
+		"vuln/api1", "vuln/api1/", "vuln/api1/bola",
+		"vuln/api2", "vuln/api2/", "vuln/api2/auth",
+		"vuln/api3", "vuln/api3/", "vuln/api3/property",
+		"vuln/api4", "vuln/api4/", "vuln/api4/resource",
+		"vuln/api5", "vuln/api5/", "vuln/api5/bfla",
+		"vuln/api6", "vuln/api6/", "vuln/api6/mass-assign",
+		"vuln/api7", "vuln/api7/", "vuln/api7/misconfig",
+		"vuln/api8", "vuln/api8/", "vuln/api8/injection",
+		"vuln/api9", "vuln/api9/", "vuln/api9/inventory",
+		"vuln/api10", "vuln/api10/", "vuln/api10/consumption",
+
+		// Advanced vuln endpoints
+		"vuln/cors/reflect", "vuln/cors/wildcard", "vuln/cors/null",
+		"vuln/redirect", "vuln/redirect/open", "vuln/redirect/param",
+		"vuln/xxe/parse", "vuln/xxe/upload",
+		"vuln/ssti/render", "vuln/ssti/eval",
+		"vuln/crlf/set", "vuln/crlf/header",
+		"vuln/host/reset", "vuln/host/route",
+		"vuln/verb/admin", "vuln/verb/debug",
+		"vuln/hpp/transfer", "vuln/hpp/search",
+		"vuln/upload/form", "vuln/upload/avatar",
+		"vuln/cmd/ping", "vuln/cmd/exec",
+		"vuln/graphql/introspection", "vuln/graphql/query",
+		"vuln/jwt/none", "vuln/jwt/weak", "vuln/jwt/kid",
+		"vuln/race/coupon", "vuln/race/transfer",
+		"vuln/deserialize/java", "vuln/deserialize/php",
+		"vuln/path/traverse", "vuln/path/read",
+		"vuln/cache/poison", "vuln/cache/deception",
+		"vuln/prototype/pollution",
+		"vuln/clickjack/frame",
+		"vuln/websocket/hijack",
+
+		// Dashboard/admin vuln surfaces
+		"vuln/dashboard", "vuln/dashboard/",
+		"vuln/dashboard/debug", "vuln/dashboard/phpinfo",
 		"vuln/dashboard/server-status", "vuln/dashboard/api-keys",
 		"vuln/dashboard/users", "vuln/dashboard/users/export",
 		"vuln/dashboard/backup/download", "vuln/dashboard/debug/env",
 		"vuln/dashboard/debug/routes", "vuln/dashboard/debug/sql",
 		"vuln/dashboard/debug/sessions", "vuln/dashboard/debug/cache",
-		// Settings vulns
-		"vuln/settings", "vuln/settings/database", "vuln/settings/email",
+		"vuln/dashboard/debug/config",
+
+		// Settings vuln surfaces
+		"vuln/settings", "vuln/settings/",
+		"vuln/settings/database", "vuln/settings/email",
 		"vuln/settings/integrations", "vuln/settings/audit",
 		"vuln/settings/flags", "vuln/settings/credentials",
 		"vuln/settings/certificates", "vuln/settings/tokens",
-		// Honeypot
-		"wp-admin", "wp-login.php", "administrator", "phpmyadmin",
-		".git/HEAD", ".git/config", ".svn/entries", "server-status",
-		"wp-content/debug.log", ".htaccess", "web.config",
-		"backup.sql", "dump.sql", "db.sql",
-		// Common dirs
-		"admin", "login", "register", "dashboard", "console",
-		"config", "backup", "test", "debug", "internal",
-		// Labyrinth
+		"vuln/settings/api-keys", "vuln/settings/webhooks",
+
+		// Infrastructure vulns
+		"vuln/infra", "vuln/infra/", "vuln/infra/aws",
+		"vuln/infra/docker", "vuln/infra/k8s",
+
+		// IoT/Desktop/Mobile vulns
+		"vuln/iot", "vuln/iot/", "vuln/mobile", "vuln/mobile/",
+
+		// Modern vulns
+		"vuln/modern", "vuln/modern/", "vuln/modern/graphql",
+		"vuln/modern/websocket", "vuln/modern/grpc",
+
+		// Specialized vulns
+		"vuln/specialized", "vuln/specialized/",
+
+		// Honeypot paths
+		"wp-admin", "wp-admin/", "wp-login.php", "wp-content", "wp-includes",
+		"wp-content/debug.log", "wp-content/uploads", "wp-config.php",
+		"administrator", "administrator/", "phpmyadmin", "phpmyadmin/",
+		"adminer", "adminer.php", "phpinfo.php", "info.php",
+		".git/HEAD", ".git/config", ".git/objects", ".gitignore",
+		".svn/entries", ".svn/wc.db", ".hg/store",
+		"server-status", "server-info",
+		".htaccess", ".htpasswd", "web.config", "web.xml",
+		"backup.sql", "dump.sql", "db.sql", "database.sql",
+		"backup.tar.gz", "backup.zip", "site.tar.gz",
+		".DS_Store", "Thumbs.db",
+		"composer.json", "package.json", "Gemfile", "requirements.txt",
+		"Dockerfile", "docker-compose.yml", ".dockerignore",
+		"Makefile", "Rakefile", "Gruntfile.js", "Gulpfile.js",
+		"id_rsa", "id_rsa.pub", ".ssh/authorized_keys",
+		"credentials.json", "service-account.json",
+
+		// Common dirs and admin panels
+		"admin", "admin/", "admin/login", "admin/dashboard",
+		"login", "register", "dashboard", "console", "portal",
+		"config", "config/", "configuration", "settings",
+		"backup", "backups", "test", "testing",
+		"debug", "debug/", "internal", "internal/",
+		"private", "secret", "tmp", "temp",
+		"uploads", "upload", "files", "images", "media",
+		"static", "assets", "public", "dist", "build",
+		"cgi-bin", "cgi-bin/", "bin",
+
+		// Labyrinth (crawler trap)
 		"articles/tech/deep-learning",
+		"articles/science/quantum",
+		"articles/business/startups",
 		"docs/api/v2/reference",
+		"docs/api/v1/getting-started",
+		"docs/tutorials/beginner",
 		"products/category/featured",
+		"products/category/new",
+		"products/sale/clearance",
+		"blog/2024/01/hello-world",
+		"blog/2024/02/update",
+		"news/latest-update",
+		"help/getting-started",
+		"help/faq",
+
 		// Email
-		"email/inbox", "email/compose",
+		"email", "email/inbox", "email/compose", "email/sent",
+		"webmail", "webmail/",
+		"mail", "mail/inbox",
+
 		// Search
-		"search",
-		// CDN
-		"static/js/app.js", "static/css/main.css",
+		"search", "search/", "search/advanced",
+		"search/images", "api/search/suggest",
+
+		// CDN / static assets
+		"static/js/app.js", "static/js/main.js", "static/js/vendor.js",
+		"static/css/main.css", "static/css/app.css",
+		"assets/js/app.js", "assets/css/style.css",
+		"dist/bundle.js", "build/static/js/main.js",
+
 		// Captcha
-		"captcha/challenge", "captcha/verify",
+		"captcha", "captcha/challenge", "captcha/verify", "captcha/image",
+
 		// Analytics
-		"analytics/beacon", "analytics/pixel.gif",
+		"analytics", "analytics/beacon", "analytics/pixel.gif",
+		"analytics/collect", "collect",
+
 		// Privacy
-		"privacy", "privacy/consent",
+		"privacy", "privacy/", "privacy/consent",
+		"privacy-policy", "terms", "terms-of-service",
+		"cookie-policy", "gdpr", "ccpa",
+
 		// i18n
-		"es/", "fr/", "de/", "ja/",
-		// Websocket
-		"ws/echo", "ws/chat",
+		"es/", "fr/", "de/", "ja/", "zh/", "ko/", "pt/", "it/", "ru/",
+		"en/", "en-US/", "en-GB/",
+
+		// WebSocket
+		"ws", "ws/echo", "ws/chat", "ws/feed", "ws/notifications",
+		"websocket", "socket.io",
+
 		// Recorder
-		"recorder/sessions",
+		"recorder", "recorder/sessions", "recorder/status",
+
+		// Spider data
+		"spider", "spider/links", "spider/sitemap",
+
+		// Framework-specific
+		"actuator", "actuator/health", "actuator/info", "actuator/env",
+		"actuator/beans", "actuator/mappings", "actuator/configprops",
+		"__debug__", "_debug_toolbar",
+		"elmah.axd", "trace.axd",
+		"rails/info/routes",
+		"django-admin",
+		"telescope", "horizon",
+
+		// Error pages
+		"404", "500", "403", "401",
+		"error", "errors", "not-found",
+
+		// Misc discovery paths
+		"README.md", "CHANGELOG.md", "LICENSE",
+		"release-notes", "changelog",
+		"xmlrpc.php", "wp-json", "wp-json/wp/v2/users",
+		"feed", "feed/rss", "feed/atom", "rss.xml", "atom.xml",
+		"manifest.json", "browserconfig.xml", "service-worker.js",
 	}
 
 	wordlistFile := filepath.Join(r.config.OutputDir, "glitch-wordlist.txt")
@@ -491,8 +680,10 @@ func truncateStderr(s string, maxLen int) string {
 
 func findBinary(name string) string {
 	// Check common locations
+	home := os.Getenv("HOME")
 	locations := []string{
-		filepath.Join(os.Getenv("HOME"), "go", "bin", name),
+		filepath.Join(home, "go", "bin", name),
+		filepath.Join(home, ".local", "bin", name),
 		filepath.Join("/usr/local/bin", name),
 		filepath.Join("/usr/bin", name),
 		filepath.Join("/tmp/nikto/program", name+".pl"),
@@ -522,6 +713,8 @@ func getVersion(name, path string) string {
 		cmd = exec.Command(path, "--version")
 	case "nikto":
 		cmd = exec.Command("perl", path, "-Version")
+	case "wapiti":
+		cmd = exec.Command(path, "--version")
 	default:
 		return ""
 	}
