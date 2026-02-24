@@ -441,6 +441,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   .scanner-btn:hover { background: #00cc77; }
   .scanner-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
   .scanner-btn.running { background: #ffaa00; animation: pulse 1s infinite; }
+  .scanner-btn.danger { background: #882222; color: #ff6666; }
+  .scanner-btn.danger:hover { background: #aa3333; }
   @keyframes pulse { 0%%,100%% { opacity:1; } 50%% { opacity:0.6; } }
 
   /* Vuln table */
@@ -604,9 +606,31 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   <div class="grid" id="dash-metrics"></div>
 
-  <div class="section">
-    <h2>// Throughput (last 60s)</h2>
-    <div class="sparkline-wrap" id="dash-sparkline"></div>
+  <!-- Performance Metrics -->
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
+    <div class="section">
+      <h2>// Throughput (last 60s)</h2>
+      <div class="sparkline-wrap" id="dash-sparkline" style="height:100px"></div>
+    </div>
+    <div class="section">
+      <h2>// Error Rate (last 60s)</h2>
+      <div class="sparkline-wrap" id="dash-err-sparkline" style="height:100px"></div>
+    </div>
+  </div>
+
+  <!-- Calculated Stats -->
+  <div class="grid" id="dash-calc-stats"></div>
+
+  <!-- Status Code Breakdown -->
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
+    <div class="section">
+      <h2>// Status Code Distribution</h2>
+      <div id="dash-status-bars"></div>
+    </div>
+    <div class="section">
+      <h2>// Response Types</h2>
+      <div id="dash-resp-types"></div>
+    </div>
   </div>
 
   <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
@@ -652,6 +676,50 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <span style="color:#888">Clients: <span id="srv-status-clients" style="color:#00ccff">--</span></span>
     <span style="color:#888">Features: <span id="srv-status-features" style="color:#00ff88">--</span></span>
     <button class="nightmare-btn" onclick="toggleNightmareMode('server')" id="srv-nightmare-btn" style="padding:4px 12px;font-size:0.85em">Nightmare: OFF</button>
+  </div>
+
+  <!-- ====== Traffic Recording ====== -->
+  <div class="srv-section" id="srv-recording">
+    <div class="srv-section-header" onclick="toggleServerSection('recording')">
+      <span class="srv-title">Traffic Recording</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <div style="display:grid;grid-template-columns:auto auto auto auto 1fr;gap:12px;align-items:end">
+        <div>
+          <div class="label" style="margin-bottom:4px">Format</div>
+          <select id="rec-format" class="ctrl-select" style="min-width:80px">
+            <option value="jsonl">JSONL</option>
+            <option value="pcap">PCAP</option>
+          </select>
+        </div>
+        <div>
+          <div class="label" style="margin-bottom:4px">Max Duration (sec)</div>
+          <input type="number" id="rec-max-dur" value="0" min="0" max="86400" step="60"
+            style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100px"
+            title="0 = unlimited">
+        </div>
+        <div>
+          <div class="label" style="margin-bottom:4px">Max Requests</div>
+          <input type="number" id="rec-max-reqs" value="0" min="0" max="10000000" step="1000"
+            style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100px"
+            title="0 = unlimited">
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="scanner-btn" id="rec-start-btn" onclick="startRecording()">Start Recording</button>
+          <button class="scanner-btn danger" id="rec-stop-btn" onclick="stopRecording()" style="display:none">Stop</button>
+        </div>
+        <div id="rec-status" style="font-size:0.82em;color:#555">Idle</div>
+      </div>
+      <div id="rec-stats" style="margin-top:10px;display:none">
+        <div class="grid">
+          <div class="card"><div class="label">Records</div><div class="value v-ok" id="rec-count">0</div></div>
+          <div class="card"><div class="label">File Size</div><div class="value v-info" id="rec-size">0 B</div></div>
+          <div class="card"><div class="label">Elapsed</div><div class="value v-info" id="rec-elapsed">0s</div></div>
+          <div class="card"><div class="label">File</div><div class="value" style="font-size:0.6em;color:#888" id="rec-file">--</div></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ====== Feature Toggles ====== -->
@@ -981,38 +1049,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div id="scanner-run-status" style="margin-top:8px;color:#555;font-size:0.82em"></div>
     </div>
 
-    <!-- Upload Scanner Output -->
+    <!-- Comparison Report (auto-filled from external scanner results) -->
     <div class="section">
-      <h2>// Upload Scanner Output</h2>
-      <div class="scanner-panel">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-          <label style="color:#aaa;font-size:0.85em">Scanner Type:</label>
-          <select id="scanner-type" class="scanner-select">
-            <option value="nuclei">Nuclei</option>
-            <option value="nikto">Nikto</option>
-            <option value="nmap">Nmap</option>
-            <option value="ffuf">ffuf</option>
-            <option value="wapiti">Wapiti</option>
-            <option value="generic">Generic</option>
-          </select>
-        </div>
-        <textarea id="scanner-output" class="scanner-textarea" placeholder="Paste scanner output here..."></textarea>
-        <button class="scanner-btn" onclick="uploadResults()">Upload &amp; Grade</button>
-      </div>
-    </div>
-
-    <!-- Comparison Report -->
-    <div class="section">
-      <h2>// Comparison Report</h2>
+      <h2>// Scan Results</h2>
       <div id="scanner-comparison">
-        <div style="color:#555">No comparison data yet. Upload scanner results or run a scan.</div>
+        <div style="color:#555">Launch an external scanner above. Results are captured and graded automatically.</div>
       </div>
     </div>
 
-    <!-- Evaluation History -->
+    <!-- Scan History -->
     <div class="section">
-      <h2>// Evaluation History</h2>
-      <div class="tbl-scroll" style="max-height:300px">
+      <h2>// Scan History</h2>
+      <div class="tbl-scroll" style="max-height:400px">
         <table>
           <thead><tr>
             <th>Timestamp</th>
@@ -1020,9 +1068,36 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
             <th>Grade</th>
             <th>Detection</th>
             <th>Status</th>
+            <th>Actions</th>
           </tr></thead>
           <tbody id="scanner-history-body"></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Manual Upload (collapsible) -->
+    <div class="section">
+      <div style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="var el=document.getElementById('manual-upload-body');el.style.display=el.style.display==='none'?'':'none'">
+        <h2>// Manual Upload (optional)</h2>
+        <span style="color:#555;font-size:0.85em">Click to expand</span>
+      </div>
+      <div id="manual-upload-body" style="display:none;margin-top:12px">
+        <p style="color:#666;font-size:0.8em;margin-bottom:8px">Paste scanner output from an external run for grading.</p>
+        <div class="scanner-panel">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+            <label style="color:#aaa;font-size:0.85em">Scanner Type:</label>
+            <select id="scanner-type" class="scanner-select">
+              <option value="nuclei">Nuclei</option>
+              <option value="nikto">Nikto</option>
+              <option value="nmap">Nmap</option>
+              <option value="ffuf">ffuf</option>
+              <option value="wapiti">Wapiti</option>
+              <option value="generic">Generic</option>
+            </select>
+          </div>
+          <textarea id="scanner-output" class="scanner-textarea" placeholder="Paste scanner output here..."></textarea>
+          <button class="scanner-btn" onclick="uploadResults()">Upload &amp; Grade</button>
+        </div>
       </div>
     </div>
 
@@ -1173,7 +1248,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         <input type="number" id="replay-cleanup-size" value="500" min="1" max="10000" step="10"
           style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100px">
         <span style="color:#555;font-size:0.78em">MB limit</span>
-        <button class="cfg-btn" onclick="replayCleanup()" title="Remove oldest capture files until total size is under the MB limit">Trim to Size Limit</button>
+        <button class="scanner-btn danger" onclick="replayCleanup()" title="Remove oldest capture files until total size is under the MB limit">Trim to Size Limit</button>
       </div>
     </div>
 
@@ -1255,7 +1330,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       </div>
       <div style="margin-top:14px;display:flex;gap:8px">
         <button class="scanner-btn" onclick="replayStart()" id="replay-play-btn">Play</button>
-        <button class="cfg-btn" onclick="replayStop()" style="background:#662222;color:#ff6666" id="replay-stop-btn">Stop</button>
+        <button class="scanner-btn danger" onclick="replayStop()" id="replay-stop-btn">Stop</button>
       </div>
     </div>
 
@@ -1288,8 +1363,63 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <div style="display:flex;align-items:center;justify-content:space-between;background:#111;border:1px solid #ffaa0033;border-radius:6px;padding:10px 16px;margin-bottom:14px;font-size:0.82em">
     <span style="color:#ffaa00;font-weight:bold">PROXY STATUS: <span id="proxy-status-text">TRANSPARENT</span></span>
     <span style="color:#888" id="proxy-status-detail">--</span>
+    <span id="proxy-runtime-badge" style="padding:3px 10px;border-radius:12px;font-size:0.78em;background:#33000033;border:1px solid #333;color:#666">STOPPED</span>
     <button class="nightmare-btn" onclick="toggleNightmareMode('proxy')" id="proxy-nightmare-btn" style="padding:4px 12px;font-size:0.85em">Nightmare: OFF</button>
   </div>
+
+  <!-- Runtime Controls -->
+  <div class="section" style="border-color:#ffaa0033">
+    <h2>// Runtime Controls</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:end">
+      <div>
+        <div class="label" style="margin-bottom:4px">Listen Port</div>
+        <input type="number" id="proxy-rt-port" value="8080" min="1" max="65535"
+          style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%">
+      </div>
+      <div>
+        <div class="label" style="margin-bottom:4px">Backend Target</div>
+        <input type="text" id="proxy-rt-target" placeholder="http://localhost:8765" value="http://localhost:8765"
+          style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%">
+      </div>
+      <div>
+        <div class="label" style="margin-bottom:4px">Uptime</div>
+        <div id="proxy-rt-uptime" style="color:#888;font-size:0.9em;padding:6px 0">--</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="scanner-btn" id="proxy-rt-start-btn" onclick="startProxy()" style="white-space:nowrap">Start Proxy</button>
+        <button class="scanner-btn danger" id="proxy-rt-stop-btn" onclick="stopProxy()" style="display:none;white-space:nowrap">Stop</button>
+        <button class="cfg-btn" id="proxy-rt-restart-btn" onclick="restartProxy()" style="display:none;white-space:nowrap">Restart</button>
+      </div>
+    </div>
+    <div id="proxy-rt-stats" style="margin-top:8px;display:none">
+      <div class="grid">
+        <div class="card"><div class="label">Requests</div><div class="value v-ok" id="proxy-rt-reqs">0</div></div>
+        <div class="card"><div class="label">Uptime</div><div class="value v-info" id="proxy-rt-uptime-card">0s</div></div>
+        <div class="card"><div class="label">Mode</div><div class="value v-warn" id="proxy-rt-mode">--</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Proxy Recording -->
+  <div class="section" style="border-color:#ffaa0033">
+    <h2>// Proxy Traffic Recording</h2>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <select id="proxy-rec-format" class="ctrl-select" style="min-width:80px">
+        <option value="jsonl">JSONL</option>
+        <option value="pcap">PCAP</option>
+      </select>
+      <div style="display:flex;align-items:center;gap:4px"><span class="label">Duration:</span>
+        <input type="number" id="proxy-rec-dur" value="0" min="0" max="86400" step="60"
+          style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:4px 8px;border-radius:4px;font-family:inherit;font-size:0.82em;width:80px" title="0 = unlimited"><span style="color:#555;font-size:0.78em">sec</span></div>
+      <div style="display:flex;align-items:center;gap:4px"><span class="label">Requests:</span>
+        <input type="number" id="proxy-rec-reqs" value="0" min="0" max="10000000" step="1000"
+          style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:4px 8px;border-radius:4px;font-family:inherit;font-size:0.82em;width:80px" title="0 = unlimited"></div>
+      <button class="scanner-btn" id="proxy-rec-start-btn" onclick="startRecording()">Record</button>
+      <button class="scanner-btn danger" id="proxy-rec-stop-btn" onclick="stopRecording()" style="display:none">Stop</button>
+      <span id="proxy-rec-status" style="font-size:0.82em;color:#555">Idle</span>
+    </div>
+  </div>
+
   <div class="grid" id="proxy-metrics"></div>
 
   <!-- Proxy Configuration -->
@@ -1566,8 +1696,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       ]);
 
       // Metrics cards
+      var totalReqs = m.total_requests || 0;
+      var uptimeSec = m.uptime_seconds || 1;
+      var avgRps = (totalReqs / uptimeSec).toFixed(1);
+      var avgLatMs = m.avg_latency_ms || 0;
+      var p95Lat = m.p95_latency_ms || avgLatMs * 2;
       document.getElementById('dash-metrics').innerHTML =
-        card('Total Requests', (m.total_requests||0).toLocaleString(), 'v-ok') +
+        card('Total Requests', totalReqs.toLocaleString(), 'v-ok') +
+        card('Req/s (avg)', avgRps, 'v-info') +
         card('Active Connections', m.active_connections||0, 'v-info') +
         card('2xx', (m.total_2xx||0).toLocaleString(), 'v-ok') +
         card('4xx', (m.total_4xx||0).toLocaleString(), 'v-warn') +
@@ -1601,18 +1737,29 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         }
       } catch(se) {}
 
-      // Proxy mode card
+      // Proxy mode card — check runtime status first
       try {
-        var proxyData = await api('/admin/api/proxy/status');
         var proxyStatus = document.getElementById('dash-proxy-status');
         var proxyDetail = document.getElementById('dash-proxy-detail');
-        var pMode = (proxyData.mode || 'transparent').toUpperCase();
-        if (proxyStatus) proxyStatus.textContent = pMode;
-        var pStats = proxyData.pipeline_stats || {};
-        if (proxyDetail) proxyDetail.textContent = (pStats.requests_processed||0) + ' fwd | ' + (pStats.requests_blocked||0) + ' blocked';
+        try {
+          var rtData = await api('/admin/api/proxy/runtime');
+          if (rtData.running) {
+            if (proxyStatus) proxyStatus.textContent = (rtData.mode || 'TRANSPARENT').toUpperCase();
+            if (proxyDetail) proxyDetail.textContent = ':' + (rtData.port||8080) + ' | ' + (rtData.requests||0) + ' reqs';
+          } else {
+            if (proxyStatus) proxyStatus.textContent = 'STOPPED';
+            if (proxyDetail) proxyDetail.textContent = 'Proxy not running';
+          }
+        } catch(rte) {
+          var proxyData = await api('/admin/api/proxy/status');
+          var pMode = (proxyData.mode || 'transparent').toUpperCase();
+          if (proxyStatus) proxyStatus.textContent = pMode;
+          var pStats = proxyData.pipeline_stats || {};
+          if (proxyDetail) proxyDetail.textContent = (pStats.requests_processed||0) + ' fwd | ' + (pStats.requests_blocked||0) + ' blocked';
+        }
       } catch(pe) {}
 
-      // Sparkline
+      // Throughput sparkline
       const series = ts.series || [];
       const wrap = document.getElementById('dash-sparkline');
       if (series.length > 0) {
@@ -1624,6 +1771,53 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           return '<div class="' + cls + '" style="left:' + (i*(bw+1)) + 'px;width:' + bw + 'px;height:' + h + '%%;" title="' + s.requests + ' req"></div>';
         }).join('');
       }
+
+      // Error rate sparkline
+      const errWrap = document.getElementById('dash-err-sparkline');
+      if (series.length > 0 && errWrap) {
+        const maxE = Math.max(...series.map(s => s.errors || 0), 1);
+        const ebw = Math.max(2, Math.floor(errWrap.clientWidth / series.length) - 1);
+        errWrap.innerHTML = series.map((s, i) => {
+          const h = Math.max(2, ((s.errors || 0) / maxE) * 100);
+          return '<div class="spark-bar err" style="left:' + (i*(ebw+1)) + 'px;width:' + ebw + 'px;height:' + h + '%%;" title="' + (s.errors||0) + ' err"></div>';
+        }).join('');
+      }
+
+      // Calculated statistics
+      var recentReqs = series.reduce(function(a,s){return a+s.requests},0);
+      var recentErrs = series.reduce(function(a,s){return a+(s.errors||0)},0);
+      var recentAvg = series.length > 0 ? series.reduce(function(a,s){return a+(s.avg_ms||0)},0)/series.length : 0;
+      var curRps = series.length > 1 ? series[series.length-1].requests : 0;
+      var recentErrRate = recentReqs > 0 ? (recentErrs/recentReqs*100).toFixed(1) : '0.0';
+      document.getElementById('dash-calc-stats').innerHTML =
+        card('Current RPS', curRps.toLocaleString(), 'v-ok') +
+        card('60s Requests', recentReqs.toLocaleString(), 'v-info') +
+        card('60s Errors', recentErrs.toLocaleString(), recentErrs > 0 ? 'v-err' : 'v-ok') +
+        card('60s Error Rate', recentErrRate + '%%', parseFloat(recentErrRate) > 10 ? 'v-err' : 'v-ok') +
+        card('Avg Latency', recentAvg.toFixed(1) + 'ms', recentAvg > 500 ? 'v-err' : 'v-ok');
+
+      // Status code and response type distributions from overview
+      try {
+        var ov = await api('/admin/api/overview');
+        var statusCodes = ov.status_codes || [];
+        var totalSC = statusCodes.reduce(function(a,c){return a+c.count},0) || 1;
+        document.getElementById('dash-status-bars').innerHTML = statusCodes.map(function(c) {
+          var pct = (c.count / totalSC * 100).toFixed(1);
+          var color = c.code >= 500 ? '#ff4444' : c.code >= 400 ? '#ffaa00' : c.code >= 300 ? '#4488ff' : '#00ff88';
+          return '<div class="bar-row"><div class="bar-label">' + c.code + '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%%;background:' + color + '"></div></div>' +
+            '<div class="bar-count">' + c.count + ' (' + pct + '%%)</div></div>';
+        }).join('') || '<div style="color:#555">No data</div>';
+
+        var types = ov.response_types || [];
+        var totalT = types.reduce(function(a,t){return a+t.count},0) || 1;
+        document.getElementById('dash-resp-types').innerHTML = types.map(function(t) {
+          var pct = (t.count / totalT * 100).toFixed(1);
+          return '<div class="bar-row"><div class="bar-label">' + escapeHtml(t.key||'unknown') + '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%%"></div></div>' +
+            '<div class="bar-count">' + t.count + ' (' + pct + '%%)</div></div>';
+        }).join('') || '<div style="color:#555">No data</div>';
+      } catch(oe) {}
 
       // Clients table
       const clients = (cl.clients || []).sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
@@ -2424,8 +2618,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   // ------ Scanner Tab ------
   let scanPollTimer = null;
+  let profileLoading = false;
 
-  window.generateProfile = async function() {
+  window.generateProfile = async function(showToast) {
+    if (profileLoading) return;
+    profileLoading = true;
     try {
       var profile = await api('/admin/api/scanner/profile');
       vulnProfile = profile;
@@ -2454,8 +2651,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         '</div>';
 
       document.getElementById('scanner-profile-summary').innerHTML = html;
-      toast('Profile generated');
-    } catch(e) { console.error('generateProfile:', e); toast('Failed to generate profile'); }
+      if (showToast) toast('Profile generated');
+    } catch(e) { console.error('generateProfile:', e); if (showToast) toast('Failed to generate profile'); }
+    finally { profileLoading = false; }
   };
 
   function metricBar(label, value, cls) {
@@ -2574,13 +2772,35 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   function renderScanResult(run) {
     var r = run.Result || {};
+    var statusCls = run.Status === 'completed' ? 'v-ok' : 'v-err';
+    var statusText = run.Status || '-';
+    if (run.Crashed) statusText = 'CRASHED';
+    if (run.NotInstalled) statusText = 'NOT INSTALLED';
+
     var html = '<div class="grid">' +
       card('Scanner', escapeHtml(run.Scanner || ''), 'v-info') +
-      card('Status', escapeHtml(run.Status || ''), run.Status === 'completed' ? 'v-ok' : 'v-err') +
+      card('Status', escapeHtml(statusText), statusCls) +
       card('Duration', escapeHtml(run.Duration || '-'), 'v-info') +
       card('Findings', (r.Findings || []).length, 'v-warn') +
-      card('Exit Code', run.ExitCode || 0, run.ExitCode === 0 ? 'v-ok' : 'v-err') +
+      card('Exit Code', run.ExitCode || 0, run.ExitCode === 0 || run.ExitCode === 1 ? 'v-ok' : 'v-err') +
       '</div>';
+
+    // Crash alert
+    if (run.Crashed) {
+      html += '<div style="background:#330000;border:1px solid #ff4444;border-radius:6px;padding:12px;margin:12px 0">' +
+        '<span style="color:#ff4444;font-weight:bold;font-size:0.9em">SCANNER CRASHED</span>';
+      if (run.CrashSignal) html += ' <span style="color:#ff8844">Signal: ' + escapeHtml(run.CrashSignal) + '</span>';
+      html += '<div style="color:#ff6666;font-size:0.82em;margin-top:6px">The scanner terminated abnormally. Exit code: ' + (run.ExitCode || 0) + '</div>';
+      html += '</div>';
+    }
+
+    // Not installed alert
+    if (run.NotInstalled) {
+      html += '<div style="background:#1a1a00;border:1px solid #ffaa00;border-radius:6px;padding:12px;margin:12px 0">' +
+        '<span style="color:#ffaa00;font-weight:bold;font-size:0.9em">SCANNER NOT INSTALLED</span>' +
+        '<div style="color:#cc8800;font-size:0.82em;margin-top:6px">Install the scanner binary and try again.</div>' +
+        '</div>';
+    }
 
     var findings = r.Findings || [];
     if (findings.length > 0) {
@@ -2593,8 +2813,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }
 
     if (run.ErrorOutput) {
-      html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:14px">SCANNER ERRORS</h3>';
+      html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:14px">SCANNER OUTPUT</h3>';
       html += '<pre style="background:#1a0a0a;border:1px solid #330000;border-radius:4px;padding:10px;color:#ff6666;font-size:0.8em;max-height:200px;overflow:auto">' + escapeHtml(run.ErrorOutput) + '</pre>';
+    }
+
+    if (run.StderrExcerpt) {
+      html += '<h3 style="color:#ff8844;font-size:0.85em;margin-top:14px">STDERR EXCERPT</h3>';
+      html += '<pre style="background:#1a0a00;border:1px solid #331100;border-radius:4px;padding:10px;color:#ff8844;font-size:0.8em;max-height:200px;overflow:auto">' + escapeHtml(run.StderrExcerpt) + '</pre>';
     }
 
     document.getElementById('scanner-comparison').innerHTML = html;
@@ -2682,27 +2907,46 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         '<td style="font-weight:bold;color:#ffaa00">...</td>' +
         '<td style="color:#888">' + escapeHtml(r.elapsed || '-') + '</td>' +
         '<td><span style="color:#ffaa00">RUNNING</span></td>' +
+        '<td></td>' +
         '</tr>');
     });
 
     // Completed scans (newest first)
-    (completed || []).slice().reverse().forEach(function(r) {
+    (completed || []).slice().reverse().forEach(function(r, idx) {
       var comp = r.Comparison || {};
       var grade = comp.Grade || comp.grade || '-';
       var det = comp.DetectionRate || comp.detection_rate;
       var detStr = det !== undefined ? (det * 100).toFixed(0) + '%%' : '-';
       var gradeClass = grade !== '-' && grade !== '?' ? 'grade-' + grade.toLowerCase() : '';
-      var statusColor = r.Status === 'completed' ? '#00ff88' : '#ff4444';
-      rows.push('<tr onclick="viewScanRun(' + (completed.indexOf(r)) + ')" style="cursor:pointer">' +
+      var statusText = r.Status || '-';
+      var statusColor = '#00ff88';
+      if (r.Crashed) { statusText = 'CRASHED'; statusColor = '#ff4444'; }
+      else if (r.NotInstalled) { statusText = 'NOT INSTALLED'; statusColor = '#ff8844'; }
+      else if (r.Status === 'failed') { statusColor = '#ff4444'; }
+      else if (r.Status === 'timeout') { statusText = 'TIMEOUT'; statusColor = '#ffaa00'; }
+      else if (r.Status === 'crashed') { statusColor = '#ff4444'; }
+
+      var exitInfo = '';
+      if (r.ExitCode && r.ExitCode !== 0) exitInfo = ' (exit ' + r.ExitCode + ')';
+      if (r.CrashSignal) exitInfo = ' (' + r.CrashSignal + ')';
+
+      var realIdx = completed.length - 1 - idx;
+      var actions = '<button class="scanner-btn" style="padding:2px 8px;font-size:0.72em" onclick="viewScanRun(' + realIdx + ')">View</button>';
+      if (comp.Grade || comp.grade) {
+        actions += ' <button class="cfg-btn" style="padding:2px 8px;font-size:0.72em" onclick="compareScanRun(' + realIdx + ')">Compare</button>';
+      }
+
+      rows.push('<tr>' +
         '<td style="color:#888">' + (r.CompletedAt ? new Date(r.CompletedAt).toLocaleString() : r.StartedAt ? new Date(r.StartedAt).toLocaleString() : '-') + '</td>' +
         '<td>' + escapeHtml(r.Scanner || '') + '</td>' +
         '<td' + (gradeClass ? ' class="' + gradeClass + '"' : '') + ' style="font-weight:bold;font-size:1.2em">' + escapeHtml(grade) + '</td>' +
         '<td>' + detStr + '</td>' +
-        '<td style="color:' + statusColor + '">' + escapeHtml(r.Status || '-') + '</td>' +
+        '<td style="color:' + statusColor + '">' + escapeHtml(statusText) + escapeHtml(exitInfo) + '</td>' +
+        '<td>' + actions + '</td>' +
         '</tr>');
     });
 
-    tbody.innerHTML = rows.join('') || '<tr><td colspan="5" style="color:#555;text-align:center">No scans yet</td></tr>';
+    tbody.innerHTML = rows.join('') || '<tr><td colspan="6" style="color:#555;text-align:center">No scans yet</td></tr>';
 
     // Store for click-to-view
     window._completedRuns = completed || [];
@@ -2717,11 +2961,22 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }
   };
 
+  window.compareScanRun = function(idx) {
+    var runs = window._completedRuns || [];
+    if (idx >= 0 && idx < runs.length) {
+      var run = runs[idx];
+      if (run.Comparison) {
+        renderComparison(run.Comparison);
+        toast('Showing comparison for ' + (run.Scanner || 'scan'));
+      }
+    }
+  };
+
   async function refreshScannerTab() {
     try {
-      // Auto-load profile on first call
-      if (!vulnProfile || !vulnProfile.total_vulns) {
-        generateProfile();
+      // Auto-load profile on first call (only once)
+      if (vulnProfile === null || vulnProfile === undefined) {
+        generateProfile(false);
       }
 
       var data = await api('/admin/api/scanner/results');
@@ -2826,13 +3081,19 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           document.getElementById('builtin-run-btn').style.display = 'none';
           document.getElementById('builtin-stop-btn').style.display = '';
           document.getElementById('builtin-progress-wrap').style.display = '';
-          var pct = status.progress || 0;
-          document.getElementById('builtin-progress-bar').style.width = pct + '%%';
-          document.getElementById('builtin-progress-text').textContent = pct.toFixed(0) + '%%';
-          document.getElementById('builtin-status-text').textContent = status.status_text || 'Running';
-          document.getElementById('builtin-elapsed').textContent = status.elapsed || '0s';
-          document.getElementById('builtin-req-count').textContent = (status.requests || 0) + ' requests';
-          document.getElementById('builtin-finding-count').textContent = (status.findings || 0) + ' findings';
+          var pct = status.progress_pct || 0;
+          var completed = status.completed || 0;
+          var total = status.total || 0;
+          var findings = status.findings || 0;
+          var elapsedMs = status.elapsed_ms || 0;
+          var elapsedSec = (elapsedMs / 1000).toFixed(1);
+          var rps = elapsedMs > 0 ? (completed / (elapsedMs / 1000)).toFixed(1) : '0';
+          document.getElementById('builtin-progress-bar').style.width = pct.toFixed(0) + '%%';
+          document.getElementById('builtin-progress-text').textContent = completed + ' / ' + total + ' (' + pct.toFixed(0) + '%%)';
+          document.getElementById('builtin-status-text').textContent = 'Scanning: ' + completed + '/' + total + ' tests';
+          document.getElementById('builtin-elapsed').textContent = elapsedSec + 's';
+          document.getElementById('builtin-req-count').textContent = completed + ' reqs (' + rps + '/s)';
+          document.getElementById('builtin-finding-count').textContent = findings + ' findings';
           if (!builtinPollTimer) {
             builtinPollTimer = setInterval(pollBuiltinStatus, 1500);
           }
@@ -2888,21 +3149,27 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     try {
       var status = await api('/admin/api/scanner/builtin/status');
       if (status.state === 'running') {
-        var pct = status.progress || 0;
-        document.getElementById('builtin-progress-bar').style.width = pct + '%%';
-        document.getElementById('builtin-progress-text').textContent = pct.toFixed(0) + '%%';
-        document.getElementById('builtin-status-text').textContent = status.status_text || 'Running';
-        document.getElementById('builtin-elapsed').textContent = status.elapsed || '0s';
-        document.getElementById('builtin-req-count').textContent = (status.requests || 0) + ' requests';
-        document.getElementById('builtin-finding-count').textContent = (status.findings || 0) + ' findings';
+        var pct = status.progress_pct || 0;
+        var completed = status.completed || 0;
+        var total = status.total || 0;
+        var findings = status.findings || 0;
+        var elapsedMs = status.elapsed_ms || 0;
+        var elapsedSec = (elapsedMs / 1000).toFixed(1);
+        var rps = elapsedMs > 0 ? (completed / (elapsedMs / 1000)).toFixed(1) : '0';
+        document.getElementById('builtin-progress-bar').style.width = pct.toFixed(0) + '%%';
+        document.getElementById('builtin-progress-text').textContent = completed + ' / ' + total + ' (' + pct.toFixed(0) + '%%)';
+        document.getElementById('builtin-status-text').textContent = 'Scanning: ' + completed + '/' + total + ' tests';
+        document.getElementById('builtin-elapsed').textContent = elapsedSec + 's';
+        document.getElementById('builtin-req-count').textContent = completed + ' reqs (' + rps + '/s)';
+        document.getElementById('builtin-finding-count').textContent = findings + ' findings';
       } else {
         if (builtinPollTimer) { clearInterval(builtinPollTimer); builtinPollTimer = null; }
         document.getElementById('builtin-run-btn').style.display = '';
         document.getElementById('builtin-stop-btn').style.display = 'none';
         if (status.state === 'completed') {
           document.getElementById('builtin-progress-bar').style.width = '100%%';
-          document.getElementById('builtin-progress-text').textContent = '100%%';
-          document.getElementById('builtin-status-text').textContent = 'Completed';
+          document.getElementById('builtin-progress-text').textContent = 'Complete';
+          document.getElementById('builtin-status-text').textContent = 'Scan completed';
           try {
             var results = await api('/admin/api/scanner/builtin/results');
             renderBuiltinResults(results);
@@ -3130,6 +3397,43 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       } else {
         pipeBody.innerHTML = '<tr><td colspan="5" style="color:#555;text-align:center">No interceptors registered</td></tr>';
       }
+
+      // Proxy runtime status
+      try {
+        var rt = await api('/admin/api/proxy/runtime');
+        var badge = document.getElementById('proxy-runtime-badge');
+        var startBtn = document.getElementById('proxy-rt-start-btn');
+        var stopBtn = document.getElementById('proxy-rt-stop-btn');
+        var restartBtn = document.getElementById('proxy-rt-restart-btn');
+        var statsDiv = document.getElementById('proxy-rt-stats');
+        if (rt.running) {
+          badge.textContent = 'RUNNING';
+          badge.style.background = '#00aa6633'; badge.style.color = '#00ff88'; badge.style.border = '1px solid #00ff88';
+          startBtn.style.display = 'none'; stopBtn.style.display = ''; restartBtn.style.display = '';
+          statsDiv.style.display = '';
+          document.getElementById('proxy-rt-reqs').textContent = (rt.requests || 0).toLocaleString();
+          document.getElementById('proxy-rt-uptime-card').textContent = fmtUptime(Math.floor(rt.uptime_seconds || 0));
+          document.getElementById('proxy-rt-mode').textContent = (rt.mode || 'transparent').toUpperCase();
+          document.getElementById('proxy-rt-uptime').textContent = fmtUptime(Math.floor(rt.uptime_seconds || 0));
+          // Update proxy status text
+          var pst = document.getElementById('proxy-status-text');
+          if (pst) pst.textContent = (rt.mode || 'transparent').toUpperCase();
+          var psd = document.getElementById('proxy-status-detail');
+          if (psd) psd.textContent = ':' + (rt.port || 8080) + ' | ' + (rt.requests || 0) + ' reqs';
+        } else {
+          badge.textContent = 'STOPPED';
+          badge.style.background = '#33000033'; badge.style.color = '#666'; badge.style.border = '1px solid #333';
+          startBtn.style.display = ''; stopBtn.style.display = 'none'; restartBtn.style.display = 'none';
+          statsDiv.style.display = 'none';
+          var pst2 = document.getElementById('proxy-status-text');
+          if (pst2) pst2.textContent = 'STOPPED';
+          var psd2 = document.getElementById('proxy-status-detail');
+          if (psd2) psd2.textContent = 'Proxy not running';
+        }
+      } catch(pe) { /* proxy runtime API may not exist */ }
+
+      // Recorder status (shared with server)
+      await refreshRecorderUI();
     } catch(e) { console.error('proxy:', e); }
   }
 
@@ -3571,6 +3875,118 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }
   };
 
+  // ------ Proxy Runtime Controls ------
+  window.startProxy = async function() {
+    var port = parseInt(document.getElementById('proxy-rt-port').value) || 8080;
+    var target = document.getElementById('proxy-rt-target').value || 'http://localhost:8765';
+    try {
+      await api('/admin/api/proxy/runtime', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'start', port: port, target: target})
+      });
+      toast('Proxy started on :' + port);
+      refreshProxy();
+    } catch(e) { toast('Failed to start proxy: ' + e.message); }
+  };
+
+  window.stopProxy = async function() {
+    try {
+      await api('/admin/api/proxy/runtime', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'stop'})
+      });
+      toast('Proxy stopped');
+      refreshProxy();
+    } catch(e) { toast('Failed to stop proxy: ' + e.message); }
+  };
+
+  window.restartProxy = async function() {
+    try {
+      await api('/admin/api/proxy/runtime', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'restart'})
+      });
+      toast('Proxy restarted');
+      refreshProxy();
+    } catch(e) { toast('Failed to restart proxy: ' + e.message); }
+  };
+
+  // ------ Recording Controls ------
+  window.startRecording = async function() {
+    var fmt = document.getElementById('rec-format');
+    var format = fmt ? fmt.value : 'jsonl';
+    var dur = parseInt(document.getElementById('rec-max-dur')?.value || '0');
+    var reqs = parseInt(document.getElementById('rec-max-reqs')?.value || '0');
+    try {
+      await api('/admin/api/recorder/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({format: format, max_duration_sec: dur, max_requests: reqs})
+      });
+      toast('Recording started (' + format + ')');
+      refreshRecorderUI();
+    } catch(e) { toast('Failed to start recording: ' + e.message); }
+  };
+
+  window.stopRecording = async function() {
+    try {
+      await api('/admin/api/recorder/stop', { method: 'POST' });
+      toast('Recording stopped');
+      refreshRecorderUI();
+    } catch(e) { toast('Failed to stop recording: ' + e.message); }
+  };
+
+  function fmtBytes(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+    return (b/1048576).toFixed(1) + ' MB';
+  }
+
+  async function refreshRecorderUI() {
+    try {
+      var st = await api('/admin/api/recorder/status');
+      // Server tab elements
+      var startBtn = document.getElementById('rec-start-btn');
+      var stopBtn = document.getElementById('rec-stop-btn');
+      var statusEl = document.getElementById('rec-status');
+      var statsDiv = document.getElementById('rec-stats');
+      // Proxy tab elements
+      var pStartBtn = document.getElementById('proxy-rec-start-btn');
+      var pStopBtn = document.getElementById('proxy-rec-stop-btn');
+      var pStatusEl = document.getElementById('proxy-rec-status');
+
+      if (st.recording) {
+        if (startBtn) startBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = '';
+        if (statusEl) { statusEl.style.color = '#00ff88'; statusEl.textContent = 'Recording (' + (st.format || 'jsonl') + ')'; }
+        if (statsDiv) statsDiv.style.display = '';
+        var countEl = document.getElementById('rec-count');
+        if (countEl) countEl.textContent = (st.records || 0).toLocaleString();
+        var sizeEl = document.getElementById('rec-size');
+        if (sizeEl) sizeEl.textContent = fmtBytes(st.size_bytes || 0);
+        var elapEl = document.getElementById('rec-elapsed');
+        if (elapEl) elapEl.textContent = (st.elapsed_sec || 0).toFixed(0) + 's';
+        var fileEl = document.getElementById('rec-file');
+        if (fileEl) fileEl.textContent = st.file_name || '--';
+        // Proxy tab
+        if (pStartBtn) pStartBtn.style.display = 'none';
+        if (pStopBtn) pStopBtn.style.display = '';
+        if (pStatusEl) { pStatusEl.style.color = '#00ff88'; pStatusEl.textContent = 'Recording: ' + (st.records||0) + ' records'; }
+      } else {
+        if (startBtn) startBtn.style.display = '';
+        if (stopBtn) stopBtn.style.display = 'none';
+        if (statusEl) { statusEl.style.color = '#555'; statusEl.textContent = 'Idle'; }
+        if (statsDiv) statsDiv.style.display = 'none';
+        if (pStartBtn) pStartBtn.style.display = '';
+        if (pStopBtn) pStopBtn.style.display = 'none';
+        if (pStatusEl) { pStatusEl.style.color = '#555'; pStatusEl.textContent = 'Idle'; }
+      }
+    } catch(e) { /* recorder API may not exist */ }
+  }
+
   // ------ Server panel refresh ------
   async function refreshServer() {
     // Update server status bar
@@ -3601,6 +4017,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       else if (id === 'srv-sessions') await refreshSessions();
       else if (id === 'srv-log') await refreshLog();
       else if (id === 'srv-traffic') await refreshTraffic();
+      else if (id === 'srv-recording') await refreshRecorderUI();
     }
   }
 
