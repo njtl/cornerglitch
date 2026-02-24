@@ -26,6 +26,9 @@ playwright-report/
 # Secrets
 .env
 
+# Runtime state
+.glitch-state.json
+
 # OS
 .DS_Store
 Thumbs.db

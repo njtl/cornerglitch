@@ -57,7 +57,7 @@ If your service survives Glitch, it can handle production.
 go build -o glitch ./cmd/glitch
 ./glitch                                    # serves on :8765, dashboard on :8766
 ./glitch -port 9000 -dash-port 9001         # custom ports
-./glitch -config config.json                # load saved configuration
+./glitch -config config.json                # load saved configuration (overrides auto-saved state)
 ./glitch -nightmare                         # nightmare mode
 GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag, or .env file)
 ```
@@ -115,6 +115,7 @@ make k8s-deploy                             # deploy to Kubernetes
 - Traffic recording in JSONL and PCAP formats with replay support
 - Spider data generation for crawler discovery
 - Full admin panel with 5-tab layout (Dashboard, Server, Scanner, Proxy, Settings), three-column dashboard grouping by subsystem, clickable clients with detail/override, group-level preset buttons (All On/Off, Off/Low/Med/High/Max), per-mode nightmare toggles, feature flags, tunable parameters, and config import/export
+- Settings auto-persist across restarts (saved to `.glitch-state.json` on every change, auto-loaded on startup)
 - Password-protected admin panel via `GLITCH_ADMIN_PASSWORD` env var (or `.env` file) or `-admin-password` flag
 
 ### Glitch Scanner (client emulator)
