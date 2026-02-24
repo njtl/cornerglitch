@@ -60,6 +60,9 @@ type Engine struct {
 	total     atomic.Int64
 	found     atomic.Int64
 
+	// Phase tracking for UI feedback during crawl/generation phases.
+	phase atomic.Value // string: "init", "crawling", "generating", "scanning", "done"
+
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
@@ -106,6 +109,7 @@ func NewEngine(config *Config) *Engine {
 		modules:  make([]AttackModule, 0),
 		reporter: NewReporter(),
 	}
+	e.phase.Store("init")
 
 	e.crawler = NewCrawler(config, client)
 
@@ -147,6 +151,7 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 	// Give crawl at most 30% of the remaining time so attacks get the rest.
 	var crawlResults []CrawlResult
 	if e.config.CrawlFirst {
+		e.phase.Store("crawling")
 		crawlBudget := 15 * time.Second // default
 		if deadline, ok := ctx.Deadline(); ok {
 			remaining := time.Until(deadline)
@@ -172,6 +177,7 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 	}
 
 	// ---- Phase 2: generate attack requests ----
+	e.phase.Store("generating")
 	requests := e.generateRequests(crawlResults)
 	e.total.Store(int64(len(requests)))
 	e.completed.Store(0)
@@ -183,6 +189,7 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 	}
 
 	// ---- Phase 3: execute via worker pool with rate limiting ----
+	e.phase.Store("scanning")
 	err := e.executeAll(ctx, requests)
 	if err != nil && ctx.Err() != nil {
 		// Scan was cancelled or duration expired; build partial report.
@@ -191,6 +198,7 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 	}
 
 	// ---- Phase 4: build report ----
+	e.phase.Store("done")
 	completedAt := time.Now()
 	report := e.reporter.BuildReport(e.config, startedAt, completedAt)
 	return report, nil
@@ -209,6 +217,16 @@ func (e *Engine) Stop() {
 // been completed, the total count, and how many findings exist so far.
 func (e *Engine) Progress() (completed, total int, findings int) {
 	return int(e.completed.Load()), int(e.total.Load()), int(e.found.Load())
+}
+
+// Phase returns the current scan phase: "init", "crawling", "generating",
+// "scanning", or "done".
+func (e *Engine) Phase() string {
+	v := e.phase.Load()
+	if v == nil {
+		return "init"
+	}
+	return v.(string)
 }
 
 // ---------------------------------------------------------------------------
