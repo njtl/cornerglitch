@@ -1971,14 +1971,21 @@ func restoreServerNightmare() {
 	}
 }
 
-// applyProxyNightmare sets proxy to nightmare mode.
+// applyProxyNightmare snapshots current proxy mode and sets nightmare mode.
+// Must be called with globalNightmare.mu held.
 func applyProxyNightmare(s *Server) {
+	globalNightmare.PreviousProxyMode = globalProxyConfig.GetMode()
 	globalProxyConfig.SetMode("nightmare")
 }
 
-// restoreProxyNightmare sets proxy back to transparent.
+// restoreProxyNightmare restores proxy to its previous mode.
+// Must be called with globalNightmare.mu held.
 func restoreProxyNightmare(s *Server) {
-	globalProxyConfig.SetMode("transparent")
+	prev := globalNightmare.PreviousProxyMode
+	if prev == "" || prev == "nightmare" {
+		prev = "transparent"
+	}
+	globalProxyConfig.SetMode(prev)
 }
 
 // ---------------------------------------------------------------------------

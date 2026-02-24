@@ -69,6 +69,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     background: #1a1a1a;
     border-color: #00ff8844;
   }
+  .tab[data-mode="server"].active { color: #00ff88; border-color: #00ff8844; }
+  .tab[data-mode="scanner"].active { color: #00ccff; border-color: #00ccff44; }
+  .tab[data-mode="proxy"].active { color: #ffaa00; border-color: #ffaa0044; }
   .panel { display: none; }
   .panel.active { display: block; }
 
@@ -538,11 +541,17 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   .nightmare-bar.off { background: #111; border: 1px solid #1a1a1a; color: #555; }
   .nightmare-bar.on { background: #ff000015; border: 1px solid #ff4444; color: #ff4444; animation: nightmare-pulse 2s infinite; }
   @keyframes nightmare-pulse { 0%%,100%% { box-shadow: 0 0 5px #ff000033; } 50%% { box-shadow: 0 0 20px #ff000066; } }
+  body.nightmare-active { background: #0a0000; }
+  body.nightmare-active .tab { border-color: #ff444422; }
+  .tab .tab-badge { display: none; color: #ff4444; font-size: 0.7em; margin-left: 4px; }
+  body.nightmare-active .tab .tab-badge { display: inline; }
 
   /* Quick action buttons */
   .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
   .quick-action-btn { background: #1a1a1a; border: 1px solid #333; color: #ccc; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 0.82em; transition: all 0.2s; }
   .quick-action-btn:hover { border-color: #00ff88; color: #00ff88; }
+  .nightmare-btn { background: linear-gradient(135deg, #1a0000, #330000); border: 1px solid #ff4444; color: #ff4444; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 0.82em; font-weight: bold; transition: all 0.2s; }
+  .nightmare-btn:hover { background: linear-gradient(135deg, #330000, #550000); box-shadow: 0 0 10px #ff000033; }
 
   /* Scanner sub-tab buttons - override */
   .scanner-subtab-btn { background: #111; border: 1px solid #222; color: #888; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 0.82em; transition: all 0.2s; border-bottom: none; }
@@ -565,11 +574,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 <div class="subtitle">Control center for the glitch web server &middot; <span id="header-uptime" style="color:#00ccff">uptime: --</span></div>
 
 <div class="tabs">
-  <button class="tab active" onclick="showTab('dashboard')">Dashboard</button>
-  <button class="tab" onclick="showTab('server')">Server</button>
-  <button class="tab" onclick="showTab('scanner')">Scanner</button>
-  <button class="tab" onclick="showTab('proxy')">Proxy</button>
-  <button class="tab" onclick="showTab('settings')">Settings</button>
+  <button class="tab active" onclick="showTab('dashboard')" data-mode="">Dashboard</button>
+  <button class="tab" onclick="showTab('server')" data-mode="server">Server<span class="tab-badge">!!</span></button>
+  <button class="tab" onclick="showTab('scanner')" data-mode="scanner">Scanner<span class="tab-badge">!!</span></button>
+  <button class="tab" onclick="showTab('proxy')" data-mode="proxy">Proxy<span class="tab-badge">!!</span></button>
+  <button class="tab" onclick="showTab('settings')" data-mode="">Settings</button>
 </div>
 
 <!-- ==================== DASHBOARD TAB ==================== -->
@@ -627,7 +636,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   <!-- Quick Actions -->
   <div class="quick-actions">
-    <button class="quick-action-btn" onclick="toggleNightmareAll()" id="dash-nightmare-btn">Enable Nightmare</button>
+    <button class="nightmare-btn" onclick="toggleNightmareAll()" id="dash-nightmare-btn">Enable Nightmare</button>
     <button class="quick-action-btn" onclick="showTab('server');setTimeout(function(){toggleServerSection('log')},100)">View Server Logs</button>
     <button class="quick-action-btn" onclick="showTab('scanner');switchScannerSubtab('builtin')">Run Scanner</button>
     <button class="quick-action-btn" onclick="showTab('proxy')">View Proxy</button>
@@ -635,6 +644,15 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 </div>
 
 <div id="panel-server" class="panel">
+
+  <!-- Server Status Bar -->
+  <div style="display:flex;align-items:center;justify-content:space-between;background:#111;border:1px solid #00ff8833;border-radius:6px;padding:10px 16px;margin-bottom:14px;font-size:0.82em">
+    <span style="color:#00ff88;font-weight:bold">SERVER STATUS: <span id="srv-status-text">RUNNING</span></span>
+    <span style="color:#888">Error Rate: <span id="srv-status-errrate" style="color:#ffaa00">--</span></span>
+    <span style="color:#888">Clients: <span id="srv-status-clients" style="color:#00ccff">--</span></span>
+    <span style="color:#888">Features: <span id="srv-status-features" style="color:#00ff88">--</span></span>
+    <button class="nightmare-btn" onclick="toggleNightmareMode('server')" id="srv-nightmare-btn" style="padding:4px 12px;font-size:0.85em">Nightmare: OFF</button>
+  </div>
 
   <!-- ====== Feature Toggles ====== -->
   <div class="srv-section open" id="srv-features">
@@ -723,16 +741,39 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- ====== Behavior & Tuning ====== -->
-  <div class="srv-section" id="srv-behavior">
-    <div class="srv-section-header" onclick="toggleServerSection('behavior')">
-      <span class="srv-title">Behavior &amp; Tuning</span>
+  <!-- ====== Labyrinth ====== -->
+  <div class="srv-section" id="srv-labyrinth">
+    <div class="srv-section-header" onclick="toggleServerSection('labyrinth')">
+      <span class="srv-title">Labyrinth</span>
       <span class="srv-arrow">&#9654;</span>
     </div>
     <div class="srv-section-body">
-      <h2 style="font-size:0.9em;margin-bottom:8px">// Advanced Tuning</h2>
-      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Fine-grained controls for traps, adaptive behavior, and caching.</p>
-      <div id="advanced-sliders"></div>
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Controls for the infinite procedural page graph that traps scrapers.</p>
+      <div id="labyrinth-sliders"></div>
+    </div>
+  </div>
+
+  <!-- ====== Adaptive Behavior ====== -->
+  <div class="srv-section" id="srv-adaptive">
+    <div class="srv-section-header" onclick="toggleServerSection('adaptive')">
+      <span class="srv-title">Adaptive Behavior</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Controls for how the server adapts to client behavior over time.</p>
+      <div id="adaptive-sliders"></div>
+    </div>
+  </div>
+
+  <!-- ====== Traps & Detection ====== -->
+  <div class="srv-section" id="srv-traps">
+    <div class="srv-section-header" onclick="toggleServerSection('traps')">
+      <span class="srv-title">Traps &amp; Detection</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Captcha triggers, cookie traps, JS challenges, bot detection thresholds.</p>
+      <div id="traps-sliders"></div>
     </div>
   </div>
 
@@ -879,6 +920,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
 <!-- ==================== SCANNER TAB ==================== -->
 <div id="panel-scanner" class="panel">
+
+  <!-- Scanner Status Bar -->
+  <div style="display:flex;align-items:center;justify-content:space-between;background:#111;border:1px solid #00ccff33;border-radius:6px;padding:10px 16px;margin-bottom:14px;font-size:0.82em">
+    <span style="color:#00ccff;font-weight:bold">SCANNER STATUS: <span id="scan-status-text">IDLE</span></span>
+    <span style="color:#888" id="scan-status-detail">No active scans</span>
+    <button class="nightmare-btn" onclick="toggleNightmareMode('scanner')" id="scan-nightmare-btn" style="padding:4px 12px;font-size:0.85em">Nightmare: OFF</button>
+  </div>
 
   <!-- Sub-tab navigation -->
   <div style="display:flex;gap:8px;margin-bottom:16px">
@@ -1236,6 +1284,12 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
 <!-- ==================== PROXY TAB ==================== -->
 <div id="panel-proxy" class="panel">
+  <!-- Proxy Status Bar -->
+  <div style="display:flex;align-items:center;justify-content:space-between;background:#111;border:1px solid #ffaa0033;border-radius:6px;padding:10px 16px;margin-bottom:14px;font-size:0.82em">
+    <span style="color:#ffaa00;font-weight:bold">PROXY STATUS: <span id="proxy-status-text">TRANSPARENT</span></span>
+    <span style="color:#888" id="proxy-status-detail">--</span>
+    <button class="nightmare-btn" onclick="toggleNightmareMode('proxy')" id="proxy-nightmare-btn" style="padding:4px 12px;font-size:0.85em">Nightmare: OFF</button>
+  </div>
   <div class="grid" id="proxy-metrics"></div>
 
   <!-- Proxy Configuration -->
@@ -1367,7 +1421,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <div class="section">
     <h2>// Admin Password</h2>
     <p style="color:#666;font-size:0.8em;margin-bottom:12px">Change the admin panel password. Current password is required.</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:600px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;max-width:800px">
       <div>
         <div class="label" style="margin-bottom:4px">Current Password</div>
         <input type="password" id="settings-current-pw" class="settings-input" placeholder="Current password">
@@ -1375,6 +1429,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div>
         <div class="label" style="margin-bottom:4px">New Password</div>
         <input type="password" id="settings-new-pw" class="settings-input" placeholder="New password (min 4 chars)">
+      </div>
+      <div>
+        <div class="label" style="margin-bottom:4px">Confirm Password</div>
+        <input type="password" id="settings-confirm-pw" class="settings-input" placeholder="Confirm new password">
       </div>
     </div>
     <button class="scanner-btn" onclick="changePassword()" style="margin-top:12px">Change Password</button>
@@ -1569,7 +1627,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
       // Clients table
       const clients = (cl.clients || []).sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
-      document.getElementById('dash-clients-body').innerHTML = clients.slice(0, 20).map(c =>
+      document.getElementById('dash-clients-body').innerHTML = clients.slice(0, 10).map(c =>
         '<tr>' +
         '<td>' + escapeHtml(shortID(c.client_id)) + '</td>' +
         '<td>' + c.total_requests + '</td>' +
@@ -1918,25 +1976,34 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
       const cfg = await api('/admin/api/config');
       document.getElementById('sliders').innerHTML =
-        slider('max_labyrinth_depth', 'Max Labyrinth Depth', cfg.max_labyrinth_depth, 1, 100, 1) +
         slider('error_rate_multiplier', 'Error Rate Multiplier', cfg.error_rate_multiplier, 0, 5, 0.1) +
-        slider('captcha_trigger_thresh', 'CAPTCHA Trigger Threshold', cfg.captcha_trigger_thresh, 0, 500, 1) +
         slider('block_chance', 'Random Block Chance', cfg.block_chance, 0, 1, 0.01) +
         slider('block_duration_sec', 'Block Duration (sec)', cfg.block_duration_sec, 1, 3600, 1) +
-        slider('bot_score_threshold', 'Bot Score Threshold', cfg.bot_score_threshold, 0, 100, 1) +
-        slider('header_corrupt_level', 'Header Corruption Level (0-4)', cfg.header_corrupt_level, 0, 4, 1) +
-        slider('delay_min_ms', 'Delay Min (ms)', cfg.delay_min_ms, 0, 10000, 100) +
-        slider('delay_max_ms', 'Delay Max (ms)', cfg.delay_max_ms, 0, 30000, 100) +
-        slider('labyrinth_link_density', 'Labyrinth Links/Page', cfg.labyrinth_link_density, 1, 20, 1) +
-        slider('adaptive_interval_sec', 'Adaptive Re-eval Interval (sec)', cfg.adaptive_interval_sec, 5, 300, 5);
+        slider('header_corrupt_level', 'Header Corruption Level (0-4)', cfg.header_corrupt_level, 0, 4, 1);
 
-      // Advanced sliders
-      document.getElementById('advanced-sliders').innerHTML =
+      // Labyrinth sliders
+      var labEl = document.getElementById('labyrinth-sliders');
+      if (labEl) labEl.innerHTML =
+        slider('max_labyrinth_depth', 'Max Labyrinth Depth', cfg.max_labyrinth_depth, 1, 100, 1) +
+        slider('labyrinth_link_density', 'Labyrinth Links/Page', cfg.labyrinth_link_density, 1, 20, 1) +
+        slider('adaptive_labyrinth_paths', 'Adaptive Labyrinth Paths', cfg.adaptive_labyrinth_paths || 5, 1, 50, 1);
+
+      // Adaptive behavior sliders
+      var adaptEl = document.getElementById('adaptive-sliders');
+      if (adaptEl) adaptEl.innerHTML =
+        slider('adaptive_interval_sec', 'Adaptive Re-eval Interval (sec)', cfg.adaptive_interval_sec, 5, 300, 5) +
+        slider('adaptive_aggressive_rps', 'Adaptive Aggressive RPS', cfg.adaptive_aggressive_rps || 10, 1, 100, 1) +
+        slider('delay_min_ms', 'Delay Min (ms)', cfg.delay_min_ms, 0, 10000, 100) +
+        slider('delay_max_ms', 'Delay Max (ms)', cfg.delay_max_ms, 0, 30000, 100);
+
+      // Traps & detection sliders
+      var trapsEl = document.getElementById('traps-sliders');
+      if (trapsEl) trapsEl.innerHTML =
+        slider('captcha_trigger_thresh', 'CAPTCHA Trigger Threshold', cfg.captcha_trigger_thresh, 0, 500, 1) +
         slider('cookie_trap_frequency', 'Cookie Trap Frequency', cfg.cookie_trap_frequency || 3, 0, 20, 1) +
         slider('js_trap_difficulty', 'JS Trap Difficulty', cfg.js_trap_difficulty || 2, 0, 5, 1) +
-        slider('content_cache_ttl_sec', 'Content Cache TTL (sec)', cfg.content_cache_ttl_sec || 60, 0, 3600, 10) +
-        slider('adaptive_aggressive_rps', 'Adaptive Aggressive RPS', cfg.adaptive_aggressive_rps || 10, 1, 100, 1) +
-        slider('adaptive_labyrinth_paths', 'Adaptive Labyrinth Paths', cfg.adaptive_labyrinth_paths || 5, 1, 50, 1);
+        slider('bot_score_threshold', 'Bot Score Threshold', cfg.bot_score_threshold, 0, 100, 1) +
+        slider('content_cache_ttl_sec', 'Content Cache TTL (sec)', cfg.content_cache_ttl_sec || 60, 0, 3600, 10);
 
       // Dropdowns
       if (cfg.honeypot_response_style) {
@@ -3461,6 +3528,16 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       }
       var btn = document.getElementById('dash-nightmare-btn');
       if (btn) btn.textContent = anyActive ? 'Disable Nightmare' : 'Enable Nightmare';
+      // Body nightmare class
+      if (anyActive) document.body.classList.add('nightmare-active');
+      else document.body.classList.remove('nightmare-active');
+      // Per-mode nightmare buttons
+      var srvBtn = document.getElementById('srv-nightmare-btn');
+      if (srvBtn) srvBtn.textContent = 'Nightmare: ' + (d.server ? 'ON' : 'OFF');
+      var scanBtn = document.getElementById('scan-nightmare-btn');
+      if (scanBtn) scanBtn.textContent = 'Nightmare: ' + (d.scanner ? 'ON' : 'OFF');
+      var proxyBtn = document.getElementById('proxy-nightmare-btn');
+      if (proxyBtn) proxyBtn.textContent = 'Nightmare: ' + (d.proxy ? 'ON' : 'OFF');
     } catch(e) {}
   }
 
@@ -3468,8 +3545,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   window.changePassword = async function() {
     var current = document.getElementById('settings-current-pw').value;
     var newPw = document.getElementById('settings-new-pw').value;
+    var confirmPw = document.getElementById('settings-confirm-pw').value;
     var status = document.getElementById('settings-pw-status');
-    if (!current || !newPw) { status.style.color = '#ff4444'; status.textContent = 'Both fields required'; return; }
+    if (!current || !newPw) { status.style.color = '#ff4444'; status.textContent = 'All fields required'; return; }
+    if (newPw !== confirmPw) { status.style.color = '#ff4444'; status.textContent = 'New passwords do not match'; return; }
     try {
       var resp = await fetch(API + '/admin/api/password', {
         method: 'POST',
@@ -3481,6 +3560,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         status.textContent = 'Password changed. You may need to re-login.';
         document.getElementById('settings-current-pw').value = '';
         document.getElementById('settings-new-pw').value = '';
+        document.getElementById('settings-confirm-pw').value = '';
       } else {
         status.style.color = '#ff4444';
         status.textContent = resp.error || 'Failed';
@@ -3493,11 +3573,30 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   // ------ Server panel refresh ------
   async function refreshServer() {
+    // Update server status bar
+    try {
+      var m = await api('/api/metrics');
+      var statusText = document.getElementById('srv-status-text');
+      if (statusText) statusText.textContent = 'RUNNING';
+      var errRate = document.getElementById('srv-status-errrate');
+      if (errRate) errRate.textContent = ((m.error_rate_pct||0).toFixed(1)) + '%%';
+      var clients = document.getElementById('srv-status-clients');
+      if (clients) clients.textContent = m.unique_clients || 0;
+    } catch(e) {}
+    // Count enabled features
+    try {
+      var f = await api('/admin/api/features');
+      var total = Object.keys(f).length;
+      var enabled = Object.values(f).filter(function(v){return v}).length;
+      var featEl = document.getElementById('srv-status-features');
+      if (featEl) featEl.textContent = enabled + '/' + total + ' enabled';
+    } catch(e) {}
+
     // Only refresh the open sections to avoid unnecessary API calls
     var sections = document.querySelectorAll('.srv-section.open');
     for (var i = 0; i < sections.length; i++) {
       var id = sections[i].id;
-      if (id === 'srv-features' || id === 'srv-errors' || id === 'srv-content' || id === 'srv-behavior' || id === 'srv-spider') await refreshControls();
+      if (id === 'srv-features' || id === 'srv-errors' || id === 'srv-content' || id === 'srv-labyrinth' || id === 'srv-adaptive' || id === 'srv-traps' || id === 'srv-spider') await refreshControls();
       else if (id === 'srv-vulns') await refreshVulns();
       else if (id === 'srv-sessions') await refreshSessions();
       else if (id === 'srv-log') await refreshLog();
@@ -3546,7 +3645,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     await refresh();
   })();
 
-  setInterval(refresh, 2000);
+  setInterval(refresh, 3000);
 })();
 </script>
 </body>
