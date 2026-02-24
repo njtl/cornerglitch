@@ -139,6 +139,22 @@ go test ./tests/acceptance/ -count=1 -timeout 120s
 go test ./tests/integration/ -count=1 -timeout 60s
 ```
 
+### Regression Tests
+
+```bash
+go test ./tests/regression/ -count=1 -v   # regression suite
+```
+
+**Every bug fix MUST include a regression test** in `tests/regression/regression_test.go`:
+
+- **Naming**: `TestRegression_<BugID>_<ShortDescription>` — BugID is task number or commit hash
+- **Documentation**: Each test group starts with a comment block explaining:
+  - What was broken (root cause)
+  - How it was fixed
+  - What the test verifies
+- **JSON field conventions**: All Go structs serving JSON APIs use snake_case JSON tags. JS must reference snake_case property names to match. Add regression tests that marshal structs and verify field names are snake_case.
+- **Structural conventions**: MatchedVuln has nested `{expected: VulnCategory, found: Finding}`. VulnCategory.Endpoints is an array (not singular). Finding uses `title` and `url` (not `name` and `endpoint`). scanner_crashed/scanner_timed_out/scanner_errors are top-level on ComparisonReport (not nested in scanner_health).
+
 ### PM Acceptance Testing
 
 **This is the default quality gate.** After any implementation work, the PM agent runs acceptance tests against the live application and produces a structured pass/fail report. Work is not considered done until PM acceptance passes.

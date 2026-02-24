@@ -184,6 +184,7 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 	e.found.Store(0)
 
 	if len(requests) == 0 {
+		e.phase.Store("done")
 		completedAt := time.Now()
 		return e.reporter.BuildReport(e.config, startedAt, completedAt), nil
 	}
