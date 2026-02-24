@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -791,5 +792,282 @@ func TestReplayStatusIncludesMetadata(t *testing.T) {
 	meta := resp["metadata"].(map[string]interface{})
 	if int(meta["total_packets"].(float64)) != 1 {
 		t.Errorf("metadata.total_packets: got %v, want 1", meta["total_packets"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NightmareState tests
+// ---------------------------------------------------------------------------
+
+func TestNightmareState_Default(t *testing.T) {
+	ns := &NightmareState{}
+	snap := ns.Snapshot()
+	if snap["server"] || snap["scanner"] || snap["proxy"] {
+		t.Error("nightmare modes should be off by default")
+	}
+	if ns.IsAnyActive() {
+		t.Error("IsAnyActive should be false by default")
+	}
+}
+
+func TestNightmareState_ToggleModes(t *testing.T) {
+	ns := &NightmareState{}
+	ns.mu.Lock()
+	ns.ServerActive = true
+	ns.mu.Unlock()
+
+	if !ns.IsAnyActive() {
+		t.Error("IsAnyActive should be true when server is active")
+	}
+
+	modes := ns.ActiveModes()
+	if len(modes) != 1 || modes[0] != "Server" {
+		t.Errorf("ActiveModes: got %v, want [Server]", modes)
+	}
+
+	ns.mu.Lock()
+	ns.ScannerActive = true
+	ns.ProxyActive = true
+	ns.mu.Unlock()
+
+	modes = ns.ActiveModes()
+	if len(modes) != 3 {
+		t.Errorf("ActiveModes: got %d, want 3", len(modes))
+	}
+
+	snap := ns.Snapshot()
+	if !snap["server"] || !snap["scanner"] || !snap["proxy"] {
+		t.Error("all modes should be active")
+	}
+}
+
+func TestNightmareState_Snapshot(t *testing.T) {
+	ns := &NightmareState{}
+	ns.mu.Lock()
+	ns.ProxyActive = true
+	ns.mu.Unlock()
+
+	snap := ns.Snapshot()
+	if snap["server"] {
+		t.Error("server should be false")
+	}
+	if snap["scanner"] {
+		t.Error("scanner should be false")
+	}
+	if !snap["proxy"] {
+		t.Error("proxy should be true")
+	}
+}
+
+func TestFeatureFlags_SetAll(t *testing.T) {
+	ff := NewFeatureFlags()
+	// Disable all
+	ff.SetAll(false)
+	snap := ff.Snapshot()
+	for name, enabled := range snap {
+		if enabled {
+			t.Errorf("flag %q should be disabled after SetAll(false)", name)
+		}
+	}
+	// Enable all
+	ff.SetAll(true)
+	snap = ff.Snapshot()
+	for name, enabled := range snap {
+		if !enabled {
+			t.Errorf("flag %q should be enabled after SetAll(true)", name)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Nightmare API tests
+// ---------------------------------------------------------------------------
+
+func TestAPI_NightmareGet(t *testing.T) {
+	// Reset state
+	globalNightmare.mu.Lock()
+	globalNightmare.ServerActive = false
+	globalNightmare.ScannerActive = false
+	globalNightmare.ProxyActive = false
+	globalNightmare.mu.Unlock()
+
+	mux := http.NewServeMux()
+	s := &Server{}
+	RegisterAdminRoutes(mux, s)
+
+	req := httptest.NewRequest("GET", "/admin/api/nightmare", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status: %d", rec.Code)
+	}
+
+	var resp map[string]bool
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["server"] || resp["scanner"] || resp["proxy"] {
+		t.Error("all modes should be off initially")
+	}
+}
+
+func TestAPI_NightmareToggleServer(t *testing.T) {
+	globalNightmare.mu.Lock()
+	globalNightmare.ServerActive = false
+	globalNightmare.ScannerActive = false
+	globalNightmare.ProxyActive = false
+	globalNightmare.mu.Unlock()
+
+	mux := http.NewServeMux()
+	s := &Server{}
+	RegisterAdminRoutes(mux, s)
+
+	body := `{"mode":"server","enabled":true}`
+	req := httptest.NewRequest("POST", "/admin/api/nightmare", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status: %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["ok"] != true {
+		t.Error("expected ok: true")
+	}
+
+	state := resp["state"].(map[string]interface{})
+	if state["server"] != true {
+		t.Error("server nightmare should be active")
+	}
+	if state["scanner"] == true || state["proxy"] == true {
+		t.Error("scanner and proxy should not be affected")
+	}
+
+	// Restore
+	globalNightmare.mu.Lock()
+	globalNightmare.ServerActive = false
+	globalNightmare.mu.Unlock()
+}
+
+func TestAPI_NightmareInvalidMode(t *testing.T) {
+	mux := http.NewServeMux()
+	s := &Server{}
+	RegisterAdminRoutes(mux, s)
+
+	body := `{"mode":"invalid","enabled":true}`
+	req := httptest.NewRequest("POST", "/admin/api/nightmare", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 400 {
+		t.Errorf("expected 400 for invalid mode, got %d", rec.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Password change tests
+// ---------------------------------------------------------------------------
+
+func TestChangePassword_Success(t *testing.T) {
+	// Set a known password
+	SetAdminPassword("testpass123")
+	// Clear sessions for clean test
+	sessions = sync.Map{}
+
+	err := ChangePassword("testpass123", "newpass456")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify new password works
+	if !checkPassword("newpass456") {
+		t.Error("new password should work after change")
+	}
+	if checkPassword("testpass123") {
+		t.Error("old password should not work after change")
+	}
+}
+
+func TestChangePassword_WrongCurrent(t *testing.T) {
+	SetAdminPassword("correctpw")
+
+	err := ChangePassword("wrongpw", "newpw")
+	if err == nil {
+		t.Error("expected error for wrong current password")
+	}
+}
+
+func TestAPI_PasswordChange(t *testing.T) {
+	SetAdminPassword("apitest123")
+
+	mux := http.NewServeMux()
+	s := &Server{}
+	RegisterAdminRoutes(mux, s)
+
+	body := `{"current":"apitest123","new":"newpass789"}`
+	req := httptest.NewRequest("POST", "/admin/api/password", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status: %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["ok"] != true {
+		t.Error("expected ok: true")
+	}
+}
+
+func TestAPI_PasswordChangeTooShort(t *testing.T) {
+	SetAdminPassword("apitest123")
+
+	mux := http.NewServeMux()
+	s := &Server{}
+	RegisterAdminRoutes(mux, s)
+
+	body := `{"current":"apitest123","new":"ab"}`
+	req := httptest.NewRequest("POST", "/admin/api/password", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 400 {
+		t.Errorf("expected 400 for short password, got %d", rec.Code)
+	}
+}
+
+func TestAPI_PasswordChangeWrongCurrent(t *testing.T) {
+	SetAdminPassword("correct789")
+
+	mux := http.NewServeMux()
+	s := &Server{}
+	RegisterAdminRoutes(mux, s)
+
+	body := `{"current":"wrong","new":"newpass"}`
+	req := httptest.NewRequest("POST", "/admin/api/password", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 401 {
+		t.Errorf("expected 401 for wrong password, got %d", rec.Code)
+	}
+}
+
+func TestGetNightmareState_Singleton(t *testing.T) {
+	ns := GetNightmareState()
+	if ns == nil {
+		t.Fatal("GetNightmareState should not return nil")
+	}
+	// Should be the same instance
+	ns2 := GetNightmareState()
+	if ns != ns2 {
+		t.Error("GetNightmareState should return the same singleton")
 	}
 }
