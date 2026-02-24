@@ -1011,34 +1011,40 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <div class="section">
       <h2>// Launch External Scanner</h2>
       <p style="color:#888;font-size:0.82em;margin-bottom:12px">Launch a scanner against this server (requires tool to be installed on host).</p>
+
+      <!-- Active Scanners Banner -->
+      <div id="active-scanners-banner" style="display:none;background:#1a1a00;border:1px solid #333300;border-radius:6px;padding:10px 14px;margin-bottom:12px">
+        <div style="color:#ffaa00;font-weight:bold;font-size:0.85em;margin-bottom:6px">Active Scanners</div>
+        <div id="active-scanners-list"></div>
+      </div>
+
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
-        <div class="scanner-panel" style="margin-bottom:0">
+        <div class="scanner-panel" id="scanner-card-nuclei" style="margin-bottom:0;display:flex;flex-direction:column">
           <h3>Nuclei</h3>
-          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Template-based scanner. Fast, accurate, low false positives.</p>
-          <button class="scanner-btn" onclick="runScanner('nuclei')">Launch</button>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px;flex:1">Template-based scanner. Fast, accurate, low false positives.</p>
+          <button class="scanner-btn" id="scanner-btn-nuclei" onclick="runScanner('nuclei')">Launch</button>
         </div>
-        <div class="scanner-panel" style="margin-bottom:0">
+        <div class="scanner-panel" id="scanner-card-nikto" style="margin-bottom:0;display:flex;flex-direction:column">
           <h3>Nikto</h3>
-          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Classic web server scanner. Checks for misconfigurations and known vulns.</p>
-          <button class="scanner-btn" onclick="runScanner('nikto')">Launch</button>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px;flex:1">Classic web server scanner. Checks for misconfigurations and known vulns.</p>
+          <button class="scanner-btn" id="scanner-btn-nikto" onclick="runScanner('nikto')">Launch</button>
         </div>
-        <div class="scanner-panel" style="margin-bottom:0">
+        <div class="scanner-panel" id="scanner-card-nmap" style="margin-bottom:0;display:flex;flex-direction:column">
           <h3>Nmap</h3>
-          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Network mapper with NSE scripts for service and vuln detection.</p>
-          <button class="scanner-btn" onclick="runScanner('nmap')">Launch</button>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px;flex:1">Network mapper with NSE scripts for service and vuln detection.</p>
+          <button class="scanner-btn" id="scanner-btn-nmap" onclick="runScanner('nmap')">Launch</button>
         </div>
-        <div class="scanner-panel" style="margin-bottom:0">
+        <div class="scanner-panel" id="scanner-card-ffuf" style="margin-bottom:0;display:flex;flex-direction:column">
           <h3>ffuf</h3>
-          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Fast web fuzzer. Directory brute-forcing and parameter discovery.</p>
-          <button class="scanner-btn" onclick="runScanner('ffuf')">Launch</button>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px;flex:1">Fast web fuzzer. Directory brute-forcing and parameter discovery.</p>
+          <button class="scanner-btn" id="scanner-btn-ffuf" onclick="runScanner('ffuf')">Launch</button>
         </div>
-        <div class="scanner-panel" style="margin-bottom:0">
+        <div class="scanner-panel" id="scanner-card-wapiti" style="margin-bottom:0;display:flex;flex-direction:column">
           <h3>Wapiti</h3>
-          <p style="color:#666;font-size:0.78em;margin-bottom:8px">Black-box web app scanner. Tests for XSS, SQLi, SSRF, and more.</p>
-          <button class="scanner-btn" onclick="runScanner('wapiti')">Launch</button>
+          <p style="color:#666;font-size:0.78em;margin-bottom:8px;flex:1">Black-box web app scanner. Tests for XSS, SQLi, SSRF, and more.</p>
+          <button class="scanner-btn" id="scanner-btn-wapiti" onclick="runScanner('wapiti')">Launch</button>
         </div>
       </div>
-      <div id="scanner-run-btns" style="display:none"></div>
       <div id="scanner-run-status" style="margin-top:8px;color:#555;font-size:0.82em"></div>
     </div>
 
@@ -1063,6 +1069,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <!-- 3. Scan Results -->
     <div class="section">
       <h2>// Scan Results</h2>
+      <div id="scanner-result-tabs" style="display:none;margin-bottom:10px;border-bottom:1px solid #333;padding-bottom:6px">
+        <!-- Populated dynamically: one tab per scanner that has results -->
+      </div>
       <div id="scanner-comparison">
         <div style="color:#555">Launch an external scanner above. Results are captured and graded automatically.</div>
       </div>
@@ -2780,44 +2789,164 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var running = data.running || [];
       var completed = data.completed || [];
 
-      // Update running status
-      var statusEl = document.getElementById('scanner-run-status');
+      // Update active scanners banner
+      var banner = document.getElementById('active-scanners-banner');
+      var listEl = document.getElementById('active-scanners-list');
       if (running.length > 0) {
-        statusEl.innerHTML = running.map(function(r) {
-          return '<div style="margin:4px 0"><span style="color:#ffaa00">&#9654; ' + escapeHtml(r.scanner) + '</span> ' +
-            '<span style="color:#888">' + escapeHtml(r.status) + ' (' + escapeHtml(r.elapsed) + ')</span> ' +
-            '<button class="scanner-btn" style="padding:2px 10px;font-size:0.75em" onclick="stopScanner(\'' + escapeHtml(r.scanner) + '\')">Stop</button></div>';
+        banner.style.display = '';
+        listEl.innerHTML = running.map(function(r) {
+          return '<div style="display:flex;align-items:center;gap:8px;margin:4px 0">' +
+            '<span style="color:#ffaa00;font-weight:bold">' + escapeHtml(r.scanner) + '</span> ' +
+            '<span style="color:#888;font-size:0.82em">' + escapeHtml(r.status) + ' (' + escapeHtml(r.elapsed) + ')</span> ' +
+            '<button class="scanner-btn" style="padding:2px 10px;font-size:0.75em" onclick="stopScanner(\'' + escapeHtml(r.scanner) + '\')">Stop</button>' +
+            '</div>';
         }).join('');
-
-        // Disable run buttons while scan is active
-        document.querySelectorAll('#scanner-run-btns .scanner-btn').forEach(function(btn) {
-          var name = btn.textContent.trim();
-          var isRunning = running.some(function(r) { return r.scanner === name; });
-          if (isRunning) { btn.classList.add('running'); btn.disabled = true; }
-          else { btn.classList.remove('running'); btn.disabled = false; }
-        });
       } else {
-        if (scanPollTimer) {
-          clearInterval(scanPollTimer);
-          scanPollTimer = null;
-          statusEl.innerHTML = '<span style="color:#00ff88">No scans running</span>';
-          document.querySelectorAll('#scanner-run-btns .scanner-btn').forEach(function(btn) {
-            btn.classList.remove('running'); btn.disabled = false;
-          });
+        banner.style.display = 'none';
+      }
+
+      // Update scanner card buttons — disable running scanners
+      var scannerNames = ['nuclei', 'nikto', 'nmap', 'ffuf', 'wapiti'];
+      var runningNames = running.map(function(r) { return r.scanner; });
+      scannerNames.forEach(function(name) {
+        var btn = document.getElementById('scanner-btn-' + name);
+        var card = document.getElementById('scanner-card-' + name);
+        if (!btn || !card) return;
+        if (runningNames.indexOf(name) >= 0) {
+          btn.disabled = true;
+          btn.textContent = 'Running...';
+          btn.style.opacity = '0.5';
+          card.style.borderColor = '#ffaa00';
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'Launch';
+          btn.style.opacity = '1';
+          card.style.borderColor = '';
         }
+      });
+
+      var statusEl = document.getElementById('scanner-run-status');
+      if (running.length === 0 && scanPollTimer) {
+        clearInterval(scanPollTimer);
+        scanPollTimer = null;
+        statusEl.innerHTML = '<span style="color:#00ff88">All scans completed</span>';
+      } else if (running.length > 0) {
+        statusEl.innerHTML = '<span style="color:#ffaa00">' + running.length + ' scanner(s) active</span>';
       }
 
       // Update history from server
       renderServerHistory(completed, running);
 
-      // Show latest completed comparison report
-      if (completed.length > 0) {
-        var latest = completed[completed.length - 1];
-        if (latest.comparison) renderComparison(latest.comparison);
-        else if (latest.result) renderScanResult(latest);
-      }
+      // Build scanner result tabs for multi-scanner display
+      buildResultTabs(completed);
     } catch(e) { console.error('pollScanner:', e); }
   }
+
+  // Build tabs for each scanner that has completed results
+  function buildResultTabs(completed) {
+    var tabsEl = document.getElementById('scanner-result-tabs');
+    if (!completed || completed.length === 0) {
+      tabsEl.style.display = 'none';
+      return;
+    }
+
+    // Group completed scans by scanner name
+    var scannerRuns = {};
+    completed.forEach(function(run, idx) {
+      var name = run.scanner || 'unknown';
+      if (!scannerRuns[name]) scannerRuns[name] = [];
+      scannerRuns[name].push({run: run, idx: idx});
+    });
+
+    var scannerNames = Object.keys(scannerRuns);
+    if (scannerNames.length <= 1 && completed.length <= 1) {
+      // Only one result — show it directly without tabs
+      tabsEl.style.display = 'none';
+      if (completed.length === 1) {
+        var only = completed[0];
+        if (only.comparison) renderComparison(only.comparison, only.scanner);
+        else renderScanResult(only);
+      }
+      return;
+    }
+
+    tabsEl.style.display = '';
+    var html = '<div style="display:flex;gap:4px;flex-wrap:wrap">';
+    html += '<button class="scanner-btn" style="padding:3px 10px;font-size:0.78em' +
+      (window._activeResultTab === 'latest' || !window._activeResultTab ? ';background:#00ff88;color:#000' : '') +
+      '" onclick="showResultTab(\'latest\')">Latest</button>';
+
+    scannerNames.forEach(function(name) {
+      var runs = scannerRuns[name];
+      var label = escapeHtml(name) + ' (' + runs.length + ')';
+      var isActive = window._activeResultTab === name;
+      html += '<button class="scanner-btn" style="padding:3px 10px;font-size:0.78em' +
+        (isActive ? ';background:#00ff88;color:#000' : '') +
+        '" onclick="showResultTab(\'' + escapeHtml(name) + '\')">' + label + '</button>';
+    });
+
+    // Multi-compare button if 2+ scanners have comparison results
+    var comparableScanners = scannerNames.filter(function(name) {
+      return scannerRuns[name].some(function(r) { return r.run.comparison; });
+    });
+    if (comparableScanners.length >= 2) {
+      html += '<button class="cfg-btn" style="padding:3px 10px;font-size:0.78em;margin-left:8px" onclick="showMultiCompare()">Compare All</button>';
+    }
+    html += '</div>';
+    tabsEl.innerHTML = html;
+
+    // Show selected tab content
+    if (!window._activeResultTab || window._activeResultTab === 'latest') {
+      var latest = completed[completed.length - 1];
+      if (latest.comparison) renderComparison(latest.comparison, latest.scanner);
+      else renderScanResult(latest);
+    } else {
+      var tabRuns = scannerRuns[window._activeResultTab];
+      if (tabRuns && tabRuns.length > 0) {
+        var latestRun = tabRuns[tabRuns.length - 1].run;
+        if (latestRun.comparison) renderComparison(latestRun.comparison, latestRun.scanner);
+        else renderScanResult(latestRun);
+      }
+    }
+  }
+
+  window.showResultTab = function(tab) {
+    window._activeResultTab = tab;
+    var completed = window._completedRuns || [];
+    buildResultTabs(completed);
+  };
+
+  window.showMultiCompare = function() {
+    var completed = window._completedRuns || [];
+    var scannerBest = {};
+    completed.forEach(function(run) {
+      if (run.comparison && run.scanner) {
+        scannerBest[run.scanner] = run;
+      }
+    });
+
+    var names = Object.keys(scannerBest);
+    if (names.length < 2) { toast('Need 2+ scanner results to compare'); return; }
+
+    var html = '<h3 style="color:#00ccaa;font-size:0.9em;margin-bottom:12px">Multi-Scanner Comparison</h3>';
+    html += '<table class="findings-tbl"><thead><tr><th>Scanner</th><th>Grade</th><th>Detection</th><th>False Pos.</th><th>Accuracy</th><th>Crashed</th></tr></thead><tbody>';
+    names.forEach(function(name) {
+      var c = scannerBest[name].comparison;
+      var gradeClass = c.grade ? 'grade-' + c.grade.toLowerCase() : '';
+      html += '<tr>' +
+        '<td style="font-weight:bold">' + escapeHtml(name) + '</td>' +
+        '<td class="' + gradeClass + '" style="font-weight:bold;font-size:1.1em">' + escapeHtml(c.grade || '?') + '</td>' +
+        '<td>' + ((c.detection_rate || 0) * 100).toFixed(1) + '%%</td>' +
+        '<td>' + ((c.false_positive_rate || 0) * 100).toFixed(1) + '%%</td>' +
+        '<td>' + ((c.accuracy || 0) * 100).toFixed(1) + '%%</td>' +
+        '<td style="color:' + (c.scanner_crashed ? '#ff4444' : '#00ff88') + '">' + (c.scanner_crashed ? 'YES' : 'No') + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('scanner-comparison').innerHTML = html;
+    window._activeResultTab = 'compare';
+    document.getElementById('scanner-result-tabs').querySelectorAll('button').forEach(function(b) { b.style.background = ''; b.style.color = ''; });
+  };
 
   window.stopScanner = async function(name) {
     try {
@@ -2842,7 +2971,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({scanner: scanner, data: data})
       });
-      renderComparison(report);
+      renderComparison(report, scanner);
       toast('Comparison complete: grade ' + (report.grade || '?'));
       pollScannerStatus();
     } catch(e) {
@@ -2906,14 +3035,22 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     document.getElementById('scanner-comparison').innerHTML = html;
   }
 
-  function renderComparison(report) {
+  function renderComparison(report, scannerName) {
     var grade = (report.grade || '?').toUpperCase();
     var gradeClass = 'grade-' + grade.toLowerCase();
     var detPct = ((report.detection_rate || 0) * 100).toFixed(1);
     var fpPct = ((report.false_positive_rate || 0) * 100).toFixed(1);
     var accPct = ((report.accuracy || 0) * 100).toFixed(1);
+    var displayName = scannerName || report.scanner || 'Scanner';
 
-    var html = '<div style="display:grid;grid-template-columns:200px 1fr;gap:20px">' +
+    var html = '<div style="margin-bottom:10px;display:flex;align-items:center;gap:10px">' +
+      '<span style="color:#00ccaa;font-weight:bold;font-size:1.1em">' + escapeHtml(displayName) + '</span>' +
+      '<span style="color:#555;font-size:0.82em">|</span>' +
+      '<span style="color:#888;font-size:0.82em">Expected: ' + (report.expected_vulns || 0) + ' vulns</span>' +
+      '<span style="color:#888;font-size:0.82em">Found: ' + (report.found_vulns || 0) + '</span>' +
+      '</div>';
+
+    html += '<div style="display:grid;grid-template-columns:200px 1fr;gap:20px">' +
       '<div>' +
         '<div class="grade ' + gradeClass + '">' + escapeHtml(grade) + '</div>' +
         '<div style="text-align:center;color:#888;font-size:0.85em">Scanner Grade</div>' +
@@ -3075,7 +3212,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var runs = window._completedRuns || [];
     if (idx >= 0 && idx < runs.length) {
       var run = runs[idx];
-      if (run.comparison) renderComparison(run.comparison);
+      if (run.comparison) renderComparison(run.comparison, run.scanner);
       else renderScanResult(run);
     }
   };
@@ -3085,7 +3222,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     if (idx >= 0 && idx < runs.length) {
       var run = runs[idx];
       if (run.comparison) {
-        renderComparison(run.comparison);
+        renderComparison(run.comparison, run.scanner);
         toast('Showing comparison for ' + (run.scanner || 'scan'));
       }
     }
@@ -3106,15 +3243,37 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       // Auto-start polling if scans are running
       if (running.length > 0 && !scanPollTimer) startScanPolling();
 
-      // Update run status
-      var statusEl = document.getElementById('scanner-run-status');
+      // Update active scanners banner and button states
+      var banner = document.getElementById('active-scanners-banner');
+      var listEl = document.getElementById('active-scanners-list');
       if (running.length > 0) {
-        statusEl.innerHTML = running.map(function(r) {
-          return '<div style="margin:4px 0"><span style="color:#ffaa00">&#9654; ' + escapeHtml(r.scanner) + '</span> ' +
-            '<span style="color:#888">' + escapeHtml(r.status) + ' (' + escapeHtml(r.elapsed) + ')</span> ' +
-            '<button class="scanner-btn" style="padding:2px 10px;font-size:0.75em" onclick="stopScanner(\'' + escapeHtml(r.scanner) + '\')">Stop</button></div>';
+        banner.style.display = '';
+        listEl.innerHTML = running.map(function(r) {
+          return '<div style="display:flex;align-items:center;gap:8px;margin:4px 0">' +
+            '<span style="color:#ffaa00;font-weight:bold">' + escapeHtml(r.scanner) + '</span> ' +
+            '<span style="color:#888;font-size:0.82em">' + escapeHtml(r.status) + ' (' + escapeHtml(r.elapsed) + ')</span> ' +
+            '<button class="scanner-btn" style="padding:2px 10px;font-size:0.75em" onclick="stopScanner(\'' + escapeHtml(r.scanner) + '\')">Stop</button>' +
+            '</div>';
         }).join('');
+      } else {
+        banner.style.display = 'none';
       }
+
+      // Disable launch buttons for running scanners
+      var runningNames = running.map(function(r) { return r.scanner; });
+      ['nuclei', 'nikto', 'nmap', 'ffuf', 'wapiti'].forEach(function(name) {
+        var btn = document.getElementById('scanner-btn-' + name);
+        var card = document.getElementById('scanner-card-' + name);
+        if (!btn || !card) return;
+        if (runningNames.indexOf(name) >= 0) {
+          btn.disabled = true; btn.textContent = 'Running...'; btn.style.opacity = '0.5'; card.style.borderColor = '#ffaa00';
+        } else {
+          btn.disabled = false; btn.textContent = 'Launch'; btn.style.opacity = '1'; card.style.borderColor = '';
+        }
+      });
+
+      // Build result tabs for multi-scanner display
+      buildResultTabs(completed);
     } catch(e) { console.error('scannerTab:', e); }
   }
 
