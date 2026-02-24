@@ -92,7 +92,7 @@ internal/
   proxy/                         Core proxy + interception pipeline
     chaos/                       Chaos modules (latency, corruption, connection, rewrite)
     waf/                         WAF modules (signatures, ratelimit, geoblock, botblock)
-    modes/                       Mode implementations (transparent, waf, chaos, nightmare)
+    modes/                       Mode implementations (transparent, waf, chaos, nightmare, mirror)
 
   # Scanner evaluation (comparison tool)
   scaneval/                      Scanner profile comparison, coverage matrix
