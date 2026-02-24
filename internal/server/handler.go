@@ -436,6 +436,24 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 		}
 		errType := h.errGen.Pick(profile)
 
+		// Check protocol glitch admin config — re-roll if disabled
+		if errors.IsProtocolGlitch(errType) {
+			pgCfg := h.config.Get()
+			pgEnabled, _ := pgCfg["protocol_glitch_enabled"].(bool)
+			if !pgEnabled {
+				// Protocol glitches disabled: re-roll up to 5 times for a non-protocol type
+				for i := 0; i < 5; i++ {
+					errType = h.errGen.Pick(profile)
+					if !errors.IsProtocolGlitch(errType) {
+						break
+					}
+				}
+				if errors.IsProtocolGlitch(errType) {
+					errType = errors.ErrNone
+				}
+			}
+		}
+
 		// Apply error — if it fully handled the response, we're done
 		if h.errGen.Apply(w, r, errType) {
 			statusCode := h.errTypeToStatus(errType)
@@ -529,6 +547,16 @@ func (h *Handler) errTypeToStatus(errType errors.ErrorType) int {
 		errors.ErrSessionTimeout, errors.ErrKeepaliveAbuse, errors.ErrTLSHalfClose,
 		errors.ErrSlowHeaders, errors.ErrAcceptThenFIN:
 		return 0
+	// Protocol glitches — hijacker-based return 0, header-based return 200
+	case errors.ErrHTTP10Chunked, errors.ErrHTTP11NoLength, errors.ErrProtocolDowngrade,
+		errors.ErrMixedVersions, errors.ErrInfoNoFinal, errors.ErrFalseH2Preface,
+		errors.ErrDuplicateStatus, errors.ErrHeaderNullBytes, errors.ErrMissingCRLF,
+		errors.ErrHeaderObsFold:
+		return 0
+	case errors.ErrH2UpgradeReject, errors.ErrH2BadStreamID, errors.ErrH2PriorityLoop,
+		errors.ErrFalseServerPush, errors.ErrBothCLAndTE, errors.ErrFalseCompression,
+		errors.ErrMultiEncodings, errors.ErrKeepAliveUpgrade:
+		return 200
 	default:
 		return 200
 	}

@@ -308,6 +308,10 @@ type AdminConfig struct {
 	LabyrinthLinkDensity int     // 1-20, links per labyrinth page
 	AdaptiveIntervalSec  int     // seconds between adaptive re-evaluation
 
+	// Protocol glitch controls
+	ProtocolGlitchEnabled bool // whether protocol-level glitches are active
+	ProtocolGlitchLevel   int  // 0=disabled, 1=subtle, 2=moderate, 3=aggressive, 4=chaos
+
 	// Extended controllability fields
 	ErrorWeights           map[string]float64
 	HoneypotResponseStyle  string
@@ -336,6 +340,8 @@ func NewAdminConfig() *AdminConfig {
 		DelayMaxMs:             0,
 		LabyrinthLinkDensity:   8,
 		AdaptiveIntervalSec:    30,
+		ProtocolGlitchEnabled: true,
+		ProtocolGlitchLevel:   2,
 		ErrorWeights:           make(map[string]float64),
 		HoneypotResponseStyle:  "realistic",
 		PageTypeWeights:        make(map[string]float64),
@@ -366,6 +372,8 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"delay_max_ms":             c.DelayMaxMs,
 		"labyrinth_link_density":   c.LabyrinthLinkDensity,
 		"adaptive_interval_sec":    c.AdaptiveIntervalSec,
+		"protocol_glitch_enabled":  c.ProtocolGlitchEnabled,
+		"protocol_glitch_level":    c.ProtocolGlitchLevel,
 		"honeypot_response_style":  c.HoneypotResponseStyle,
 		"cookie_trap_frequency":    c.CookieTrapFrequency,
 		"js_trap_difficulty":       c.JSTrapDifficulty,
@@ -514,6 +522,17 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 			v = 50
 		}
 		c.AdaptiveLabyrinthPaths = v
+	case "protocol_glitch_enabled":
+		c.ProtocolGlitchEnabled = value != 0
+	case "protocol_glitch_level":
+		v := int(value)
+		if v < 0 {
+			v = 0
+		}
+		if v > 4 {
+			v = 4
+		}
+		c.ProtocolGlitchLevel = v
 	default:
 		return false
 	}

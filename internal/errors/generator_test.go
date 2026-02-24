@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -26,7 +27,7 @@ func TestPick_WeightDistribution(t *testing.T) {
 	for i := 0; i < n; i++ {
 		counts[g.Pick(profile)]++
 	}
-	// ErrNone has weight 0.62, should appear most often
+	// ErrNone should appear most often
 	for et, c := range counts {
 		if et != ErrNone && c > counts[ErrNone] {
 			t.Fatalf("expected ErrNone to be most frequent, but %q appeared %d times vs ErrNone %d", et, c, counts[ErrNone])
@@ -123,4 +124,260 @@ func TestIsDelay(t *testing.T) {
 	if IsDelay(Err500) {
 		t.Fatal("Err500 should not be a delay")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Protocol Glitch Tests
+// ---------------------------------------------------------------------------
+
+func TestDefaultProfile_WeightsSumToOne(t *testing.T) {
+	profile := DefaultProfile()
+	var total float64
+	for _, w := range profile.Weights {
+		total += w
+	}
+	if math.Abs(total-1.0) > 0.01 {
+		t.Fatalf("DefaultProfile weights sum to %.4f, expected ~1.0", total)
+	}
+}
+
+func TestAggressiveProfile_WeightsSumToOne(t *testing.T) {
+	profile := AggressiveProfile()
+	var total float64
+	for _, w := range profile.Weights {
+		total += w
+	}
+	if math.Abs(total-1.0) > 0.01 {
+		t.Fatalf("AggressiveProfile weights sum to %.4f, expected ~1.0", total)
+	}
+}
+
+func TestIsProtocolGlitch(t *testing.T) {
+	protocolTypes := []ErrorType{
+		ErrHTTP10Chunked, ErrHTTP11NoLength, ErrProtocolDowngrade, ErrMixedVersions, ErrInfoNoFinal,
+		ErrH2UpgradeReject, ErrFalseH2Preface, ErrH2BadStreamID, ErrH2PriorityLoop, ErrFalseServerPush,
+		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
+		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
+		ErrKeepAliveUpgrade,
+	}
+	for _, et := range protocolTypes {
+		if !IsProtocolGlitch(et) {
+			t.Fatalf("expected %q to be a protocol glitch", et)
+		}
+	}
+
+	nonProtocol := []ErrorType{ErrNone, Err500, Err404, ErrSlowDrip, ErrConnectionReset, ErrTCPReset}
+	for _, et := range nonProtocol {
+		if IsProtocolGlitch(et) {
+			t.Fatalf("expected %q NOT to be a protocol glitch", et)
+		}
+	}
+}
+
+// TestApply_ProtocolHeaderBased tests header-based protocol glitches that do NOT
+// require the http.Hijacker interface — they work with httptest.ResponseRecorder.
+func TestApply_ProtocolHeaderBased(t *testing.T) {
+	headerBasedTypes := []struct {
+		errType       ErrorType
+		expectHeaders map[string]string // header key -> expected substring
+	}{
+		{
+			ErrH2UpgradeReject,
+			map[string]string{"Upgrade": "h2c", "Connection": "Upgrade"},
+		},
+		{
+			ErrH2BadStreamID,
+			map[string]string{"X-H2-Stream-Id": "-1"},
+		},
+		{
+			ErrH2PriorityLoop,
+			map[string]string{"X-H2-Priority": "parent=self"},
+		},
+		{
+			ErrFalseServerPush,
+			map[string]string{"Link": "preload"},
+		},
+		{
+			ErrBothCLAndTE,
+			map[string]string{"Content-Length": "5", "Transfer-Encoding": "chunked"},
+		},
+		{
+			ErrFalseCompression,
+			map[string]string{"Content-Encoding": "br"},
+		},
+		{
+			ErrMultiEncodings,
+			map[string]string{"Content-Encoding": "gzip"},
+		},
+		{
+			ErrKeepAliveUpgrade,
+			map[string]string{"Upgrade": "websocket"},
+		},
+	}
+
+	g := NewGenerator()
+	for _, tc := range headerBasedTypes {
+		t.Run(string(tc.errType), func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("GET", "/", nil)
+			handled := g.Apply(w, r, tc.errType)
+			if !handled {
+				t.Fatalf("Apply(%s) should return true", tc.errType)
+			}
+			if w.Code != http.StatusOK {
+				t.Fatalf("Apply(%s): expected status 200, got %d", tc.errType, w.Code)
+			}
+			for hdr, substr := range tc.expectHeaders {
+				got := w.Header().Get(hdr)
+				if got == "" {
+					// Check all values
+					vals := w.Header().Values(hdr)
+					found := false
+					for _, v := range vals {
+						if containsSubstring(v, substr) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Fatalf("Apply(%s): expected header %q containing %q, got none", tc.errType, hdr, substr)
+					}
+				} else if !containsSubstring(got, substr) {
+					// Check all values for multi-valued headers
+					vals := w.Header().Values(hdr)
+					found := false
+					for _, v := range vals {
+						if containsSubstring(v, substr) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Fatalf("Apply(%s): expected header %q containing %q, got %q", tc.errType, hdr, substr, got)
+					}
+				}
+			}
+			if w.Body.Len() == 0 {
+				t.Fatalf("Apply(%s): expected non-empty body", tc.errType)
+			}
+		})
+	}
+}
+
+// TestApply_ProtocolHijackerBased tests hijacker-based protocol glitches
+// with httptest.ResponseRecorder (which does NOT implement http.Hijacker).
+// These should fall back to writing a 500 status.
+func TestApply_ProtocolHijackerFallback(t *testing.T) {
+	hijackerTypes := []ErrorType{
+		ErrHTTP10Chunked, ErrHTTP11NoLength, ErrProtocolDowngrade,
+		ErrMixedVersions, ErrInfoNoFinal, ErrFalseH2Preface,
+		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
+	}
+
+	g := NewGenerator()
+	for _, et := range hijackerTypes {
+		t.Run(string(et), func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("GET", "/", nil)
+			handled := g.Apply(w, r, et)
+			if !handled {
+				t.Fatalf("Apply(%s) should return true even on hijacker fallback", et)
+			}
+			// Hijacker-based errors should fall back to 500 when Hijacker is unavailable
+			if w.Code != http.StatusInternalServerError {
+				t.Fatalf("Apply(%s): expected fallback status 500, got %d", et, w.Code)
+			}
+		})
+	}
+}
+
+// TestApply_AllProtocolGlitchesHandled verifies every protocol glitch
+// error type is handled in Apply() and returns true (fully handled).
+func TestApply_AllProtocolGlitchesHandled(t *testing.T) {
+	allProtocol := []ErrorType{
+		ErrHTTP10Chunked, ErrHTTP11NoLength, ErrProtocolDowngrade, ErrMixedVersions, ErrInfoNoFinal,
+		ErrH2UpgradeReject, ErrFalseH2Preface, ErrH2BadStreamID, ErrH2PriorityLoop, ErrFalseServerPush,
+		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
+		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
+		ErrKeepAliveUpgrade,
+	}
+
+	g := NewGenerator()
+	for _, et := range allProtocol {
+		t.Run(string(et), func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("GET", "/", nil)
+			handled := g.Apply(w, r, et)
+			if !handled {
+				t.Fatalf("Apply(%s) should return true (fully handled)", et)
+			}
+		})
+	}
+}
+
+// TestDefaultProfile_ContainsAllProtocolGlitches ensures all 18 protocol glitch
+// types appear in the DefaultProfile weights.
+func TestDefaultProfile_ContainsAllProtocolGlitches(t *testing.T) {
+	profile := DefaultProfile()
+	allProtocol := []ErrorType{
+		ErrHTTP10Chunked, ErrHTTP11NoLength, ErrProtocolDowngrade, ErrMixedVersions, ErrInfoNoFinal,
+		ErrH2UpgradeReject, ErrFalseH2Preface, ErrH2BadStreamID, ErrH2PriorityLoop, ErrFalseServerPush,
+		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
+		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
+		ErrKeepAliveUpgrade,
+	}
+	for _, et := range allProtocol {
+		w, ok := profile.Weights[et]
+		if !ok {
+			t.Fatalf("DefaultProfile missing protocol glitch type %q", et)
+		}
+		if w <= 0 {
+			t.Fatalf("DefaultProfile weight for %q is %f, expected > 0", et, w)
+		}
+	}
+}
+
+// TestAggressiveProfile_ContainsAllProtocolGlitches ensures all 18 protocol glitch
+// types appear in the AggressiveProfile weights.
+func TestAggressiveProfile_ContainsAllProtocolGlitches(t *testing.T) {
+	profile := AggressiveProfile()
+	allProtocol := []ErrorType{
+		ErrHTTP10Chunked, ErrHTTP11NoLength, ErrProtocolDowngrade, ErrMixedVersions, ErrInfoNoFinal,
+		ErrH2UpgradeReject, ErrFalseH2Preface, ErrH2BadStreamID, ErrH2PriorityLoop, ErrFalseServerPush,
+		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
+		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
+		ErrKeepAliveUpgrade,
+	}
+	for _, et := range allProtocol {
+		w, ok := profile.Weights[et]
+		if !ok {
+			t.Fatalf("AggressiveProfile missing protocol glitch type %q", et)
+		}
+		if w <= 0 {
+			t.Fatalf("AggressiveProfile weight for %q is %f, expected > 0", et, w)
+		}
+	}
+}
+
+// TestAggressiveProfile_HigherProtocolWeights verifies aggressive profile has
+// higher protocol glitch weights than default.
+func TestAggressiveProfile_HigherProtocolWeights(t *testing.T) {
+	def := DefaultProfile()
+	agg := AggressiveProfile()
+	for _, et := range []ErrorType{ErrHTTP10Chunked, ErrFalseH2Preface, ErrDuplicateStatus, ErrBothCLAndTE} {
+		if agg.Weights[et] <= def.Weights[et] {
+			t.Fatalf("AggressiveProfile weight for %q (%.4f) should be higher than DefaultProfile (%.4f)",
+				et, agg.Weights[et], def.Weights[et])
+		}
+	}
+}
+
+// containsSubstring is a simple helper for test assertions.
+func containsSubstring(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

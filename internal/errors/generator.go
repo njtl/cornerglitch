@@ -44,6 +44,34 @@ const (
 	ErrTLSHalfClose      ErrorType = "tls_half_close"      // partial response, CloseWrite(), hold read open
 	ErrSlowHeaders       ErrorType = "slow_headers"        // send headers byte-by-byte with 200-500ms gaps
 	ErrAcceptThenFIN     ErrorType = "accept_then_fin"     // hijack and immediately close
+
+	// Protocol-level glitches — HTTP version violations
+	ErrHTTP10Chunked     ErrorType = "http10_chunked"      // HTTP/1.0 with Transfer-Encoding: chunked
+	ErrHTTP11NoLength    ErrorType = "http11_no_length"    // HTTP/1.1 with no Content-Length and no chunked
+	ErrProtocolDowngrade ErrorType = "protocol_downgrade"  // send HTTP/1.0 response to HTTP/1.1 client
+	ErrMixedVersions     ErrorType = "mixed_versions"      // send 100 Continue then HTTP/1.0 200
+	ErrInfoNoFinal       ErrorType = "info_no_final"       // send 1xx responses then close without final
+
+	// Protocol-level glitches — HTTP/2 mock violations
+	ErrH2UpgradeReject   ErrorType = "h2_upgrade_reject"   // offer h2c upgrade but respond HTTP/1.1
+	ErrFalseH2Preface    ErrorType = "false_h2_preface"    // send H2 preface bytes then HTTP/1.1 content
+	ErrH2BadStreamID     ErrorType = "h2_bad_stream_id"    // invalid H2 stream ID headers
+	ErrH2PriorityLoop    ErrorType = "h2_priority_loop"    // circular priority dependency header
+	ErrFalseServerPush   ErrorType = "false_server_push"   // Link preload for nonexistent resources
+
+	// Protocol-level glitches — header protocol violations
+	ErrDuplicateStatus   ErrorType = "duplicate_status"    // write status line twice
+	ErrHeaderNullBytes   ErrorType = "header_null_bytes"   // embed \x00 in header values
+	ErrMissingCRLF       ErrorType = "missing_crlf"        // use LF-only instead of CRLF
+	ErrHeaderObsFold     ErrorType = "header_obs_fold"     // obsolete header folding
+
+	// Protocol-level glitches — content encoding violations
+	ErrBothCLAndTE       ErrorType = "both_cl_and_te"      // set both Content-Length and Transfer-Encoding
+	ErrFalseCompression  ErrorType = "false_compression"   // claim br but send uncompressed
+	ErrMultiEncodings    ErrorType = "multi_encodings"     // conflicting Content-Encoding values
+
+	// Protocol-level glitches — connection violations
+	ErrKeepAliveUpgrade  ErrorType = "keepalive_upgrade"   // both Connection: keep-alive and Upgrade: websocket
 )
 
 // ErrorProfile defines probabilities for each error type.
@@ -55,7 +83,7 @@ type ErrorProfile struct {
 func DefaultProfile() ErrorProfile {
 	return ErrorProfile{
 		Weights: map[ErrorType]float64{
-			ErrNone:              0.62,
+			ErrNone:              0.594,
 			Err500:               0.03,
 			Err502:               0.02,
 			Err503:               0.02,
@@ -86,6 +114,25 @@ func DefaultProfile() ErrorProfile {
 			ErrTLSHalfClose:      0.003,
 			ErrSlowHeaders:       0.004,
 			ErrAcceptThenFIN:     0.004,
+			// Protocol-level glitches
+			ErrHTTP10Chunked:     0.002,
+			ErrHTTP11NoLength:    0.002,
+			ErrProtocolDowngrade: 0.002,
+			ErrMixedVersions:    0.002,
+			ErrInfoNoFinal:      0.002,
+			ErrH2UpgradeReject:  0.002,
+			ErrFalseH2Preface:   0.002,
+			ErrH2BadStreamID:    0.002,
+			ErrH2PriorityLoop:   0.002,
+			ErrFalseServerPush:  0.002,
+			ErrDuplicateStatus:  0.002,
+			ErrHeaderNullBytes:  0.002,
+			ErrMissingCRLF:      0.002,
+			ErrHeaderObsFold:    0.002,
+			ErrBothCLAndTE:      0.002,
+			ErrFalseCompression: 0.002,
+			ErrMultiEncodings:   0.002,
+			ErrKeepAliveUpgrade: 0.002,
 		},
 	}
 }
@@ -94,7 +141,7 @@ func DefaultProfile() ErrorProfile {
 func AggressiveProfile() ErrorProfile {
 	return ErrorProfile{
 		Weights: map[ErrorType]float64{
-			ErrNone:             0.22,
+			ErrNone:             0.056,
 			Err500:              0.06,
 			Err502:              0.05,
 			Err503:              0.05,
@@ -125,6 +172,25 @@ func AggressiveProfile() ErrorProfile {
 			ErrTLSHalfClose:     0.01,
 			ErrSlowHeaders:      0.01,
 			ErrAcceptThenFIN:    0.01,
+			// Protocol-level glitches
+			ErrHTTP10Chunked:     0.008,
+			ErrHTTP11NoLength:    0.008,
+			ErrProtocolDowngrade: 0.008,
+			ErrMixedVersions:    0.008,
+			ErrInfoNoFinal:      0.008,
+			ErrH2UpgradeReject:  0.008,
+			ErrFalseH2Preface:   0.008,
+			ErrH2BadStreamID:    0.008,
+			ErrH2PriorityLoop:   0.008,
+			ErrFalseServerPush:  0.008,
+			ErrDuplicateStatus:  0.008,
+			ErrHeaderNullBytes:  0.008,
+			ErrMissingCRLF:      0.008,
+			ErrHeaderObsFold:    0.008,
+			ErrBothCLAndTE:      0.008,
+			ErrFalseCompression: 0.008,
+			ErrMultiEncodings:   0.008,
+			ErrKeepAliveUpgrade: 0.008,
 		},
 	}
 }
@@ -396,6 +462,254 @@ func (g *Generator) Apply(w http.ResponseWriter, r *http.Request, errType ErrorT
 			}
 		}
 		return true
+
+	// ---- Protocol-level glitches: HTTP Version ----
+
+	case ErrHTTP10Chunked:
+		// HTTP/1.0 response with Transfer-Encoding: chunked (illegal combo)
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.0 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: text/html\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
+		buf.Flush()
+		return true
+
+	case ErrHTTP11NoLength:
+		// HTTP/1.1 with no Content-Length and no chunked, just body then close
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body>No content-length, no chunked encoding. Just data.</body></html>")
+		buf.Flush()
+		return true
+
+	case ErrProtocolDowngrade:
+		// Send HTTP/1.0 200 OK + Connection: close to HTTP/1.1 client
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.0 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 22\r\n\r\nProtocol downgrade OK.")
+		buf.Flush()
+		return true
+
+	case ErrMixedVersions:
+		// Send HTTP/1.1 100 Continue then HTTP/1.0 200 OK
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 12\r\n\r\nMixed hello.")
+		buf.Flush()
+		return true
+
+	case ErrInfoNoFinal:
+		// Send 100 Continue, 102 Processing, then close without final response
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 102 Processing\r\n\r\n")
+		buf.Flush()
+		// Close without sending a final 2xx/3xx/4xx/5xx response
+		return true
+
+	// ---- Protocol-level glitches: HTTP/2 Mock ----
+
+	case ErrH2UpgradeReject:
+		// Offer h2c upgrade but respond with HTTP/1.1 normally
+		w.Header().Set("Upgrade", "h2c")
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html><body>Offered h2c upgrade but serving HTTP/1.1</body></html>"))
+		return true
+
+	case ErrFalseH2Preface:
+		// Send HTTP/2 connection preface bytes followed by HTTP/1.1 content
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		// HTTP/2 client connection preface magic
+		buf.WriteString("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+		// Then switch to HTTP/1.1 content
+		buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 28\r\n\r\nFalse H2 preface, then H1.1.")
+		buf.Flush()
+		return true
+
+	case ErrH2BadStreamID:
+		// Add invalid H2 stream ID headers
+		w.Header().Set("X-H2-Stream-ID", "-1")
+		w.Header().Add("X-H2-Stream-ID", "0")
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html><body>Bad H2 stream IDs in headers</body></html>"))
+		return true
+
+	case ErrH2PriorityLoop:
+		// Circular priority dependency
+		w.Header().Set("X-H2-Priority", "parent=self")
+		w.Header().Set("X-H2-Stream-Weight", "256")
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html><body>Circular H2 priority dependency</body></html>"))
+		return true
+
+	case ErrFalseServerPush:
+		// Link preload headers for nonexistent resources
+		w.Header().Add("Link", "</fake-bundle.js>; rel=preload; as=script")
+		w.Header().Add("Link", "</nonexistent.css>; rel=preload; as=style")
+		w.Header().Add("Link", "</ghost-image.webp>; rel=preload; as=image")
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html><head></head><body>False server push preload hints</body></html>"))
+		return true
+
+	// ---- Protocol-level glitches: Header Protocol ----
+
+	case ErrDuplicateStatus:
+		// Write the status line twice before headers
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.1 200 OK\r\nHTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 16\r\n\r\nDuplicate status.")
+		buf.Flush()
+		return true
+
+	case ErrHeaderNullBytes:
+		// Embed \x00 in header values
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nX-Glitch: before\x00after\r\nX-Data: null\x00byte\x00header\r\nContent-Length: 20\r\n\r\nNull bytes in header.")
+		buf.Flush()
+		return true
+
+	case ErrMissingCRLF:
+		// Use LF-only instead of CRLF in headers
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.1 200 OK\nContent-Type: text/html\nContent-Length: 15\n\n<html>LF only.</html>")
+		buf.Flush()
+		return true
+
+	case ErrHeaderObsFold:
+		// Obsolete header folding: continue header value on next line with space prefix
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nX-Long-Header: start of value\r\n continued on next line\r\n and another continuation\r\nContent-Length: 22\r\n\r\nObs-fold header value.")
+		buf.Flush()
+		return true
+
+	// ---- Protocol-level glitches: Content Encoding ----
+
+	case ErrBothCLAndTE:
+		// Set both Content-Length AND Transfer-Encoding: chunked (ambiguous per RFC 7230)
+		w.Header().Set("Content-Length", "5")
+		w.Header().Set("Transfer-Encoding", "chunked")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("hello"))
+		return true
+
+	case ErrFalseCompression:
+		// Claim Content-Encoding: br but send uncompressed body
+		w.Header().Set("Content-Encoding", "br")
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html><body>Claims to be Brotli-compressed but is plain text</body></html>"))
+		return true
+
+	case ErrMultiEncodings:
+		// Set conflicting Content-Encoding values
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Add("Content-Encoding", "deflate")
+		w.Header().Add("Content-Encoding", "identity")
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html><body>Multiple conflicting encodings</body></html>"))
+		return true
+
+	// ---- Protocol-level glitches: Connection ----
+
+	case ErrKeepAliveUpgrade:
+		// Set both Connection: keep-alive and Upgrade: websocket (conflicting signals)
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Add("Connection", "Upgrade")
+		w.Header().Set("Upgrade", "websocket")
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html><body>Keep-alive + Upgrade conflict</body></html>"))
+		return true
 	}
 
 	return false
@@ -423,6 +737,20 @@ func IsError(et ErrorType) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+// IsProtocolGlitch returns true if the error type is a protocol-level glitch.
+func IsProtocolGlitch(et ErrorType) bool {
+	switch et {
+	case ErrHTTP10Chunked, ErrHTTP11NoLength, ErrProtocolDowngrade, ErrMixedVersions, ErrInfoNoFinal,
+		ErrH2UpgradeReject, ErrFalseH2Preface, ErrH2BadStreamID, ErrH2PriorityLoop, ErrFalseServerPush,
+		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
+		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
+		ErrKeepAliveUpgrade:
+		return true
+	default:
+		return false
 	}
 }
 
