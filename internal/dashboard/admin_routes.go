@@ -730,8 +730,37 @@ func adminAPIScannerProfile(w http.ResponseWriter, r *http.Request, s *Server) {
 	runner := getScanRunner()
 	available := runner.AvailableScanners()
 
+	// Compute summary statistics
+	detectable := 0
+	for _, v := range profile.Vulnerabilities {
+		if v.Detectable {
+			detectable++
+		}
+	}
+
+	vulnSnap := globalVulnConfig.Snapshot()
+	enabledGroups := 0
+	totalGroups := len(VulnGroups)
+	if groups, ok := vulnSnap["groups"].(map[string]bool); ok {
+		for _, enabled := range groups {
+			if enabled {
+				enabledGroups++
+			}
+		}
+	}
+
+	summary := map[string]interface{}{
+		"total":           profile.TotalVulns,
+		"detectable":      detectable,
+		"by_severity":     profile.BySeverity,
+		"enabled_groups":  enabledGroups,
+		"total_groups":    totalGroups,
+		"total_endpoints": profile.TotalEndpoints,
+	}
+
 	resp := map[string]interface{}{
 		"profile":            profile,
+		"summary":            summary,
 		"available_scanners": available,
 	}
 
@@ -808,8 +837,10 @@ func adminAPIScannerCompare(w http.ResponseWriter, r *http.Request, s *Server) {
 	}
 
 	var req struct {
-		Scanner string `json:"scanner"`
-		Data    string `json:"data"`
+		Scanner   string `json:"scanner"`
+		Data      string `json:"data"`
+		ScanStart string `json:"scan_start"` // optional RFC3339 timestamp
+		ScanEnd   string `json:"scan_end"`   // optional RFC3339 timestamp
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
@@ -826,10 +857,48 @@ func adminAPIScannerCompare(w http.ResponseWriter, r *http.Request, s *Server) {
 		return
 	}
 
+	// Classify false negatives using server request logs when time window is provided
+	classifyFNFromCollector(report, s, req.ScanStart, req.ScanEnd)
+
 	// Record in comparison history
 	comparisonHistory.Add(report)
 
 	json.NewEncoder(w).Encode(report)
+}
+
+// classifyFNFromCollector classifies false negatives in a comparison report
+// by cross-referencing with the metrics collector's request logs.
+// If scanStart/scanEnd are provided (RFC3339), it uses only requests in that
+// window. Otherwise it falls back to the last hour of request data.
+func classifyFNFromCollector(report *scaneval.ComparisonReport, s *Server, scanStart, scanEnd string) {
+	if len(report.FalseNegatives) == 0 {
+		return
+	}
+
+	var start, end time.Time
+	var err error
+
+	if scanStart != "" {
+		start, err = time.Parse(time.RFC3339, scanStart)
+		if err != nil {
+			start = time.Time{}
+		}
+	}
+	if scanEnd != "" {
+		end, err = time.Parse(time.RFC3339, scanEnd)
+		if err != nil {
+			end = time.Time{}
+		}
+	}
+
+	// Default to last hour if no valid time window provided
+	if start.IsZero() || end.IsZero() {
+		end = time.Now()
+		start = end.Add(-1 * time.Hour)
+	}
+
+	accessedPaths := s.collector.GetPathsInTimeWindow(start, end)
+	scaneval.ClassifyFalseNegatives(report, accessedPaths)
 }
 
 func adminAPIScannerResults(w http.ResponseWriter, r *http.Request, s *Server) {
@@ -1198,7 +1267,9 @@ func adminAPIScannerMultiCompare(w http.ResponseWriter, r *http.Request, s *Serv
 	}
 
 	var req struct {
-		Reports map[string]string `json:"reports"` // scanner name -> raw output
+		Reports   map[string]string `json:"reports"`    // scanner name -> raw output
+		ScanStart string            `json:"scan_start"` // optional RFC3339 timestamp
+		ScanEnd   string            `json:"scan_end"`   // optional RFC3339 timestamp
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
@@ -1217,6 +1288,8 @@ func adminAPIScannerMultiCompare(w http.ResponseWriter, r *http.Request, s *Serv
 			})
 			return
 		}
+		// Classify false negatives using server request logs
+		classifyFNFromCollector(report, s, req.ScanStart, req.ScanEnd)
 		reports[scannerName] = report
 		// Also record each individual report in history
 		comparisonHistory.Add(report)

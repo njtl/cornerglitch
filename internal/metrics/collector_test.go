@@ -125,3 +125,126 @@ func TestClientProfile(t *testing.T) {
 		t.Fatal("expected nil for unknown client")
 	}
 }
+
+func TestGetPathsInTimeWindow_WithinWindow(t *testing.T) {
+	c := NewCollector()
+	base := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+
+	// Record requests at different times
+	c.Record(RequestRecord{
+		Timestamp:  base.Add(1 * time.Minute),
+		ClientID:   "client_1",
+		Path:       "/vuln/a01/",
+		StatusCode: 200,
+	})
+	c.Record(RequestRecord{
+		Timestamp:  base.Add(2 * time.Minute),
+		ClientID:   "client_1",
+		Path:       "/vuln/a01/idor",
+		StatusCode: 200,
+	})
+	c.Record(RequestRecord{
+		Timestamp:  base.Add(3 * time.Minute),
+		ClientID:   "client_1",
+		Path:       "/vuln/a01/",
+		StatusCode: 200,
+	})
+
+	// Query a window that includes all records
+	start := base
+	end := base.Add(5 * time.Minute)
+	paths := c.GetPathsInTimeWindow(start, end)
+
+	if paths["/vuln/a01/"] != 2 {
+		t.Errorf("expected /vuln/a01/ count 2, got %d", paths["/vuln/a01/"])
+	}
+	if paths["/vuln/a01/idor"] != 1 {
+		t.Errorf("expected /vuln/a01/idor count 1, got %d", paths["/vuln/a01/idor"])
+	}
+}
+
+func TestGetPathsInTimeWindow_ExcludesOutside(t *testing.T) {
+	c := NewCollector()
+	base := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+
+	// Record before window
+	c.Record(RequestRecord{
+		Timestamp:  base.Add(-5 * time.Minute),
+		ClientID:   "client_1",
+		Path:       "/before",
+		StatusCode: 200,
+	})
+	// Record inside window
+	c.Record(RequestRecord{
+		Timestamp:  base.Add(2 * time.Minute),
+		ClientID:   "client_1",
+		Path:       "/during",
+		StatusCode: 200,
+	})
+	// Record after window
+	c.Record(RequestRecord{
+		Timestamp:  base.Add(15 * time.Minute),
+		ClientID:   "client_1",
+		Path:       "/after",
+		StatusCode: 200,
+	})
+
+	start := base
+	end := base.Add(10 * time.Minute)
+	paths := c.GetPathsInTimeWindow(start, end)
+
+	if _, ok := paths["/before"]; ok {
+		t.Error("expected /before to be excluded (before window)")
+	}
+	if paths["/during"] != 1 {
+		t.Errorf("expected /during count 1, got %d", paths["/during"])
+	}
+	if _, ok := paths["/after"]; ok {
+		t.Error("expected /after to be excluded (after window)")
+	}
+}
+
+func TestGetPathsInTimeWindow_EmptyWindow(t *testing.T) {
+	c := NewCollector()
+	base := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+
+	c.Record(RequestRecord{
+		Timestamp:  base.Add(1 * time.Minute),
+		ClientID:   "client_1",
+		Path:       "/test",
+		StatusCode: 200,
+	})
+
+	// Query a window that excludes all records
+	start := base.Add(5 * time.Minute)
+	end := base.Add(10 * time.Minute)
+	paths := c.GetPathsInTimeWindow(start, end)
+
+	if len(paths) != 0 {
+		t.Errorf("expected empty paths for non-overlapping window, got %d entries", len(paths))
+	}
+}
+
+func TestGetPathsInTimeWindow_BoundaryInclusive(t *testing.T) {
+	c := NewCollector()
+	exact := time.Date(2025, 6, 15, 10, 5, 0, 0, time.UTC)
+
+	c.Record(RequestRecord{
+		Timestamp:  exact,
+		ClientID:   "client_1",
+		Path:       "/boundary",
+		StatusCode: 200,
+	})
+
+	// Record at exact start time should be included
+	paths := c.GetPathsInTimeWindow(exact, exact.Add(1*time.Minute))
+	if paths["/boundary"] != 1 {
+		t.Errorf("expected /boundary at start boundary to be included, got count %d", paths["/boundary"])
+	}
+
+	// Record at exact end time should be included
+	paths = c.GetPathsInTimeWindow(exact.Add(-1*time.Minute), exact)
+	if paths["/boundary"] != 1 {
+		t.Errorf("expected /boundary at end boundary to be included, got count %d", paths["/boundary"])
+	}
+}

@@ -729,3 +729,202 @@ func TestFeatureEnabled(t *testing.T) {
 		t.Error("featureEnabled should return false for missing feature")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ClassifyFalseNegatives tests
+// ---------------------------------------------------------------------------
+
+func TestClassifyFalseNegatives_AllCrawled(t *testing.T) {
+	report := &ComparisonReport{
+		FalseNegatives: []VulnCategory{
+			{
+				ID:        "vuln-1",
+				Name:      "Test Vuln 1",
+				Severity:  "high",
+				Endpoints: []string{"/vuln/a01/", "/vuln/a01/idor"},
+			},
+		},
+	}
+
+	// All endpoints were accessed
+	accessedPaths := map[string]int{
+		"/vuln/a01/":     3,
+		"/vuln/a01/idor": 1,
+	}
+
+	ClassifyFalseNegatives(report, accessedPaths)
+
+	if len(report.ClassifiedFN) != 1 {
+		t.Fatalf("ClassifiedFN length = %d, want 1", len(report.ClassifiedFN))
+	}
+	cfn := report.ClassifiedFN[0]
+	if cfn.Classification != "crawled_not_detected" {
+		t.Errorf("Classification = %q, want %q", cfn.Classification, "crawled_not_detected")
+	}
+	if len(cfn.EndpointsHit) != 2 {
+		t.Errorf("EndpointsHit length = %d, want 2", len(cfn.EndpointsHit))
+	}
+	if len(cfn.EndpointsMissed) != 0 {
+		t.Errorf("EndpointsMissed length = %d, want 0", len(cfn.EndpointsMissed))
+	}
+}
+
+func TestClassifyFalseNegatives_NotCrawled(t *testing.T) {
+	report := &ComparisonReport{
+		FalseNegatives: []VulnCategory{
+			{
+				ID:        "vuln-2",
+				Name:      "Test Vuln 2",
+				Severity:  "critical",
+				Endpoints: []string{"/vuln/a03/sqli", "/vuln/a03/xss"},
+			},
+		},
+	}
+
+	// No endpoints were accessed
+	accessedPaths := map[string]int{
+		"/other/path": 5,
+	}
+
+	ClassifyFalseNegatives(report, accessedPaths)
+
+	if len(report.ClassifiedFN) != 1 {
+		t.Fatalf("ClassifiedFN length = %d, want 1", len(report.ClassifiedFN))
+	}
+	cfn := report.ClassifiedFN[0]
+	if cfn.Classification != "not_crawled" {
+		t.Errorf("Classification = %q, want %q", cfn.Classification, "not_crawled")
+	}
+	if len(cfn.EndpointsHit) != 0 {
+		t.Errorf("EndpointsHit length = %d, want 0", len(cfn.EndpointsHit))
+	}
+	if len(cfn.EndpointsMissed) != 2 {
+		t.Errorf("EndpointsMissed length = %d, want 2", len(cfn.EndpointsMissed))
+	}
+}
+
+func TestClassifyFalseNegatives_Mixed(t *testing.T) {
+	report := &ComparisonReport{
+		FalseNegatives: []VulnCategory{
+			{
+				ID:        "vuln-3",
+				Name:      "Test Vuln 3",
+				Severity:  "high",
+				Endpoints: []string{"/vuln/a05/", "/vuln/a05/default-creds", "/vuln/a05/verbose-errors"},
+			},
+		},
+	}
+
+	// Only some endpoints were accessed
+	accessedPaths := map[string]int{
+		"/vuln/a05/": 2,
+	}
+
+	ClassifyFalseNegatives(report, accessedPaths)
+
+	if len(report.ClassifiedFN) != 1 {
+		t.Fatalf("ClassifiedFN length = %d, want 1", len(report.ClassifiedFN))
+	}
+	cfn := report.ClassifiedFN[0]
+	// At least one endpoint was hit, so it should be classified as crawled_not_detected
+	if cfn.Classification != "crawled_not_detected" {
+		t.Errorf("Classification = %q, want %q", cfn.Classification, "crawled_not_detected")
+	}
+	if len(cfn.EndpointsHit) != 1 {
+		t.Errorf("EndpointsHit length = %d, want 1", len(cfn.EndpointsHit))
+	}
+	if len(cfn.EndpointsMissed) != 2 {
+		t.Errorf("EndpointsMissed length = %d, want 2", len(cfn.EndpointsMissed))
+	}
+}
+
+func TestClassifyFalseNegatives_EmptyPaths(t *testing.T) {
+	report := &ComparisonReport{
+		FalseNegatives: []VulnCategory{
+			{
+				ID:        "vuln-4",
+				Name:      "Test Vuln 4",
+				Severity:  "medium",
+				Endpoints: []string{"/vuln/a10/"},
+			},
+		},
+	}
+
+	accessedPaths := map[string]int{}
+
+	ClassifyFalseNegatives(report, accessedPaths)
+
+	if len(report.ClassifiedFN) != 1 {
+		t.Fatalf("ClassifiedFN length = %d, want 1", len(report.ClassifiedFN))
+	}
+	if report.ClassifiedFN[0].Classification != "not_crawled" {
+		t.Errorf("Classification = %q, want %q", report.ClassifiedFN[0].Classification, "not_crawled")
+	}
+}
+
+func TestClassifyFalseNegatives_EmptyFalseNegatives(t *testing.T) {
+	report := &ComparisonReport{
+		FalseNegatives: []VulnCategory{},
+	}
+
+	accessedPaths := map[string]int{
+		"/vuln/a01/": 5,
+	}
+
+	ClassifyFalseNegatives(report, accessedPaths)
+
+	if len(report.ClassifiedFN) != 0 {
+		t.Errorf("ClassifiedFN length = %d, want 0 for empty false negatives", len(report.ClassifiedFN))
+	}
+}
+
+func TestClassifyFalseNegatives_MultipleVulns(t *testing.T) {
+	report := &ComparisonReport{
+		FalseNegatives: []VulnCategory{
+			{
+				ID:        "vuln-crawled",
+				Name:      "Crawled Vuln",
+				Severity:  "high",
+				Endpoints: []string{"/vuln/a01/"},
+			},
+			{
+				ID:        "vuln-not-crawled",
+				Name:      "Not Crawled Vuln",
+				Severity:  "critical",
+				Endpoints: []string{"/vuln/a07/"},
+			},
+			{
+				ID:        "vuln-partially",
+				Name:      "Partially Crawled",
+				Severity:  "medium",
+				Endpoints: []string{"/vuln/a05/", "/vuln/a05/verbose-errors"},
+			},
+		},
+	}
+
+	accessedPaths := map[string]int{
+		"/vuln/a01/": 3,
+		"/vuln/a05/": 1,
+	}
+
+	ClassifyFalseNegatives(report, accessedPaths)
+
+	if len(report.ClassifiedFN) != 3 {
+		t.Fatalf("ClassifiedFN length = %d, want 3", len(report.ClassifiedFN))
+	}
+
+	// First: crawled_not_detected
+	if report.ClassifiedFN[0].Classification != "crawled_not_detected" {
+		t.Errorf("ClassifiedFN[0].Classification = %q, want %q", report.ClassifiedFN[0].Classification, "crawled_not_detected")
+	}
+
+	// Second: not_crawled
+	if report.ClassifiedFN[1].Classification != "not_crawled" {
+		t.Errorf("ClassifiedFN[1].Classification = %q, want %q", report.ClassifiedFN[1].Classification, "not_crawled")
+	}
+
+	// Third: crawled_not_detected (at least one endpoint was hit)
+	if report.ClassifiedFN[2].Classification != "crawled_not_detected" {
+		t.Errorf("ClassifiedFN[2].Classification = %q, want %q", report.ClassifiedFN[2].Classification, "crawled_not_detected")
+	}
+}

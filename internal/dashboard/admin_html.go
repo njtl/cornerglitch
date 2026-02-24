@@ -543,6 +543,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   .nightmare-bar.off { background: #111; border: 1px solid #1a1a1a; color: #555; }
   .nightmare-bar.on { background: #ff000015; border: 1px solid #ff4444; color: #ff4444; animation: nightmare-pulse 2s infinite; }
   @keyframes nightmare-pulse { 0%%,100%% { box-shadow: 0 0 5px #ff000033; } 50%% { box-shadow: 0 0 20px #ff000066; } }
+  @keyframes shimmer { 0%% { background-position: 200%% 0; } 100%% { background-position: -200%% 0; } }
   body.nightmare-active { background: #0a0000; }
   body.nightmare-active .tab { border-color: #ff444422; }
   .tab .tab-badge { display: none; color: #ff4444; font-size: 0.7em; margin-left: 4px; }
@@ -1006,15 +1007,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <!-- ====== Sub-tab A: Evaluate External Scanners ====== -->
   <div id="scanner-eval-panel">
 
-    <!-- Context Banner -->
-    <div class="section">
-      <h2>// Vulnerability Profile</h2>
-      <div id="scanner-profile-summary" style="margin-top:8px">
-        <div style="color:#555">Loading vulnerability profile...</div>
-      </div>
-    </div>
-
-    <!-- Launch External Scanner -->
+    <!-- 1. Launch External Scanner -->
     <div class="section">
       <h2>// Launch External Scanner</h2>
       <p style="color:#888;font-size:0.82em;margin-bottom:12px">Launch a scanner against this server (requires tool to be installed on host).</p>
@@ -1049,15 +1042,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div id="scanner-run-status" style="margin-top:8px;color:#555;font-size:0.82em"></div>
     </div>
 
-    <!-- Comparison Report (auto-filled from external scanner results) -->
-    <div class="section">
-      <h2>// Scan Results</h2>
-      <div id="scanner-comparison">
-        <div style="color:#555">Launch an external scanner above. Results are captured and graded automatically.</div>
-      </div>
-    </div>
-
-    <!-- Scan History -->
+    <!-- 2. Scan History -->
     <div class="section">
       <h2>// Scan History</h2>
       <div class="tbl-scroll" style="max-height:400px">
@@ -1072,6 +1057,22 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           </tr></thead>
           <tbody id="scanner-history-body"></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- 3. Scan Results -->
+    <div class="section">
+      <h2>// Scan Results</h2>
+      <div id="scanner-comparison">
+        <div style="color:#555">Launch an external scanner above. Results are captured and graded automatically.</div>
+      </div>
+    </div>
+
+    <!-- 4. Target Vulnerability Surface -->
+    <div class="section">
+      <h2>// Target Vulnerability Surface</h2>
+      <div id="scanner-profile-summary" style="margin-top:8px">
+        <div style="color:#555">Loading vulnerability surface...</div>
       </div>
     </div>
 
@@ -2113,7 +2114,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     proxy_latency_prob: 'Probability of adding random latency to proxied requests (0=none, 1=always)',
     proxy_corrupt_prob: 'Probability of corrupting proxied response data (0=none, 1=always)',
     proxy_drop_prob: 'Probability of silently dropping proxied requests (0=none, 1=always)',
-    proxy_reset_prob: 'Probability of sending TCP RST instead of response (0=none, 1=always)'
+    proxy_reset_prob: 'Probability of sending TCP RST instead of response (0=none, 1=always)',
+    protocol_glitch_level: 'Severity of HTTP protocol-level glitches (0=disabled, 1=subtle, 2=moderate, 3=aggressive, 4=chaos)'
   };
 
   const ERROR_TIPS = {
@@ -2173,7 +2175,17 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         slider('error_rate_multiplier', 'Error Rate Multiplier', cfg.error_rate_multiplier, 0, 5, 0.1) +
         slider('block_chance', 'Random Block Chance', cfg.block_chance, 0, 1, 0.01) +
         slider('block_duration_sec', 'Block Duration (sec)', cfg.block_duration_sec, 1, 3600, 1) +
-        slider('header_corrupt_level', 'Header Corruption Level (0-4)', cfg.header_corrupt_level, 0, 4, 1);
+        slider('header_corrupt_level', 'Header Corruption Level (0-4)', cfg.header_corrupt_level, 0, 4, 1) +
+        slider('protocol_glitch_level', 'Protocol Glitch Level (0-4)', cfg.protocol_glitch_level || 2, 0, 4, 1) +
+        '<div class="toggle-row" style="margin-top:8px">' +
+          '<div class="toggle-name has-tip">Protocol Glitch Enabled' +
+            '<span class="tip-icon">?</span><span class="tip-box">Enable HTTP protocol-level glitches (version violations, encoding conflicts, header corruption)</span>' +
+          '</div>' +
+          '<label class="toggle-sw">' +
+          '<input type="checkbox" ' + (cfg.protocol_glitch_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'protocol_glitch_enabled\', this.checked ? 1 : 0)">' +
+          '<div class="toggle-track"></div>' +
+          '<div class="toggle-knob"></div>' +
+          '</label></div>';
 
       // Labyrinth sliders
       var labEl = document.getElementById('labyrinth-sliders');
@@ -2624,36 +2636,105 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     if (profileLoading) return;
     profileLoading = true;
     try {
-      var profile = await api('/admin/api/scanner/profile');
-      vulnProfile = profile;
-      var sev = profile.severity_counts || {};
-      var metrics = profile.expected_metrics || {};
+      var data = await api('/admin/api/scanner/profile');
+      vulnProfile = data;
+      var p = data.profile || data;
+      var summary = data.summary || {};
+      var vulns = p.vulnerabilities || [];
+      var sev = summary.by_severity || p.by_severity || {};
+      var totalVulns = summary.total || p.total_vulns || 0;
+      var detectable = summary.detectable || 0;
+      var enabledGroups = summary.enabled_groups || 0;
+      var totalGroups = summary.total_groups || 0;
+      var totalEndpoints = summary.total_endpoints || p.total_endpoints || 0;
 
+      // a) Summary cards row
       var sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
-      var sevHtml = sevOrder.map(function(s) {
-        return '<span class="sev sev-' + s + '" style="margin-right:10px">' + s + ': ' + (sev[s] || 0) + '</span>';
-      }).join('');
-
+      var sevSummary = sevOrder.map(function(s) { return (sev[s] || 0) + ' ' + s; }).join(' / ');
       var html = '<div class="grid">' +
-        card('Total Vulns', profile.total_vulns || 0, 'v-ok') +
-        card('Total Endpoints', profile.total_endpoints || 0, 'v-info') +
-        card('OWASP', (profile.category_counts || {}).owasp || 0, 'v-err') +
-        card('Advanced', (profile.category_counts || {}).advanced || 0, 'v-warn') +
-        card('Dashboard', (profile.category_counts || {}).dashboard || 0, 'v-info') +
-        '</div>' +
-        '<div style="margin:12px 0">' + sevHtml + '</div>' +
-        '<div style="margin-top:14px">' +
-        '<h3 style="color:#00ccaa;font-size:0.85em;margin-bottom:8px">EXPECTED BEHAVIOR METRICS</h3>' +
-        metricBar('Error Rate', metrics.error_rate || 0, 'prog-red') +
-        metricBar('Labyrinth Rate', metrics.labyrinth_rate || 0, 'prog-yellow') +
-        metricBar('Block Rate', metrics.block_rate || 0, 'prog-red') +
-        metricBar('CAPTCHA Rate', metrics.captcha_rate || 0, 'prog-yellow') +
+        card('Total Vulnerabilities', totalVulns, 'v-ok') +
+        card('By Severity', sevSummary, 'v-warn') +
+        card('Enabled Groups', enabledGroups + ' of ' + totalGroups, 'v-info') +
+        card('Detectable', detectable + ' of ' + totalVulns, 'v-ok') +
         '</div>';
 
+      // b) Help text
+      html += '<div style="margin:12px 0;padding:10px 14px;background:#0a1a1a;border:1px solid #00ccff22;border-radius:6px;color:#889;font-size:0.82em;line-height:1.5">' +
+        'This shows what vulnerabilities the server currently exposes. Scanners are graded against this profile &mdash; a perfect scanner would detect all detectable vulnerabilities.' +
+        '</div>';
+
+      // d) Coverage section (only if scan has run)
+      var runs = window._completedRuns || [];
+      if (runs.length > 0) {
+        var lastRun = runs[runs.length - 1];
+        var comp = lastRun.comparison || {};
+        var tp = (comp.true_positives || []).length;
+        var testedEndpoints = tp;
+        var coveragePct = totalVulns > 0 ? Math.min((testedEndpoints / totalVulns) * 100, 100).toFixed(1) : '0.0';
+        html += '<div style="margin:12px 0;padding:10px 14px;background:#111;border:1px solid #00ff8833;border-radius:6px">' +
+          '<div style="color:#aaa;font-size:0.82em;margin-bottom:6px">Last scan detected ' +
+          '<span style="color:#00ff88;font-weight:bold">' + testedEndpoints + '</span> of ' +
+          '<span style="color:#0ff">' + totalVulns + '</span> vulnerabilities (' +
+          '<span style="color:#00ff88">' + coveragePct + '%%</span>)</div>' +
+          '<div class="prog-bar"><div class="prog-fill prog-green" style="width:' + coveragePct + '%%"></div></div>' +
+          '</div>';
+      }
+
+      // c) Collapsible vulnerability list (collapsed by default)
+      html += '<div style="margin-top:14px">' +
+        '<div style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#111;border:1px solid #00ccff33;border-radius:6px" ' +
+        'onclick="var body=document.getElementById(\'vuln-surface-list\');body.style.display=body.style.display===\'none\'?\'\':\'none\';this.querySelector(\'.vuln-expand-arrow\').textContent=body.style.display===\'none\'?\'\\u25B6\':\'\\u25BC\'">' +
+        '<span style="color:#00ccaa;font-size:0.85em;font-weight:bold"><span class="vuln-expand-arrow" style="margin-right:6px">&#9654;</span>View All Expected Vulnerabilities (' + totalVulns + ')</span>' +
+        '<span style="color:#555;font-size:0.8em">click to expand</span>' +
+        '</div>';
+
+      html += '<div id="vuln-surface-list" style="display:none;margin-top:8px">';
+
+      // Filter buttons by severity
+      html += '<div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap">' +
+        '<button class="scanner-btn" style="padding:3px 10px;font-size:0.75em" onclick="filterVulnSurface(\'all\')">All</button>';
+      sevOrder.forEach(function(s) {
+        var color = s === 'critical' ? '#ff2244' : s === 'high' ? '#ff8800' : s === 'medium' ? '#ffcc00' : s === 'low' ? '#4488ff' : '#666';
+        html += '<button class="scanner-btn" style="padding:3px 10px;font-size:0.75em;border-color:' + color + '" onclick="filterVulnSurface(\'' + s + '\')">' +
+          s.charAt(0).toUpperCase() + s.slice(1) + ' (' + (sev[s] || 0) + ')</button>';
+      });
+      html += '</div>';
+
+      // Vulnerability table
+      html += '<div class="tbl-scroll" style="max-height:500px"><table id="vuln-surface-table">' +
+        '<thead><tr><th>ID</th><th>Name</th><th>Severity</th><th>Endpoints</th><th>Detectable</th></tr></thead><tbody>';
+      vulns.forEach(function(v) {
+        var sevColor = v.severity === 'critical' ? '#ff2244' : v.severity === 'high' ? '#ff8800' : v.severity === 'medium' ? '#ffcc00' : v.severity === 'low' ? '#4488ff' : '#666';
+        var endpoints = (v.endpoints || []).join(', ') || '-';
+        var detectIcon = v.detectable ? '<span style="color:#00ff88">Yes</span>' : '<span style="color:#555">No</span>';
+        html += '<tr data-severity="' + escapeHtml(v.severity || '') + '">' +
+          '<td style="color:#888;font-size:0.8em;white-space:nowrap">' + escapeHtml(v.id || '') + '</td>' +
+          '<td>' + escapeHtml(v.name || '') + '</td>' +
+          '<td><span style="color:' + sevColor + ';font-weight:bold;text-transform:uppercase;font-size:0.8em">' + escapeHtml(v.severity || '') + '</span></td>' +
+          '<td style="color:#888;font-size:0.8em;max-width:280px;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(endpoints) + '</td>' +
+          '<td style="text-align:center">' + detectIcon + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+      html += '</div></div>';
+
       document.getElementById('scanner-profile-summary').innerHTML = html;
-      if (showToast) toast('Profile generated');
-    } catch(e) { console.error('generateProfile:', e); if (showToast) toast('Failed to generate profile'); }
+      if (showToast) toast('Profile loaded');
+    } catch(e) { console.error('generateProfile:', e); if (showToast) toast('Failed to load profile'); }
     finally { profileLoading = false; }
+  };
+
+  window.filterVulnSurface = function(severity) {
+    var table = document.getElementById('vuln-surface-table');
+    if (!table) return;
+    var rows = table.querySelectorAll('tbody tr');
+    rows.forEach(function(row) {
+      if (severity === 'all' || row.getAttribute('data-severity') === severity) {
+        row.style.display = '';
+      } else {
+        row.style.display = 'none';
+      }
+    });
   };
 
   function metricBar(label, value, cls) {
@@ -2869,13 +2950,51 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }
 
     var fn = report.false_negatives || [];
+    var cfn = report.classified_false_negatives || [];
     if (fn.length > 0) {
-      html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:16px">FALSE NEGATIVES - MISSED (' + fn.length + ')</h3>';
-      html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
-      fn.forEach(function(item) {
-        html += '<tr><td class="missed">' + escapeHtml(item.name || '') + '</td><td>' + escapeHtml((item.endpoints || [])[0] || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
-      });
-      html += '</tbody></table>';
+      // If we have classified FN data, split into two groups
+      if (cfn.length > 0) {
+        var critical = cfn.filter(function(c) { return c.classification === 'crawled_not_detected'; });
+        var notCrawled = cfn.filter(function(c) { return c.classification === 'not_crawled'; });
+
+        html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:16px">FALSE NEGATIVES - MISSED (' + fn.length + ') ' +
+          '<span style="background:#ff4444;color:#000;padding:1px 6px;border-radius:3px;font-size:0.85em;margin-left:6px">' + critical.length + ' critical</span> ' +
+          '<span style="background:#ffaa00;color:#000;padding:1px 6px;border-radius:3px;font-size:0.85em;margin-left:4px">' + notCrawled.length + ' not crawled</span></h3>';
+
+        if (critical.length > 0) {
+          html += '<h4 style="color:#ff4444;font-size:0.8em;margin-top:10px;text-transform:uppercase;letter-spacing:0.5px">CRAWLED BUT NOT DETECTED (Critical)</h4>';
+          html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Severity</th><th>Endpoints Hit</th><th>Endpoints Missed</th></tr></thead><tbody>';
+          critical.forEach(function(item) {
+            var v = item.vuln || {};
+            var hitStr = (item.endpoints_hit || []).map(function(e) { return escapeHtml(e); }).join(', ') || '-';
+            var missStr = (item.endpoints_missed || []).map(function(e) { return escapeHtml(e); }).join(', ') || '-';
+            html += '<tr style="background:#330000"><td class="missed">' + escapeHtml(v.name || '') + '</td><td>' + escapeHtml(v.severity || '') + '</td>' +
+              '<td style="color:#ff6666;font-size:0.85em">' + hitStr + '</td>' +
+              '<td style="color:#888;font-size:0.85em">' + missStr + '</td></tr>';
+          });
+          html += '</tbody></table>';
+        }
+
+        if (notCrawled.length > 0) {
+          html += '<h4 style="color:#ffaa00;font-size:0.8em;margin-top:10px;text-transform:uppercase;letter-spacing:0.5px">NOT CRAWLED (Crawling Issue)</h4>';
+          html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Severity</th><th>Endpoints Not Reached</th></tr></thead><tbody>';
+          notCrawled.forEach(function(item) {
+            var v = item.vuln || {};
+            var missStr = (item.endpoints_missed || []).map(function(e) { return escapeHtml(e); }).join(', ') || '-';
+            html += '<tr style="background:#1a1a00"><td style="color:#ffaa00">' + escapeHtml(v.name || '') + '</td><td>' + escapeHtml(v.severity || '') + '</td>' +
+              '<td style="color:#888;font-size:0.85em">' + missStr + '</td></tr>';
+          });
+          html += '</tbody></table>';
+        }
+      } else {
+        // No classification data - fall back to original display
+        html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:16px">FALSE NEGATIVES - MISSED (' + fn.length + ')</h3>';
+        html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
+        fn.forEach(function(item) {
+          html += '<tr><td class="missed">' + escapeHtml(item.name || '') + '</td><td>' + escapeHtml((item.endpoints || [])[0] || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      }
     }
 
     var fpList = report.false_positives || [];
@@ -3081,19 +3200,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           document.getElementById('builtin-run-btn').style.display = 'none';
           document.getElementById('builtin-stop-btn').style.display = '';
           document.getElementById('builtin-progress-wrap').style.display = '';
-          var pct = status.progress_pct || 0;
-          var completed = status.completed || 0;
-          var total = status.total || 0;
-          var findings = status.findings || 0;
-          var elapsedMs = status.elapsed_ms || 0;
-          var elapsedSec = (elapsedMs / 1000).toFixed(1);
-          var rps = elapsedMs > 0 ? (completed / (elapsedMs / 1000)).toFixed(1) : '0';
-          document.getElementById('builtin-progress-bar').style.width = pct.toFixed(0) + '%%';
-          document.getElementById('builtin-progress-text').textContent = completed + ' / ' + total + ' (' + pct.toFixed(0) + '%%)';
-          document.getElementById('builtin-status-text').textContent = 'Scanning: ' + completed + '/' + total + ' tests';
-          document.getElementById('builtin-elapsed').textContent = elapsedSec + 's';
-          document.getElementById('builtin-req-count').textContent = completed + ' reqs (' + rps + '/s)';
-          document.getElementById('builtin-finding-count').textContent = findings + ' findings';
+          // Delegate display to pollBuiltinStatus for consistency
+          pollBuiltinStatus();
           if (!builtinPollTimer) {
             builtinPollTimer = setInterval(pollBuiltinStatus, 1500);
           }
@@ -3149,6 +3257,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     try {
       var status = await api('/admin/api/scanner/builtin/status');
       if (status.state === 'running') {
+        var phase = status.phase || 'scanning';
         var pct = status.progress_pct || 0;
         var completed = status.completed || 0;
         var total = status.total || 0;
@@ -3156,12 +3265,34 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         var elapsedMs = status.elapsed_ms || 0;
         var elapsedSec = (elapsedMs / 1000).toFixed(1);
         var rps = elapsedMs > 0 ? (completed / (elapsedMs / 1000)).toFixed(1) : '0';
-        document.getElementById('builtin-progress-bar').style.width = pct.toFixed(0) + '%%';
-        document.getElementById('builtin-progress-text').textContent = completed + ' / ' + total + ' (' + pct.toFixed(0) + '%%)';
-        document.getElementById('builtin-status-text').textContent = 'Scanning: ' + completed + '/' + total + ' tests';
+
+        if (phase === 'crawling') {
+          document.getElementById('builtin-progress-bar').style.width = '100%%';
+          document.getElementById('builtin-progress-bar').style.background = 'linear-gradient(90deg,#0aa,#066,#0aa)';
+          document.getElementById('builtin-progress-bar').style.backgroundSize = '200%% 100%%';
+          document.getElementById('builtin-progress-bar').style.animation = 'shimmer 1.5s linear infinite';
+          document.getElementById('builtin-progress-text').textContent = 'Crawling target...';
+          document.getElementById('builtin-status-text').textContent = 'Phase: Crawling target site';
+          document.getElementById('builtin-req-count').textContent = 'crawling...';
+          document.getElementById('builtin-finding-count').textContent = '-';
+        } else if (phase === 'generating') {
+          document.getElementById('builtin-progress-bar').style.width = '100%%';
+          document.getElementById('builtin-progress-bar').style.background = '#ffaa00';
+          document.getElementById('builtin-progress-bar').style.animation = '';
+          document.getElementById('builtin-progress-text').textContent = 'Generating requests...';
+          document.getElementById('builtin-status-text').textContent = 'Phase: Building attack requests';
+          document.getElementById('builtin-req-count').textContent = 'generating...';
+          document.getElementById('builtin-finding-count').textContent = '-';
+        } else {
+          document.getElementById('builtin-progress-bar').style.width = pct.toFixed(0) + '%%';
+          document.getElementById('builtin-progress-bar').style.background = '';
+          document.getElementById('builtin-progress-bar').style.animation = '';
+          document.getElementById('builtin-progress-text').textContent = completed + ' / ' + total + ' (' + pct.toFixed(0) + '%%)';
+          document.getElementById('builtin-status-text').textContent = 'Scanning: ' + completed + '/' + total + ' tests';
+          document.getElementById('builtin-req-count').textContent = completed + ' reqs (' + rps + '/s)';
+          document.getElementById('builtin-finding-count').textContent = findings + ' findings';
+        }
         document.getElementById('builtin-elapsed').textContent = elapsedSec + 's';
-        document.getElementById('builtin-req-count').textContent = completed + ' reqs (' + rps + '/s)';
-        document.getElementById('builtin-finding-count').textContent = findings + ' findings';
       } else {
         if (builtinPollTimer) { clearInterval(builtinPollTimer); builtinPollTimer = null; }
         document.getElementById('builtin-run-btn').style.display = '';
