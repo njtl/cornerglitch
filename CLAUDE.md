@@ -21,6 +21,7 @@ go build -o glitch ./cmd/glitch
 ./glitch -port 9000 -dash-port 9001         # custom ports
 ./glitch -config config.json                # load saved configuration
 ./glitch -nightmare                         # nightmare mode
+GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag)
 
 # Scanner (client emulator)
 go build -o glitch-scanner ./cmd/glitch-scanner
@@ -30,9 +31,14 @@ glitch-scanner -target http://localhost:8765 -profile nightmare
 # Proxy (middleware emulator)
 go build -o glitch-proxy ./cmd/glitch-proxy
 glitch-proxy -target http://localhost:8765 -mode chaos
+glitch-proxy -target http://localhost:8765 --chaos-prob 0.3 --waf-action block
 
 # Self-test (all three against each other)
 glitch selftest --mode nightmare --duration 60s
+glitch selftest --mode baseline              # also: scanner-stress, proxy-stress, chaos
+
+# Docker
+docker-compose up                            # runs server + dashboard
 ```
 
 No external dependencies — stdlib only, go 1.24+.
@@ -68,6 +74,7 @@ internal/
   health/                        Health endpoints + Spring Boot Actuator emulation
   search/, email/, oauth/, cdn/, i18n/, privacy/, websocket/, analytics/
   recorder/                      Traffic recording (JSONL/PCAP formats)
+  replay/                        PCAP/JSONL replay (loader, player, timing modes)
   spider/                        Spider data generation for crawl discovery
 
   # Scanner subsystems
@@ -93,7 +100,12 @@ internal/
   # Self-test
   selftest/                      Pipeline orchestration, monitoring, reporting
 
-docs/                            PRDs, architecture plan
+Dockerfile                       Multi-stage build (non-root, healthcheck)
+docker-compose.yml               Server + dashboard with volumes/env config
+Makefile                         build, test, vet, clean, docker-build, run, cross
+.github/workflows/               CI (lint/test/build) + Docker multi-arch push
+
+docs/                            PRDs, architecture plans, design docs
 tests/
   acceptance/                    Acceptance tests
   integration/                   Integration tests
@@ -108,7 +120,10 @@ tests/
 - **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0. Includes HTTP errors, TCP-level errors, and protocol-level glitches (18 types: version mismatches, header corruption, encoding conflicts, connection tricks). Protocol glitches are togglable via admin config (`protocol_glitch_enabled`, `protocol_glitch_level` 0-4).
 - **Labyrinth pages are deterministic** — seeded from path via SHA-256 so the same URL always yields the same page.
 - **Adaptive behavior** is per-client (keyed by fingerprint ID) and mode transitions happen in `adaptive/engine.go:evaluate()`.
-- **Admin panel runs on a separate port** (default 8766) with 5 tabs: Dashboard, Server (green), Scanner (cyan), Proxy (orange), Settings. Server tab uses collapsible sections. Scanner has 3 sub-tabs (Evaluate External, Built-in Scanner, PCAP Replay). External scanner sub-tab order: Launch, History, Results, Target Vulnerability Surface, Manual Upload.
+- **Admin panel runs on a separate port** (default 8766), password-protected via `GLITCH_ADMIN_PASSWORD` env var or `-admin-password` flag (session cookies with 8-hour TTL). 5 tabs: Dashboard, Server (green), Scanner (cyan), Proxy (orange), Settings. Server tab uses collapsible sections. Scanner has 3 sub-tabs (Evaluate External, Built-in Scanner, PCAP Replay). External scanner sub-tab order: Launch, History, Results, Target Vulnerability Surface, Manual Upload.
+- **Vulnerability groups** are map-based (`VulnGroups` slice): owasp, api_security, advanced, modern, infrastructure, iot_desktop, mobile_privacy, specialized, dashboard. Each group can be toggled via admin API; disabled groups return 404.
+- **Nightmare mode** is per-subsystem (server/scanner/proxy) via `NightmareState` struct. Server nightmare snapshots all config + feature flags and applies extreme values. Proxy nightmare snapshots the previous proxy mode for restore. Global nightmare bar with pulsing red animation.
+- **Selftest** has 4 modes: baseline, scanner-stress, proxy-stress, chaos. Crawl budget is capped at 30% of remaining time.
 - **Vuln pages use "Acme Corp Portal" layout** — corporate-looking nav bar, sidebar, breadcrumbs, footer.
 - **Content pages include JS API calls** — `fetch()` calls, `<link rel="prefetch">` hints, and hidden `<a>` tags so scanners discover API endpoints.
 - **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag.
@@ -121,7 +136,8 @@ In `vuln/owasp.go:ServeHTTP`, paths are routed in order with longer prefixes che
 
 ### Admin Panel Architecture
 
-- Data structures in `dashboard/admin.go`: FeatureFlags, AdminConfig, VulnConfig, ConfigExport (all thread-safe with sync.RWMutex)
+- Data structures in `dashboard/admin.go`: FeatureFlags, AdminConfig, VulnConfig, ProxyConfig, NightmareState, ConfigExport (all thread-safe with sync.RWMutex)
+- Auth in `dashboard/auth.go`: password validation, session cookies, ChangePassword()
 - API routes in `dashboard/admin_routes.go`
 - HTML/CSS/JS in `dashboard/admin_html.go`: single-page app with auto-refresh
 
@@ -214,4 +230,5 @@ New agents can be created in `~/.claude/agents/<name>.md` — follow the existin
 - `docs/PRD-proxy.md` — Proxy component PRD
 - `docs/PRD-nightmare.md` — Nightmare mode PRD
 - `docs/PRD-selftest.md` — Self-test pipeline PRD
-- `done_*.md` — Work session logs with PM feedback tracking
+- `docs/scanner_redesign.md` — Scanner subsystem redesign notes
+- `docs/ui_refactoring_plan.md` — Admin panel UI refactoring plan
