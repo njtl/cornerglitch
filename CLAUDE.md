@@ -145,6 +145,24 @@ In `vuln/owasp.go:ServeHTTP`, paths are routed in order with longer prefixes che
 - API routes in `dashboard/admin_routes.go`
 - HTML/CSS/JS in `dashboard/admin_html.go`: single-page app with auto-refresh
 
+## Branch & Merge Policy
+
+**All non-trivial work MUST go through a Pull Request.** Direct pushes to `master` are only allowed for single-commit hotfixes. For any feature, refactor, or multi-file change:
+
+1. Create a feature branch (e.g. `qa/atomic-tests`, `feature/new-subsystem`)
+2. Commit often to the branch
+3. When done, open a PR via `gh pr create`
+4. CI must pass on the PR branch
+5. Merge via PR (squash or merge commit)
+
+### Test Maintenance Rules
+
+- When any setting is **added** → corresponding atomic tests MUST be added
+- When any setting is **changed** → corresponding tests MUST be updated
+- When any setting is **removed** → corresponding tests MUST be removed
+- Test suite must stay in sync with the codebase at all times
+- PR reviews must verify test coverage for setting changes
+
 ## Pushing to Remote
 
 **A green CI pipeline is a hard requirement for pushing to `master`.** Before pushing:
