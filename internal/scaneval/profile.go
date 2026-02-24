@@ -90,6 +90,8 @@ type ComparisonReport struct {
 	ScannerTimedOut bool     `json:"scanner_timed_out"`
 	ScannerErrors   []string `json:"scanner_errors"`
 
+	ClassifiedFN []ClassifiedFalseNegative `json:"classified_false_negatives,omitempty"`
+
 	Grade string `json:"grade"`
 }
 
@@ -97,6 +99,39 @@ type ComparisonReport struct {
 type MatchedVuln struct {
 	Expected VulnCategory `json:"expected"`
 	Found    Finding      `json:"found"`
+}
+
+// ClassifiedFalseNegative distinguishes between false negatives that were
+// crawled but not detected (critical) vs not crawled at all (less critical).
+type ClassifiedFalseNegative struct {
+	Vuln            VulnCategory `json:"vuln"`
+	Classification  string       `json:"classification"` // "not_crawled" or "crawled_not_detected"
+	EndpointsHit    []string     `json:"endpoints_hit"`
+	EndpointsMissed []string     `json:"endpoints_missed"`
+}
+
+// ClassifyFalseNegatives cross-references false negatives from a comparison
+// report with server request logs (accessedPaths) to determine whether each
+// missed vulnerability was actually crawled but not detected (critical) or
+// not crawled at all (less critical, a crawling issue rather than detection).
+func ClassifyFalseNegatives(report *ComparisonReport, accessedPaths map[string]int) {
+	report.ClassifiedFN = nil
+	for _, fn := range report.FalseNegatives {
+		cfn := ClassifiedFalseNegative{Vuln: fn}
+		for _, ep := range fn.Endpoints {
+			if _, hit := accessedPaths[ep]; hit {
+				cfn.EndpointsHit = append(cfn.EndpointsHit, ep)
+			} else {
+				cfn.EndpointsMissed = append(cfn.EndpointsMissed, ep)
+			}
+		}
+		if len(cfn.EndpointsHit) > 0 {
+			cfn.Classification = "crawled_not_detected"
+		} else {
+			cfn.Classification = "not_crawled"
+		}
+		report.ClassifiedFN = append(report.ClassifiedFN, cfn)
+	}
 }
 
 // ComputeProfile examines enabled features and config to build a complete

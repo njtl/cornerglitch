@@ -248,6 +248,23 @@ func (c *Collector) TimeSeries(n int) []secondBucket {
 	return result
 }
 
+// GetPathsInTimeWindow returns a map of paths and their request counts
+// for requests that occurred within the given time window [start, end].
+func (c *Collector) GetPathsInTimeWindow(start, end time.Time) map[string]int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	paths := make(map[string]int)
+	for _, rec := range c.records {
+		if rec.Timestamp.IsZero() {
+			continue
+		}
+		if !rec.Timestamp.Before(start) && !rec.Timestamp.After(end) {
+			paths[rec.Path]++
+		}
+	}
+	return paths
+}
+
 // Uptime returns server uptime.
 func (c *Collector) Uptime() time.Duration {
 	return time.Since(c.startTime)
