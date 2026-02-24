@@ -821,7 +821,8 @@ func TestProxy_Behavioral_ServerStillResponds(t *testing.T) {
 			// Retry a few times since chaos/error injection is probabilistic
 			var lastErr error
 			for i := 0; i < 5; i++ {
-				resp, err := http.Get(serverURL + "/health")
+				cl := &http.Client{Timeout: 10 * time.Second}
+				resp, err := cl.Get(serverURL + "/health")
 				if err != nil {
 					lastErr = err
 					time.Sleep(100 * time.Millisecond)
@@ -1137,7 +1138,8 @@ func TestProxy_ServerRequestsWithProxyModes(t *testing.T) {
 			// Server health endpoint should always respond
 			var success bool
 			for retry := 0; retry < 5; retry++ {
-				resp, err := http.Get(serverURL + "/health")
+				cl := &http.Client{Timeout: 10 * time.Second}
+				resp, err := cl.Get(serverURL + "/health")
 				if err != nil {
 					time.Sleep(200 * time.Millisecond)
 					continue

@@ -696,10 +696,14 @@ func TestConcurrentRequests(t *testing.T) {
 	h := newTestHandler()
 	done := make(chan bool, 20)
 
+	// Use paths that are handled by deterministic subsystems (health, search,
+	// api, etc.) and avoid "/" which can hit slow error types like slow_drip
+	// (17s) or delayed (3-5s). This test verifies concurrency safety, not
+	// response speed — slow chaos errors are tested elsewhere.
 	paths := []string{
-		"/", "/health", "/search?q=test", "/api/v1/users",
+		"/health", "/search?q=test", "/api/v1/users",
 		"/webmail", "/es/", "/api/i18n/languages", "/status",
-		"/vuln/a01/admin", "/wp-admin/",
+		"/vuln/a01/admin", "/wp-admin/", "/ping",
 	}
 
 	for i := 0; i < 20; i++ {
@@ -713,10 +717,12 @@ func TestConcurrentRequests(t *testing.T) {
 		}(i)
 	}
 
+	// Generous timeout — CI runners are slower than local machines, and some
+	// subsystems (api, search) do real work. 30s is plenty even on slow VMs.
 	for i := 0; i < 20; i++ {
 		select {
 		case <-done:
-		case <-time.After(10 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Fatal("concurrent requests timed out")
 		}
 	}

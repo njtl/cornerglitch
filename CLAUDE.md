@@ -144,12 +144,31 @@ In `vuln/owasp.go:ServeHTTP`, paths are routed in order with longer prefixes che
 - API routes in `dashboard/admin_routes.go`
 - HTML/CSS/JS in `dashboard/admin_html.go`: single-page app with auto-refresh
 
+## Pushing to Remote
+
+**A green CI pipeline is a hard requirement for pushing to `master`.** Before pushing:
+
+1. Run `go build ./...` and `go vet ./...` — must pass
+2. Run `go test ./... -count=1 -timeout 300s` — must pass (unit, integration, regression)
+3. Push to remote
+4. Wait for CI pipeline to complete — **must be green**
+5. If CI fails, fix the issue and push again before considering the work done
+
+**Do NOT push and move on without confirming the pipeline is green.** A red pipeline means the push is broken and must be fixed immediately.
+
+### CI vs Local Parity
+
+Integration tests must not be flaky between local and CI. Common causes of local-vs-CI divergence:
+- **Random chaos error types**: Tests against the chaos handler (e.g. `newTestHandler()`) may get slow error types (`slow_drip`, `slow_headers`, `delayed`) that cause timeouts. Fix: use deterministic subsystem paths (e.g. `/health`, `/api/v1/users`) or add retries. Never test response speed against `/` which routes through the error generator.
+- **CI runners are slower**: Shared VMs have less CPU/memory. Use generous timeouts (30s+) for concurrent tests.
+- **No running server in CI**: Acceptance tests that hit `localhost:8765` must skip gracefully when no server is running (`requireServer` pattern with `t.Skip`).
+
 ## Testing
 
 ```bash
 go build ./...                   # compile all binaries
 go vet ./...                     # static analysis
-go test ./... -count=1           # all unit tests
+go test ./... -count=1 -timeout 300s  # all unit tests (with timeout matching CI)
 ```
 
 ### Acceptance Tests (require running server)
