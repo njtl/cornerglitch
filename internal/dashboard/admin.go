@@ -982,8 +982,9 @@ type NightmareState struct {
 	ServerActive     bool
 	ScannerActive    bool
 	ProxyActive      bool
-	PreviousConfig   map[string]interface{} // snapshot before server nightmare
-	PreviousFeatures map[string]bool        // snapshot before server nightmare
+	PreviousConfig    map[string]interface{} // snapshot before server nightmare
+	PreviousFeatures  map[string]bool        // snapshot before server nightmare
+	PreviousProxyMode string                 // snapshot before proxy nightmare
 }
 
 var globalNightmare = &NightmareState{}
