@@ -35,7 +35,7 @@ glitch-proxy -target http://localhost:8765 --chaos-prob 0.3 --waf-action block
 
 # Self-test (all three against each other)
 glitch selftest --mode nightmare --duration 60s
-glitch selftest --mode baseline              # also: scanner-stress, proxy-stress, chaos
+glitch selftest --mode baseline              # also: scanner-stress, proxy-stress, server-stress, chaos
 
 # Docker
 docker-compose up                            # runs server + dashboard
@@ -104,6 +104,8 @@ Dockerfile                       Multi-stage build (non-root, healthcheck)
 docker-compose.yml               Server + dashboard with volumes/env config
 Makefile                         build, test, vet, clean, docker-build, run, cross
 .github/workflows/               CI (lint/test/build) + Docker multi-arch push
+deploy/k8s/                      Kubernetes manifests (deployment, service, configmap, ingress)
+deploy/systemd/                  Systemd service files (glitch-server, glitch-proxy)
 
 docs/                            PRDs, architecture plans, design docs
 tests/
@@ -123,12 +125,13 @@ tests/
 - **Admin panel runs on a separate port** (default 8766), password-protected via `GLITCH_ADMIN_PASSWORD` env var or `-admin-password` flag (session cookies with 8-hour TTL). 5 tabs: Dashboard, Server (green), Scanner (cyan), Proxy (orange), Settings. Server tab uses collapsible sections. Scanner has 3 sub-tabs (Evaluate External, Built-in Scanner, PCAP Replay). External scanner sub-tab order: Launch, History, Results, Target Vulnerability Surface, Manual Upload.
 - **Vulnerability groups** are map-based (`VulnGroups` slice): owasp, api_security, advanced, modern, infrastructure, iot_desktop, mobile_privacy, specialized, dashboard. Each group can be toggled via admin API; disabled groups return 404.
 - **Nightmare mode** is per-subsystem (server/scanner/proxy) via `NightmareState` struct. Server nightmare snapshots all config + feature flags and applies extreme values. Proxy nightmare snapshots the previous proxy mode for restore. Global nightmare bar with pulsing red animation.
-- **Selftest** has 4 modes: baseline, scanner-stress, proxy-stress, chaos. Crawl budget is capped at 30% of remaining time.
+- **Selftest** has 6 modes: baseline, scanner-stress, proxy-stress, server-stress, chaos, nightmare. Crawl budget is capped at 30% of remaining time.
 - **Vuln pages use "Acme Corp Portal" layout** — corporate-looking nav bar, sidebar, breadcrumbs, footer.
 - **Content pages include JS API calls** — `fetch()` calls, `<link rel="prefetch">` hints, and hidden `<a>` tags so scanners discover API endpoints.
 - **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag.
 - **Every subsystem is controllable** — all feature toggles and config parameters are wired to their actual subsystems.
 - **Avoid hard numbers in docs** — use qualitative language since counts change as the project evolves.
+- **Keep docs in sync** — any change to the project (new feature, refactor, bug fix, config change) must update both `CLAUDE.md` and `readme.md` to reflect the current state. This applies to user requests too: if the user asks for a change, update both files as part of the work.
 
 ### Vuln Handler Routing Chain
 
