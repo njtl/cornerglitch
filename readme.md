@@ -59,7 +59,7 @@ go build -o glitch ./cmd/glitch
 ./glitch -port 9000 -dash-port 9001         # custom ports
 ./glitch -config config.json                # load saved configuration
 ./glitch -nightmare                         # nightmare mode
-GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag)
+GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag, or .env file)
 ```
 
 ### Glitch Scanner
@@ -115,7 +115,7 @@ make k8s-deploy                             # deploy to Kubernetes
 - Traffic recording in JSONL and PCAP formats with replay support
 - Spider data generation for crawler discovery
 - Full admin panel with 5-tab layout (Dashboard, Server, Scanner, Proxy, Settings), three-column dashboard grouping by subsystem, clickable clients with detail/override, group-level preset buttons (All On/Off, Off/Low/Med/High/Max), per-mode nightmare toggles, feature flags, tunable parameters, and config import/export
-- Password-protected admin panel via `GLITCH_ADMIN_PASSWORD` env var or `-admin-password` flag
+- Password-protected admin panel via `GLITCH_ADMIN_PASSWORD` env var (or `.env` file) or `-admin-password` flag
 
 ### Glitch Scanner (client emulator)
 
@@ -124,7 +124,8 @@ make k8s-deploy                             # deploy to Kubernetes
 - Resilience testing -- verifies graceful handling of every error type the server can throw
 - Evasion modes for WAF bypass testing (encoding, header manipulation, fragmentation)
 - Configurable profiles: compliance, aggressive, stealth, nightmare
-- Scanner evaluation: compare results against expected vulnerability surface, classify false negatives (crawled vs not-crawled), multi-scanner comparison
+- Scanner evaluation: compare results against expected vulnerability surface, classify false negatives (crawled vs not-crawled), multi-scanner comparison with accuracy scoring
+- Supported external scanners: nuclei, httpx, ffuf, nikto, nmap, wapiti -- launched and parsed automatically from the admin panel
 
 ### Glitch Proxy (middleware emulator)
 

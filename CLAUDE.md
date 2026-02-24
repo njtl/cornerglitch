@@ -21,7 +21,7 @@ go build -o glitch ./cmd/glitch
 ./glitch -port 9000 -dash-port 9001         # custom ports
 ./glitch -config config.json                # load saved configuration
 ./glitch -nightmare                         # nightmare mode
-GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag)
+GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag, or .env file)
 
 # Scanner (client emulator)
 go build -o glitch-scanner ./cmd/glitch-scanner
@@ -122,7 +122,7 @@ tests/
 - **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0. Includes HTTP errors, TCP-level errors, and protocol-level glitches (18 types: version mismatches, header corruption, encoding conflicts, connection tricks). Protocol glitches are togglable via admin config (`protocol_glitch_enabled`, `protocol_glitch_level` 0-4).
 - **Labyrinth pages are deterministic** — seeded from path via SHA-256 so the same URL always yields the same page.
 - **Adaptive behavior** is per-client (keyed by fingerprint ID) and mode transitions happen in `adaptive/engine.go:evaluate()`.
-- **Admin panel runs on a separate port** (default 8766), password-protected via `GLITCH_ADMIN_PASSWORD` env var or `-admin-password` flag (session cookies with 8-hour TTL). 5 tabs: Dashboard, Server (green), Scanner (cyan), Proxy (orange), Settings. Server tab uses collapsible sections. Scanner has 3 sub-tabs (Evaluate External, Built-in Scanner, PCAP Replay). External scanner sub-tab order: Launch, History, Results, Target Vulnerability Surface, Manual Upload.
+- **Admin panel runs on a separate port** (default 8766), password-protected via `GLITCH_ADMIN_PASSWORD` env var (or `.env` file) or `-admin-password` flag (session cookies with 8-hour TTL). 5 tabs: Dashboard, Server (green), Scanner (cyan), Proxy (orange), Settings. Server tab uses collapsible sections. Scanner has 3 sub-tabs (Evaluate External, Built-in Scanner, PCAP Replay). External scanner sub-tab order: Launch, History, Results, Target Vulnerability Surface, Manual Upload.
 - **Vulnerability groups** are map-based (`VulnGroups` slice): owasp, api_security, advanced, modern, infrastructure, iot_desktop, mobile_privacy, specialized, dashboard. Each group can be toggled via admin API; disabled groups return 404.
 - **Nightmare mode** is per-subsystem (server/scanner/proxy) via `NightmareState` struct. Server nightmare snapshots all config + feature flags and applies extreme values. Proxy nightmare snapshots the previous proxy mode for restore. Global nightmare bar with pulsing red animation.
 - **Selftest** has 6 modes: baseline, scanner-stress, proxy-stress, server-stress, chaos, nightmare. Crawl budget is capped at 30% of remaining time.
@@ -191,11 +191,14 @@ go test ./tests/regression/ -count=1 -v   # regression suite
 
 ### Scanner Evaluation Flow
 1. External scanners are launched from admin panel (or CLI) against the server
-2. Scanner results are auto-captured and parsed by `scaneval/` parsers
-3. Results compared against `ExpectedProfile` (computed from enabled vulns/features)
-4. False negatives are classified: "crawled_not_detected" (critical) vs "not_crawled" (crawling issue) by cross-referencing with server request logs via `metrics/collector.GetPathsInTimeWindow()`
-5. Multi-scanner results displayed with per-scanner tabs and side-by-side comparison
-6. Built-in scanner tracks phases (crawling/generating/scanning/done) for UI progress feedback
+2. Supported external scanners: nuclei, httpx, ffuf, nikto, nmap, wapiti — each with dedicated parsers and command-line configuration in `scaneval/runner.go`
+3. Scanner results are auto-captured and parsed by `scaneval/` parsers
+4. Results compared against `ExpectedProfile` (computed from enabled vulns/features)
+5. False negatives are classified: "crawled_not_detected" (critical) vs "not_crawled" (crawling issue) by cross-referencing with server request logs via `metrics/collector.GetPathsInTimeWindow()`
+6. Multi-scanner results displayed with per-scanner tabs and side-by-side comparison
+7. Accuracy is a weighted score (0-100): detection contributes 70%, low false-positive rate contributes 30%
+8. Built-in scanner tracks phases (crawling/generating/scanning/done) for UI progress feedback
+9. ffuf uses a generated wordlist of hundreds of paths covering all vuln groups, APIs, honeypots, frameworks, and discovery paths
 
 ### Three-Way Architecture
 ```
