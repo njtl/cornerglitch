@@ -861,10 +861,17 @@ func TestNightmareState_Snapshot(t *testing.T) {
 
 func TestFeatureFlags_SetAll(t *testing.T) {
 	ff := NewFeatureFlags()
-	// Disable all
+	// Disable all (recorder is excluded from SetAll — it stays at its prior value)
 	ff.SetAll(false)
 	snap := ff.Snapshot()
 	for name, enabled := range snap {
+		if name == "recorder" {
+			// recorder is excluded from SetAll; it keeps its NewFeatureFlags() default (true)
+			if !enabled {
+				t.Errorf("flag %q should be unchanged (true) after SetAll(false)", name)
+			}
+			continue
+		}
 		if enabled {
 			t.Errorf("flag %q should be disabled after SetAll(false)", name)
 		}
@@ -876,6 +883,13 @@ func TestFeatureFlags_SetAll(t *testing.T) {
 		if !enabled {
 			t.Errorf("flag %q should be enabled after SetAll(true)", name)
 		}
+	}
+	// Verify recorder stays false if explicitly set before SetAll
+	ff.Set("recorder", false)
+	ff.SetAll(true)
+	snap = ff.Snapshot()
+	if snap["recorder"] {
+		t.Error("recorder should remain false after SetAll(true) when explicitly disabled")
 	}
 }
 

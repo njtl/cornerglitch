@@ -128,7 +128,8 @@ tests/
 - **Selftest** has 6 modes: baseline, scanner-stress, proxy-stress, server-stress, chaos, nightmare. Crawl budget is capped at 30% of remaining time.
 - **Vuln pages use "Acme Corp Portal" layout** — corporate-looking nav bar, sidebar, breadcrumbs, footer.
 - **Content pages include JS API calls** — `fetch()` calls, `<link rel="prefetch">` hints, and hidden `<a>` tags so scanners discover API endpoints.
-- **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag.
+- **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag. Settings auto-save to `.glitch-state.json` on every change and auto-load on startup (unless `-config` flag is used).
+- **Recorder is an operational flag** — `FeatureFlags.SetAll()` excludes `recorder` because traffic recording is an operational setting, not a chaos feature. Nightmare mode does not start/stop recording.
 - **Every subsystem is controllable** — all feature toggles and config parameters are wired to their actual subsystems.
 - **Avoid hard numbers in docs** — use qualitative language since counts change as the project evolves.
 - **Keep docs in sync** — any change to the project (new feature, refactor, bug fix, config change) must update both `CLAUDE.md` and `readme.md` to reflect the current state. This applies to user requests too: if the user asks for a change, update both files as part of the work.

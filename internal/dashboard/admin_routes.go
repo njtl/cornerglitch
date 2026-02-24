@@ -400,6 +400,7 @@ func adminAPIFeaturesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"feature": req.Feature,
@@ -445,6 +446,7 @@ func adminAPIConfigPost(w http.ResponseWriter, r *http.Request) {
 	var strVal string
 	if json.Unmarshal(strReq.Value, &strVal) == nil {
 		if globalConfig.SetString(strReq.Key, strVal) {
+			TriggerAutoSave()
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"ok":    true,
 				"key":   strReq.Key,
@@ -458,6 +460,7 @@ func adminAPIConfigPost(w http.ResponseWriter, r *http.Request) {
 	var numVal float64
 	if json.Unmarshal(strReq.Value, &numVal) == nil {
 		if globalConfig.Set(strReq.Key, numVal) {
+			TriggerAutoSave()
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"ok":    true,
 				"key":   strReq.Key,
@@ -676,6 +679,7 @@ func adminAPIBlockingPost(w http.ResponseWriter, r *http.Request, s *Server) {
 		s.adapt.SetBlockDuration(time.Duration(*req.DurationSec) * time.Second)
 	}
 
+	TriggerAutoSave()
 	chance, duration, enabled := s.adapt.GetBlockConfig()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":           true,
@@ -1038,6 +1042,7 @@ func adminAPIVulnsPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	globalVulnConfig.SetCategory(req.ID, req.Enabled)
+	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"id":      req.ID,
@@ -1070,6 +1075,7 @@ func adminAPIVulnsGroupPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	globalVulnConfig.SetGroup(req.Group, req.Enabled)
+	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"group":   req.Group,
@@ -1111,6 +1117,7 @@ func adminAPIErrorWeightsPost(w http.ResponseWriter, r *http.Request) {
 
 	if req.Reset {
 		globalConfig.ResetErrorWeights()
+		TriggerAutoSave()
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":      true,
 			"reset":   true,
@@ -1120,6 +1127,7 @@ func adminAPIErrorWeightsPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	globalConfig.SetErrorWeight(req.ErrorType, req.Weight)
+	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":         true,
 		"error_type": req.ErrorType,
@@ -1161,6 +1169,7 @@ func adminAPIPageTypeWeightsPost(w http.ResponseWriter, r *http.Request) {
 
 	if req.Reset {
 		globalConfig.ResetPageTypeWeights()
+		TriggerAutoSave()
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":      true,
 			"reset":   true,
@@ -1170,6 +1179,7 @@ func adminAPIPageTypeWeightsPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	globalConfig.SetPageTypeWeight(req.PageType, req.Weight)
+	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":        true,
 		"page_type": req.PageType,
@@ -1224,6 +1234,7 @@ func adminAPISpiderPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":    true,
 		"key":   req.Key,
@@ -1272,6 +1283,7 @@ func adminAPIConfigImport(w http.ResponseWriter, r *http.Request, s *Server) {
 	}
 
 	ImportConfig(&export)
+	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"message": "Configuration imported successfully",
@@ -2241,6 +2253,7 @@ func adminAPINightmarePost(w http.ResponseWriter, r *http.Request, s *Server) {
 		return
 	}
 
+	TriggerAutoSave()
 	state := map[string]bool{
 		"server":  globalNightmare.ServerActive,
 		"scanner": globalNightmare.ScannerActive,

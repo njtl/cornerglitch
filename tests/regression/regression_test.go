@@ -8,10 +8,12 @@ package regression
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/glitchWebServer/internal/dashboard"
 	"github.com/glitchWebServer/internal/scaneval"
 	"github.com/glitchWebServer/internal/scanner"
 )
@@ -283,5 +285,118 @@ func TestRegression_01d51f8_FindingUseTitleAndURL(t *testing.T) {
 	}
 	if _, exists := parsed["endpoint"]; exists {
 		t.Error("Finding must NOT have 'endpoint' field (use 'url')")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bug: Nightmare mode toggled traffic recording on/off
+//
+// Root cause: FeatureFlags.SetAll(true) set ALL flags including the "recorder"
+// flag, which is an operational setting (traffic capture) rather than a chaos
+// feature. Enabling/disabling nightmare would start/stop traffic recording.
+//
+// Fix: Excluded recorder from SetAll().
+//
+// Verified: SetAll(true/false) does not change the recorder flag.
+// ---------------------------------------------------------------------------
+
+func TestRegression_NightmareRecorder(t *testing.T) {
+	ff := dashboard.NewFeatureFlags()
+
+	// Explicitly disable recorder
+	ff.Set("recorder", false)
+
+	// Enabling all features should not affect recorder
+	ff.SetAll(true)
+	snap := ff.Snapshot()
+	if snap["recorder"] {
+		t.Error("SetAll(true) must not enable recorder — it is an operational flag, not a chaos feature")
+	}
+
+	// Explicitly enable recorder
+	ff.Set("recorder", true)
+
+	// Disabling all features should not affect recorder
+	ff.SetAll(false)
+	snap = ff.Snapshot()
+	if !snap["recorder"] {
+		t.Error("SetAll(false) must not disable recorder — it is an operational flag, not a chaos feature")
+	}
+
+	// All other flags should be affected
+	for name, enabled := range snap {
+		if name == "recorder" {
+			continue
+		}
+		if enabled {
+			t.Errorf("flag %q should be disabled after SetAll(false)", name)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bug: Settings not persisted across restarts
+//
+// Root cause: Config changes via the admin API were only stored in memory.
+// No auto-save mechanism existed to write state to disk.
+//
+// Fix: Added debounced auto-save that writes .glitch-state.json on every
+// config change via the admin API, and auto-loads it on startup.
+//
+// Verified: ExportConfig + ImportConfig round-trip preserves all settings.
+// SetStateFile + TriggerAutoSave writes state file that LoadStateFile reads.
+// ---------------------------------------------------------------------------
+
+func TestRegression_SettingsPersistence(t *testing.T) {
+	// Use a temp file for the state
+	tmp, err := os.CreateTemp("", "glitch-state-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmp.Name())
+	tmp.Close()
+
+	// Configure state file
+	dashboard.SetStateFile(tmp.Name())
+	defer dashboard.SetStateFile("") // clean up
+
+	// Change a setting
+	dashboard.GetAdminConfig().Set("error_rate_multiplier", 3.5)
+	dashboard.GetFeatureFlags().Set("labyrinth", false)
+
+	// Trigger auto-save and wait for debounce
+	dashboard.TriggerAutoSave()
+	time.Sleep(700 * time.Millisecond)
+
+	// Verify file was written
+	data, err := os.ReadFile(tmp.Name())
+	if err != nil {
+		t.Fatalf("State file not written: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("State file is empty")
+	}
+
+	// Verify the file contains valid config
+	var export dashboard.ConfigExport
+	if err := json.Unmarshal(data, &export); err != nil {
+		t.Fatalf("State file is not valid JSON: %v", err)
+	}
+	if export.Version == "" {
+		t.Error("State file missing version")
+	}
+
+	// Reset config to defaults
+	dashboard.GetAdminConfig().Set("error_rate_multiplier", 1.0)
+	dashboard.GetFeatureFlags().Set("labyrinth", true)
+
+	// Load state file — should restore settings
+	if !dashboard.LoadStateFile() {
+		t.Fatal("LoadStateFile returned false")
+	}
+
+	snap := dashboard.GetFeatureFlags().Snapshot()
+	if snap["labyrinth"] {
+		t.Error("labyrinth should be false after loading state file")
 	}
 }

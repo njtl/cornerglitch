@@ -1,7 +1,10 @@
 package dashboard
 
 import (
+	"encoding/json"
+	"log"
 	"net/http"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -10,6 +13,71 @@ import (
 	"github.com/glitchWebServer/internal/scaneval"
 	"github.com/glitchWebServer/internal/spider"
 )
+
+// ---------------------------------------------------------------------------
+// Auto-save — debounced state persistence to disk
+// ---------------------------------------------------------------------------
+
+var (
+	stateFilePath string
+	autoSaveMu    sync.Mutex
+	autoSaveTimer *time.Timer
+)
+
+// SetStateFile configures the path for auto-saving config state.
+func SetStateFile(path string) {
+	autoSaveMu.Lock()
+	defer autoSaveMu.Unlock()
+	stateFilePath = path
+}
+
+// TriggerAutoSave schedules a debounced write of the current config to disk.
+// Multiple rapid changes are coalesced into a single write after 500ms of quiet.
+func TriggerAutoSave() {
+	autoSaveMu.Lock()
+	defer autoSaveMu.Unlock()
+	if stateFilePath == "" {
+		return
+	}
+	if autoSaveTimer != nil {
+		autoSaveTimer.Stop()
+	}
+	autoSaveTimer = time.AfterFunc(500*time.Millisecond, func() {
+		export := ExportConfig()
+		data, err := json.MarshalIndent(export, "", "  ")
+		if err != nil {
+			log.Printf("\033[31m[glitch]\033[0m Auto-save marshal error: %v", err)
+			return
+		}
+		if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
+			log.Printf("\033[31m[glitch]\033[0m Auto-save write error: %v", err)
+			return
+		}
+	})
+}
+
+// LoadStateFile loads config from the state file if it exists.
+// Returns true if a state file was loaded.
+func LoadStateFile() bool {
+	autoSaveMu.Lock()
+	path := stateFilePath
+	autoSaveMu.Unlock()
+	if path == "" {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var export ConfigExport
+	if err := json.Unmarshal(data, &export); err != nil {
+		log.Printf("\033[31m[glitch]\033[0m Failed to parse state file %s: %v", path, err)
+		return false
+	}
+	ImportConfig(&export)
+	log.Printf("\033[36m[glitch]\033[0m Restored settings from %s", path)
+	return true
+}
 
 // ---------------------------------------------------------------------------
 // Feature Flags — thread-safe toggles for server subsystems
@@ -1078,6 +1146,8 @@ func sortedKV(m map[string]int, top int) []kvPair {
 }
 
 // SetAll sets all feature flags to the given value.
+// Note: recorder is excluded because it is an operational setting (traffic
+// capture), not a chaos feature. Nightmare mode should not start/stop recording.
 func (f *FeatureFlags) SetAll(enabled bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1098,7 +1168,7 @@ func (f *FeatureFlags) SetAll(enabled bool) {
 	f.search = enabled
 	f.email = enabled
 	f.i18n = enabled
-	f.recorder = enabled
+	// f.recorder deliberately excluded — operational, not chaos
 	f.websocket = enabled
 	f.privacy = enabled
 	f.health = enabled

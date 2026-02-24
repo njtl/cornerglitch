@@ -69,7 +69,10 @@ func main() {
 		dashboard.SetAdminPassword(pw)
 	}
 
-	// Import config file if specified
+	// Set up auto-save state file.
+	dashboard.SetStateFile(".glitch-state.json")
+
+	// Import config: explicit file takes priority, otherwise auto-load state.
 	if *configFile != "" {
 		data, err := os.ReadFile(*configFile)
 		if err != nil {
@@ -81,6 +84,8 @@ func main() {
 		}
 		dashboard.ImportConfig(&export)
 		log.Printf("\033[36m[glitch]\033[0m Imported config from %s (version: %s)", *configFile, export.Version)
+	} else {
+		dashboard.LoadStateFile()
 	}
 
 	collector := metrics.NewCollector()
