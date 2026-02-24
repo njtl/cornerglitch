@@ -48,7 +48,7 @@ cmd/
 internal/
   # Server subsystems
   server/handler.go              Main request handler — dispatches to all subsystems
-  errors/generator.go            Error types (HTTP + TCP) with weighted probability profiles
+  errors/generator.go            Error types (HTTP + TCP + protocol) with weighted probability profiles
   pages/generator.go             Content generators (HTML, JSON, XML, CSV, SSE, etc.)
   content/engine.go              Deterministic page generation with JS API calls
   labyrinth/labyrinth.go         Infinite procedural page graph for trapping scrapers
@@ -68,6 +68,7 @@ internal/
   health/                        Health endpoints + Spring Boot Actuator emulation
   search/, email/, oauth/, cdn/, i18n/, privacy/, websocket/, analytics/
   recorder/                      Traffic recording (JSONL/PCAP formats)
+  spider/                        Spider data generation for crawl discovery
 
   # Scanner subsystems
   scanner/
@@ -96,6 +97,7 @@ docs/                            PRDs, architecture plan
 tests/
   acceptance/                    Acceptance tests
   integration/                   Integration tests
+  regression/                    Regression tests for fixed bugs
   nightmare/                     Nightmare mode survival tests
 ```
 
@@ -103,10 +105,10 @@ tests/
 
 - **Zero external deps.** Everything uses Go stdlib. Do not add third-party modules.
 - **All logic is in `internal/`.** Nothing in `internal/` is meant to be imported by external code.
-- **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0.
+- **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0. Includes HTTP errors, TCP-level errors, and protocol-level glitches (18 types: version mismatches, header corruption, encoding conflicts, connection tricks). Protocol glitches are togglable via admin config (`protocol_glitch_enabled`, `protocol_glitch_level` 0-4).
 - **Labyrinth pages are deterministic** — seeded from path via SHA-256 so the same URL always yields the same page.
 - **Adaptive behavior** is per-client (keyed by fingerprint ID) and mode transitions happen in `adaptive/engine.go:evaluate()`.
-- **Admin panel runs on a separate port** (default 8766) with 5 tabs: Dashboard, Server (green), Scanner (cyan), Proxy (orange), Settings. Server tab uses collapsible sections. Scanner has 3 sub-tabs (Evaluate External, Built-in Scanner, PCAP Replay).
+- **Admin panel runs on a separate port** (default 8766) with 5 tabs: Dashboard, Server (green), Scanner (cyan), Proxy (orange), Settings. Server tab uses collapsible sections. Scanner has 3 sub-tabs (Evaluate External, Built-in Scanner, PCAP Replay). External scanner sub-tab order: Launch, History, Results, Target Vulnerability Surface, Manual Upload.
 - **Vuln pages use "Acme Corp Portal" layout** — corporate-looking nav bar, sidebar, breadcrumbs, footer.
 - **Content pages include JS API calls** — `fetch()` calls, `<link rel="prefetch">` hints, and hidden `<a>` tags so scanners discover API endpoints.
 - **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag.
@@ -167,6 +169,14 @@ go test ./tests/regression/ -count=1 -v   # regression suite
 3. Every request is recorded in `metrics/collector.go` (ring buffer + per-client profile)
 4. Adaptive engine re-evaluates client behavior periodically based on accumulated metrics
 5. Dashboard reads from collector and adaptive engine via JSON APIs
+
+### Scanner Evaluation Flow
+1. External scanners are launched from admin panel (or CLI) against the server
+2. Scanner results are auto-captured and parsed by `scaneval/` parsers
+3. Results compared against `ExpectedProfile` (computed from enabled vulns/features)
+4. False negatives are classified: "crawled_not_detected" (critical) vs "not_crawled" (crawling issue) by cross-referencing with server request logs via `metrics/collector.GetPathsInTimeWindow()`
+5. Multi-scanner results displayed with per-scanner tabs and side-by-side comparison
+6. Built-in scanner tracks phases (crawling/generating/scanning/done) for UI progress feedback
 
 ### Three-Way Architecture
 ```
