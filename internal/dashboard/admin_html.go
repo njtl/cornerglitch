@@ -2732,8 +2732,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       // Show latest completed comparison report
       if (completed.length > 0) {
         var latest = completed[completed.length - 1];
-        if (latest.Comparison) renderComparison(latest.Comparison);
-        else if (latest.Result) renderScanResult(latest);
+        if (latest.comparison) renderComparison(latest.comparison);
+        else if (latest.result) renderScanResult(latest);
       }
     } catch(e) { console.error('pollScanner:', e); }
   }
@@ -2771,66 +2771,66 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   };
 
   function renderScanResult(run) {
-    var r = run.Result || {};
-    var statusCls = run.Status === 'completed' ? 'v-ok' : 'v-err';
-    var statusText = run.Status || '-';
-    if (run.Crashed) statusText = 'CRASHED';
-    if (run.NotInstalled) statusText = 'NOT INSTALLED';
+    var r = run.result || {};
+    var statusCls = run.status === 'completed' ? 'v-ok' : 'v-err';
+    var statusText = run.status || '-';
+    if (run.crashed) statusText = 'CRASHED';
+    if (run.not_installed) statusText = 'NOT INSTALLED';
 
     var html = '<div class="grid">' +
-      card('Scanner', escapeHtml(run.Scanner || ''), 'v-info') +
+      card('Scanner', escapeHtml(run.scanner || ''), 'v-info') +
       card('Status', escapeHtml(statusText), statusCls) +
-      card('Duration', escapeHtml(run.Duration || '-'), 'v-info') +
-      card('Findings', (r.Findings || []).length, 'v-warn') +
-      card('Exit Code', run.ExitCode || 0, run.ExitCode === 0 || run.ExitCode === 1 ? 'v-ok' : 'v-err') +
+      card('Duration', escapeHtml(run.duration || '-'), 'v-info') +
+      card('Findings', (r.findings || []).length, 'v-warn') +
+      card('Exit Code', run.exit_code || 0, run.exit_code === 0 || run.exit_code === 1 ? 'v-ok' : 'v-err') +
       '</div>';
 
     // Crash alert
-    if (run.Crashed) {
+    if (run.crashed) {
       html += '<div style="background:#330000;border:1px solid #ff4444;border-radius:6px;padding:12px;margin:12px 0">' +
         '<span style="color:#ff4444;font-weight:bold;font-size:0.9em">SCANNER CRASHED</span>';
-      if (run.CrashSignal) html += ' <span style="color:#ff8844">Signal: ' + escapeHtml(run.CrashSignal) + '</span>';
-      html += '<div style="color:#ff6666;font-size:0.82em;margin-top:6px">The scanner terminated abnormally. Exit code: ' + (run.ExitCode || 0) + '</div>';
+      if (run.crash_signal) html += ' <span style="color:#ff8844">Signal: ' + escapeHtml(run.crash_signal) + '</span>';
+      html += '<div style="color:#ff6666;font-size:0.82em;margin-top:6px">The scanner terminated abnormally. Exit code: ' + (run.exit_code || 0) + '</div>';
       html += '</div>';
     }
 
     // Not installed alert
-    if (run.NotInstalled) {
+    if (run.not_installed) {
       html += '<div style="background:#1a1a00;border:1px solid #ffaa00;border-radius:6px;padding:12px;margin:12px 0">' +
         '<span style="color:#ffaa00;font-weight:bold;font-size:0.9em">SCANNER NOT INSTALLED</span>' +
         '<div style="color:#cc8800;font-size:0.82em;margin-top:6px">Install the scanner binary and try again.</div>' +
         '</div>';
     }
 
-    var findings = r.Findings || [];
+    var findings = r.findings || [];
     if (findings.length > 0) {
       html += '<h3 style="color:#00ccaa;font-size:0.85em;margin-top:14px">FINDINGS (' + findings.length + ')</h3>';
       html += '<table class="findings-tbl"><thead><tr><th>Name</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
       findings.forEach(function(f) {
-        html += '<tr><td>' + escapeHtml(f.name || f.Name || '') + '</td><td>' + escapeHtml(f.endpoint || f.Endpoint || '') + '</td><td>' + escapeHtml(f.severity || f.Severity || '') + '</td></tr>';
+        html += '<tr><td>' + escapeHtml(f.title || f.id || '') + '</td><td>' + escapeHtml(f.url || '') + '</td><td>' + escapeHtml(f.severity || '') + '</td></tr>';
       });
       html += '</tbody></table>';
     }
 
-    if (run.ErrorOutput) {
+    if (run.error_output) {
       html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:14px">SCANNER OUTPUT</h3>';
-      html += '<pre style="background:#1a0a0a;border:1px solid #330000;border-radius:4px;padding:10px;color:#ff6666;font-size:0.8em;max-height:200px;overflow:auto">' + escapeHtml(run.ErrorOutput) + '</pre>';
+      html += '<pre style="background:#1a0a0a;border:1px solid #330000;border-radius:4px;padding:10px;color:#ff6666;font-size:0.8em;max-height:200px;overflow:auto">' + escapeHtml(run.error_output) + '</pre>';
     }
 
-    if (run.StderrExcerpt) {
+    if (run.stderr_excerpt) {
       html += '<h3 style="color:#ff8844;font-size:0.85em;margin-top:14px">STDERR EXCERPT</h3>';
-      html += '<pre style="background:#1a0a00;border:1px solid #331100;border-radius:4px;padding:10px;color:#ff8844;font-size:0.8em;max-height:200px;overflow:auto">' + escapeHtml(run.StderrExcerpt) + '</pre>';
+      html += '<pre style="background:#1a0a00;border:1px solid #331100;border-radius:4px;padding:10px;color:#ff8844;font-size:0.8em;max-height:200px;overflow:auto">' + escapeHtml(run.stderr_excerpt) + '</pre>';
     }
 
     document.getElementById('scanner-comparison').innerHTML = html;
   }
 
   function renderComparison(report) {
-    var grade = (report.grade || report.Grade || '?').toUpperCase();
+    var grade = (report.grade || '?').toUpperCase();
     var gradeClass = 'grade-' + grade.toLowerCase();
-    var detPct = ((report.detection_rate || report.DetectionRate || 0) * 100).toFixed(1);
-    var fpPct = ((report.false_pos_rate || report.FalsePositiveRate || 0) * 100).toFixed(1);
-    var accPct = ((report.accuracy || report.Accuracy || 0) * 100).toFixed(1);
+    var detPct = ((report.detection_rate || 0) * 100).toFixed(1);
+    var fpPct = ((report.false_positive_rate || 0) * 100).toFixed(1);
+    var accPct = ((report.accuracy || 0) * 100).toFixed(1);
 
     var html = '<div style="display:grid;grid-template-columns:200px 1fr;gap:20px">' +
       '<div>' +
@@ -2851,45 +2851,45 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         '<span style="color:#ffcc00;font-size:0.85em">' + accPct + '%%</span></div>' +
       '</div></div>';
 
-    var health = report.scanner_health || report.ScannerHealth || {};
     html += '<div style="margin-top:14px;font-size:0.85em;color:#888">' +
-      'Crashed: <span style="color:' + (health.crashed || health.Crashed ? '#ff4444' : '#00ff88') + '">' + (health.crashed || health.Crashed ? 'YES' : 'no') + '</span> | ' +
-      'Timed out: <span style="color:' + (health.timed_out || health.TimedOut ? '#ff4444' : '#00ff88') + '">' + (health.timed_out || health.TimedOut ? 'YES' : 'no') + '</span> | ' +
-      'Errors: <span style="color:' + ((health.errors || health.Errors || 0) > 0 ? '#ff4444' : '#00ff88') + '">' + (health.errors || health.Errors || 0) + '</span>' +
+      'Crashed: <span style="color:' + (report.scanner_crashed ? '#ff4444' : '#00ff88') + '">' + (report.scanner_crashed ? 'YES' : 'no') + '</span> | ' +
+      'Timed out: <span style="color:' + (report.scanner_timed_out ? '#ff4444' : '#00ff88') + '">' + (report.scanner_timed_out ? 'YES' : 'no') + '</span> | ' +
+      'Errors: <span style="color:' + ((report.scanner_errors || []).length > 0 ? '#ff4444' : '#00ff88') + '">' + (report.scanner_errors || []).length + '</span>' +
       '</div>';
 
-    var tp = report.true_positives || report.TruePositives || [];
+    var tp = report.true_positives || [];
     if (tp.length > 0) {
       html += '<h3 style="color:#00ff88;font-size:0.85em;margin-top:16px">TRUE POSITIVES (' + tp.length + ')</h3>';
       html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
       tp.forEach(function(item) {
-        html += '<tr><td class="found">' + escapeHtml(item.name || item.Name || '') + '</td><td>' + escapeHtml(item.endpoint || item.Endpoint || '') + '</td><td>' + escapeHtml(item.severity || item.Severity || '') + '</td></tr>';
+        var exp = item.expected || {};
+        html += '<tr><td class="found">' + escapeHtml(exp.name || '') + '</td><td>' + escapeHtml((exp.endpoints || [])[0] || '') + '</td><td>' + escapeHtml(exp.severity || '') + '</td></tr>';
       });
       html += '</tbody></table>';
     }
 
-    var fn = report.false_negatives || report.FalseNegatives || [];
+    var fn = report.false_negatives || [];
     if (fn.length > 0) {
       html += '<h3 style="color:#ff4444;font-size:0.85em;margin-top:16px">FALSE NEGATIVES - MISSED (' + fn.length + ')</h3>';
       html += '<table class="findings-tbl"><thead><tr><th>Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
       fn.forEach(function(item) {
-        html += '<tr><td class="missed">' + escapeHtml(item.name || item.Name || '') + '</td><td>' + escapeHtml(item.endpoint || item.Endpoint || '') + '</td><td>' + escapeHtml(item.severity || item.Severity || '') + '</td></tr>';
+        html += '<tr><td class="missed">' + escapeHtml(item.name || '') + '</td><td>' + escapeHtml((item.endpoints || [])[0] || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
       });
       html += '</tbody></table>';
     }
 
-    var fpList = report.false_positives || report.FalsePositives || [];
+    var fpList = report.false_positives || [];
     if (fpList.length > 0) {
       html += '<h3 style="color:#ffaa00;font-size:0.85em;margin-top:16px">FALSE POSITIVES (' + fpList.length + ')</h3>';
       html += '<table class="findings-tbl"><thead><tr><th>Reported Vulnerability</th><th>Endpoint</th><th>Severity</th></tr></thead><tbody>';
       fpList.forEach(function(item) {
-        html += '<tr><td class="false-pos">' + escapeHtml(item.name || item.Name || '') + '</td><td>' + escapeHtml(item.endpoint || item.Endpoint || '') + '</td><td>' + escapeHtml(item.severity || item.Severity || '') + '</td></tr>';
+        html += '<tr><td class="false-pos">' + escapeHtml(item.title || item.id || '') + '</td><td>' + escapeHtml(item.url || '') + '</td><td>' + escapeHtml(item.severity || '') + '</td></tr>';
       });
       html += '</tbody></table>';
     }
 
-    if (report.message || report.Message) {
-      html += '<div style="margin-top:12px;color:#555;font-size:0.82em">' + escapeHtml(report.message || report.Message) + '</div>';
+    if (report.message) {
+      html += '<div style="margin-top:12px;color:#555;font-size:0.82em">' + escapeHtml(report.message) + '</div>';
     }
 
     document.getElementById('scanner-comparison').innerHTML = html;
@@ -2913,32 +2913,32 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
     // Completed scans (newest first)
     (completed || []).slice().reverse().forEach(function(r, idx) {
-      var comp = r.Comparison || {};
-      var grade = comp.Grade || comp.grade || '-';
-      var det = comp.DetectionRate || comp.detection_rate;
+      var comp = r.comparison || {};
+      var grade = comp.grade || '-';
+      var det = comp.detection_rate;
       var detStr = det !== undefined ? (det * 100).toFixed(0) + '%%' : '-';
       var gradeClass = grade !== '-' && grade !== '?' ? 'grade-' + grade.toLowerCase() : '';
-      var statusText = r.Status || '-';
+      var statusText = r.status || '-';
       var statusColor = '#00ff88';
-      if (r.Crashed) { statusText = 'CRASHED'; statusColor = '#ff4444'; }
-      else if (r.NotInstalled) { statusText = 'NOT INSTALLED'; statusColor = '#ff8844'; }
-      else if (r.Status === 'failed') { statusColor = '#ff4444'; }
-      else if (r.Status === 'timeout') { statusText = 'TIMEOUT'; statusColor = '#ffaa00'; }
-      else if (r.Status === 'crashed') { statusColor = '#ff4444'; }
+      if (r.crashed) { statusText = 'CRASHED'; statusColor = '#ff4444'; }
+      else if (r.not_installed) { statusText = 'NOT INSTALLED'; statusColor = '#ff8844'; }
+      else if (r.status === 'failed') { statusColor = '#ff4444'; }
+      else if (r.status === 'timeout') { statusText = 'TIMEOUT'; statusColor = '#ffaa00'; }
+      else if (r.status === 'crashed') { statusColor = '#ff4444'; }
 
       var exitInfo = '';
-      if (r.ExitCode && r.ExitCode !== 0) exitInfo = ' (exit ' + r.ExitCode + ')';
-      if (r.CrashSignal) exitInfo = ' (' + r.CrashSignal + ')';
+      if (r.exit_code && r.exit_code !== 0) exitInfo = ' (exit ' + r.exit_code + ')';
+      if (r.crash_signal) exitInfo = ' (' + r.crash_signal + ')';
 
       var realIdx = completed.length - 1 - idx;
       var actions = '<button class="scanner-btn" style="padding:2px 8px;font-size:0.72em" onclick="viewScanRun(' + realIdx + ')">View</button>';
-      if (comp.Grade || comp.grade) {
+      if (comp.grade) {
         actions += ' <button class="cfg-btn" style="padding:2px 8px;font-size:0.72em" onclick="compareScanRun(' + realIdx + ')">Compare</button>';
       }
 
       rows.push('<tr>' +
-        '<td style="color:#888">' + (r.CompletedAt ? new Date(r.CompletedAt).toLocaleString() : r.StartedAt ? new Date(r.StartedAt).toLocaleString() : '-') + '</td>' +
-        '<td>' + escapeHtml(r.Scanner || '') + '</td>' +
+        '<td style="color:#888">' + (r.completed_at ? new Date(r.completed_at).toLocaleString() : r.started_at ? new Date(r.started_at).toLocaleString() : '-') + '</td>' +
+        '<td>' + escapeHtml(r.scanner || '') + '</td>' +
         '<td' + (gradeClass ? ' class="' + gradeClass + '"' : '') + ' style="font-weight:bold;font-size:1.2em">' + escapeHtml(grade) + '</td>' +
         '<td>' + detStr + '</td>' +
         '<td style="color:' + statusColor + '">' + escapeHtml(statusText) + escapeHtml(exitInfo) + '</td>' +
@@ -2956,7 +2956,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var runs = window._completedRuns || [];
     if (idx >= 0 && idx < runs.length) {
       var run = runs[idx];
-      if (run.Comparison) renderComparison(run.Comparison);
+      if (run.comparison) renderComparison(run.comparison);
       else renderScanResult(run);
     }
   };
@@ -2965,9 +2965,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var runs = window._completedRuns || [];
     if (idx >= 0 && idx < runs.length) {
       var run = runs[idx];
-      if (run.Comparison) {
-        renderComparison(run.Comparison);
-        toast('Showing comparison for ' + (run.Scanner || 'scan'));
+      if (run.comparison) {
+        renderComparison(run.comparison);
+        toast('Showing comparison for ' + (run.scanner || 'scan'));
       }
     }
   };
