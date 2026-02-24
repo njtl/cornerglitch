@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/scaneval"
 	"github.com/glitchWebServer/internal/spider"
 )
@@ -866,6 +867,8 @@ var (
 	globalVulnConfig   = NewVulnConfig()
 	globalProxyConfig  = NewProxyConfig()
 	globalSpiderConfig = spider.NewConfig()
+	globalProxyManager = NewProxyManager()
+	globalRecorder     *recorder.Recorder
 
 	// Scanner runner — uses the real scanner package
 	scanRunner   *scaneval.Runner
@@ -887,6 +890,9 @@ func GetVulnConfig() *VulnConfig { return globalVulnConfig }
 // GetProxyConfig returns the global ProxyConfig instance.
 func GetProxyConfig() *ProxyConfig { return globalProxyConfig }
 
+// GetProxyManager returns the global ProxyManager instance.
+func GetProxyManager() *ProxyManager { return globalProxyManager }
+
 // GetSpiderConfig returns the global spider Config instance.
 func GetSpiderConfig() *spider.Config { return globalSpiderConfig }
 
@@ -896,6 +902,16 @@ func SetSpiderConfig(cfg *spider.Config) {
 	if cfg != nil {
 		globalSpiderConfig = cfg
 	}
+}
+
+// SetRecorder sets the global recorder instance for admin API access.
+func SetRecorder(rec *recorder.Recorder) {
+	globalRecorder = rec
+}
+
+// GetRecorder returns the global recorder instance.
+func GetRecorder() *recorder.Recorder {
+	return globalRecorder
 }
 
 // getScanRunner returns the singleton scaneval.Runner, creating it on first call.

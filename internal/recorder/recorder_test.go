@@ -1545,3 +1545,124 @@ func TestPCAPWriter_WriteAfterClose(t *testing.T) {
 		t.Error("expected error when writing to closed PCAPWriter")
 	}
 }
+
+// =============================================================================
+// StartWithLimits and GetStatus tests
+// =============================================================================
+
+func TestRecorder_StartWithLimits_MaxRequests(t *testing.T) {
+	rec := newTestRecorder(t)
+
+	// Start with a max of 5 requests
+	rec.StartWithLimits(0, 5)
+	if !rec.IsRecording() {
+		t.Fatal("expected recording to be true after StartWithLimits")
+	}
+
+	// Record 10 requests; the recorder should auto-stop after 5
+	for i := 0; i < 10; i++ {
+		rec.RecordFull("GET", "/page", "c1", nil, nil, 200, http.Header{}, 0, 0.1)
+	}
+
+	if rec.IsRecording() {
+		t.Error("expected recording to auto-stop after reaching maxRequests")
+	}
+
+	// Verify exactly 5 records were written
+	captures := rec.GetCaptures()
+	if len(captures) != 1 {
+		t.Fatalf("expected 1 capture file, got %d", len(captures))
+	}
+	if captures[0].Records != 5 {
+		t.Errorf("expected 5 records, got %d", captures[0].Records)
+	}
+}
+
+func TestRecorder_StartWithLimits_MaxDuration(t *testing.T) {
+	rec := newTestRecorder(t)
+
+	// Start with a max duration of 1 second
+	rec.StartWithLimits(1, 0)
+	if !rec.IsRecording() {
+		t.Fatal("expected recording to be true after StartWithLimits")
+	}
+
+	// Wait 2 seconds for the timer to fire
+	time.Sleep(2 * time.Second)
+
+	if rec.IsRecording() {
+		t.Error("expected recording to auto-stop after maxDuration elapsed")
+	}
+}
+
+func TestRecorder_GetStatus_Recording(t *testing.T) {
+	rec := newTestRecorder(t)
+
+	rec.SetFormat("jsonl")
+	rec.StartWithLimits(60, 1000)
+
+	// Record a few entries
+	for i := 0; i < 3; i++ {
+		rec.RecordFull("GET", "/test", "c1", nil, nil, 200, http.Header{}, 10, 0.5)
+	}
+
+	status := rec.GetStatus()
+
+	if !status.Recording {
+		t.Error("expected Recording to be true")
+	}
+	if status.Format != "jsonl" {
+		t.Errorf("expected format jsonl, got %q", status.Format)
+	}
+	if status.FileName == "" {
+		t.Error("expected non-empty FileName")
+	}
+	if status.Records != 3 {
+		t.Errorf("expected 3 records, got %d", status.Records)
+	}
+	if status.SizeBytes == 0 {
+		t.Error("expected non-zero SizeBytes")
+	}
+	if status.ElapsedSec <= 0 {
+		t.Errorf("expected positive ElapsedSec, got %f", status.ElapsedSec)
+	}
+	if status.MaxDuration != 60 {
+		t.Errorf("expected MaxDuration 60, got %d", status.MaxDuration)
+	}
+	if status.MaxRequests != 1000 {
+		t.Errorf("expected MaxRequests 1000, got %d", status.MaxRequests)
+	}
+
+	rec.Stop()
+}
+
+func TestRecorder_GetStatus_NotRecording(t *testing.T) {
+	rec := newTestRecorder(t)
+
+	status := rec.GetStatus()
+
+	if status.Recording {
+		t.Error("expected Recording to be false")
+	}
+	if status.Format != "jsonl" {
+		t.Errorf("expected default format jsonl, got %q", status.Format)
+	}
+	if status.FileName != "" {
+		t.Errorf("expected empty FileName, got %q", status.FileName)
+	}
+	if status.Records != 0 {
+		t.Errorf("expected 0 records, got %d", status.Records)
+	}
+	if status.SizeBytes != 0 {
+		t.Errorf("expected 0 SizeBytes, got %d", status.SizeBytes)
+	}
+	if status.ElapsedSec != 0 {
+		t.Errorf("expected 0 ElapsedSec, got %f", status.ElapsedSec)
+	}
+	if status.MaxDuration != 0 {
+		t.Errorf("expected 0 MaxDuration, got %d", status.MaxDuration)
+	}
+	if status.MaxRequests != 0 {
+		t.Errorf("expected 0 MaxRequests, got %d", status.MaxRequests)
+	}
+}
