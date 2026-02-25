@@ -228,21 +228,4 @@ func TestServer_Spider_RobotsCrawlDelayDefault(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-func resetSpiderConfig(t *testing.T) {
-	t.Helper()
-	cfg := dashboard.GetSpiderConfig()
-	cfg.Set("sitemap_error_rate", 0.15)
-	cfg.Set("sitemap_gzip_error_rate", 0.10)
-	cfg.Set("favicon_error_rate", 0.20)
-	cfg.Set("robots_error_rate", 0.10)
-	cfg.Set("meta_error_rate", 0.10)
-	cfg.Set("enable_sitemap_index", true)
-	cfg.Set("enable_gzip_sitemap", true)
-	// Int-typed configs require int type
-	cfg.Set("sitemap_entry_count", 50)
-	cfg.Set("robots_crawl_delay", 2)
-}
+// resetSpiderConfig is defined in helpers_test.go
