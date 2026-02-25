@@ -130,6 +130,7 @@ func resetAll(t *testing.T) {
 	resetAdminConfig(t)
 	resetVulnConfig(t)
 	resetNightmareState(t)
+	resetSpiderConfig(t)
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +309,21 @@ func makePostRequest(t *testing.T, path string, body interface{}) *http.Request 
 // makeRecorder creates an httptest.ResponseRecorder.
 func makeRecorder() *httptest.ResponseRecorder {
 	return httptest.NewRecorder()
+}
+
+// resetSpiderConfig restores spider config to defaults.
+func resetSpiderConfig(t *testing.T) {
+	t.Helper()
+	cfg := dashboard.GetSpiderConfig()
+	cfg.Set("sitemap_error_rate", 0.15)
+	cfg.Set("sitemap_gzip_error_rate", 0.10)
+	cfg.Set("favicon_error_rate", 0.20)
+	cfg.Set("robots_error_rate", 0.10)
+	cfg.Set("meta_error_rate", 0.10)
+	cfg.Set("enable_sitemap_index", true)
+	cfg.Set("enable_gzip_sitemap", true)
+	cfg.Set("sitemap_entry_count", 50)
+	cfg.Set("robots_crawl_delay", 2)
 }
 
 func toFloat64(v interface{}) (float64, bool) {

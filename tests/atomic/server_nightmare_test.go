@@ -1,6 +1,7 @@
 package atomic
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/glitchWebServer/internal/dashboard"
@@ -271,46 +272,69 @@ func TestServer_Nightmare_InvalidModeReturnsError(t *testing.T) {
 	}
 }
 
-// TestServer_Nightmare_RecorderUntouched verifies nightmare doesn't affect recorder.
-func TestServer_Nightmare_RecorderUntouched(t *testing.T) {
-	mux := setupTestEnv(t)
-	resetAll(t)
+// Recorder-nightmare interaction test is in server_combos_test.go
+// (TestCombo_NightmarePreservesRecorder) to avoid duplication.
 
-	// Set recorder to a specific state
-	dashboard.GetFeatureFlags().Set("recorder", false)
-
-	// Activate server nightmare (which calls SetAll(true))
-	apiPost(t, mux, "/admin/api/nightmare", map[string]interface{}{
-		"mode":    "server",
-		"enabled": true,
-	})
-
-	// Recorder should NOT be changed
-	snap := dashboard.GetFeatureFlags().Snapshot()
-	if snap["recorder"] {
-		t.Error("nightmare should not change recorder flag")
-	}
-
-	// Clean up
-	apiPost(t, mux, "/admin/api/nightmare", map[string]interface{}{
-		"mode":    "server",
-		"enabled": false,
-	})
-}
-
-// TestServer_Nightmare_ActiveModes tests the ActiveModes() helper.
+// TestServer_Nightmare_ActiveModes tests the ActiveModes() helper in all states.
 func TestServer_Nightmare_ActiveModes(t *testing.T) {
+	mux := setupTestEnv(t)
 	resetAll(t)
 	ns := dashboard.GetNightmareState()
 
-	// No active modes
+	// No active modes initially
 	modes := ns.ActiveModes()
 	if len(modes) != 0 {
 		t.Errorf("ActiveModes should be empty, got %v", modes)
 	}
 
-	// Manually set for direct testing
-	ns.Reset()
+	// Activate server → ActiveModes should include "server"
+	apiPost(t, mux, "/admin/api/nightmare", map[string]interface{}{
+		"mode":    "server",
+		"enabled": true,
+	})
+	modes = ns.ActiveModes()
+	if len(modes) != 1 {
+		t.Errorf("after server activate, ActiveModes should have 1 entry, got %v", modes)
+	}
+	found := false
+	for _, m := range modes {
+		if strings.EqualFold(m, "server") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ActiveModes should contain 'server' (case-insensitive), got %v", modes)
+	}
+
+	// Activate scanner too → should have 2
+	apiPost(t, mux, "/admin/api/nightmare", map[string]interface{}{
+		"mode":    "scanner",
+		"enabled": true,
+	})
+	modes = ns.ActiveModes()
+	if len(modes) != 2 {
+		t.Errorf("after server+scanner activate, ActiveModes should have 2, got %v", modes)
+	}
+
+	// Activate all → should have 3
+	apiPost(t, mux, "/admin/api/nightmare", map[string]interface{}{
+		"mode":    "proxy",
+		"enabled": true,
+	})
+	modes = ns.ActiveModes()
+	if len(modes) != 3 {
+		t.Errorf("after all activate, ActiveModes should have 3, got %v", modes)
+	}
+
+	// Deactivate all
+	apiPost(t, mux, "/admin/api/nightmare", map[string]interface{}{
+		"mode":    "all",
+		"enabled": false,
+	})
+	modes = ns.ActiveModes()
+	if len(modes) != 0 {
+		t.Errorf("after deactivate all, ActiveModes should be empty, got %v", modes)
+	}
 }
 
 // TestServer_Nightmare_APIResponseFormat verifies the nightmare GET response.

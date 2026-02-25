@@ -46,12 +46,17 @@ func TestScanner_API_ProfileReflectsFeatureFlags(t *testing.T) {
 	mux := setupTestEnv(t)
 	resetAll(t)
 
-	// Get baseline profile
+	// Get baseline profile with all features enabled
 	baseResp := apiGet(t, mux, "/admin/api/scanner/profile")
 	baseSummary := baseResp["summary"].(map[string]interface{})
 	baseTotal, _ := toFloat64(baseSummary["total"])
+	baseDetectable, _ := toFloat64(baseSummary["detectable"])
 
-	// Disable vuln feature flag
+	if baseTotal == 0 {
+		t.Fatal("baseline total should not be 0 with all features enabled")
+	}
+
+	// Disable vuln feature flag — this should reduce detectable vulns
 	apiPost(t, mux, "/admin/api/features", map[string]interface{}{
 		"feature": "vuln",
 		"enabled": false,
@@ -61,18 +66,30 @@ func TestScanner_API_ProfileReflectsFeatureFlags(t *testing.T) {
 	afterResp := apiGet(t, mux, "/admin/api/scanner/profile")
 	afterSummary := afterResp["summary"].(map[string]interface{})
 	afterTotal, _ := toFloat64(afterSummary["total"])
+	afterDetectable, _ := toFloat64(afterSummary["detectable"])
 
-	// With vuln disabled, total should be different (likely fewer)
-	if afterTotal == baseTotal && baseTotal > 0 {
-		// This is acceptable — some profiles may not change.
-		// The key test is that the endpoint works and returns valid data.
+	// The profile endpoint must return valid data in both states
+	if afterTotal < 0 {
+		t.Errorf("total should not be negative after disabling vuln: %v", afterTotal)
 	}
 
-	// Re-enable
+	// At minimum, either total or detectable should differ
+	if afterTotal == baseTotal && afterDetectable == baseDetectable {
+		t.Logf("WARNING: disabling vuln did not change profile total (%v) or detectable (%v) — profile may not reflect feature flags", baseTotal, baseDetectable)
+	}
+
+	// Re-enable and verify profile restores
 	apiPost(t, mux, "/admin/api/features", map[string]interface{}{
 		"feature": "vuln",
 		"enabled": true,
 	})
+
+	restoredResp := apiGet(t, mux, "/admin/api/scanner/profile")
+	restoredSummary := restoredResp["summary"].(map[string]interface{})
+	restoredTotal, _ := toFloat64(restoredSummary["total"])
+	if restoredTotal != baseTotal {
+		t.Errorf("restored total = %v, want %v (same as baseline)", restoredTotal, baseTotal)
+	}
 }
 
 // TestScanner_API_ProfileReflectsVulnGroups verifies profile changes with vuln group toggles.
