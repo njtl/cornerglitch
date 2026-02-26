@@ -1,8 +1,12 @@
 package scaneval
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -137,7 +141,53 @@ func ClassifyFalseNegatives(report *ComparisonReport, accessedPaths map[string]i
 // ComputeProfile examines enabled features and config to build a complete
 // expected vulnerability profile. It takes feature flags and config as plain
 // maps so it has no dependency on other internal packages.
+// profileCache caches the last computed profile to avoid rebuilding 229+
+// VulnCategory structs on every request. Invalidated when features/config change.
+var (
+	profileCacheMu   sync.RWMutex
+	profileCacheKey  string
+	profileCacheVal  *ExpectedProfile
+)
+
+// profileHashKey computes a stable hash of the inputs that affect the profile.
+func profileHashKey(features map[string]bool, config map[string]interface{}, serverPort, dashPort int) string {
+	h := sha256.New()
+	// Features are the primary determinant of which vulns are included.
+	// Sort keys for determinism.
+	fb, _ := json.Marshal(features)
+	h.Write(fb)
+	// Only a few config keys affect the profile (behavioral rates).
+	fmt.Fprintf(h, "|%d|%d", serverPort, dashPort)
+	cb, _ := json.Marshal(config)
+	h.Write(cb)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 func ComputeProfile(features map[string]bool, config map[string]interface{}, serverPort, dashPort int) *ExpectedProfile {
+	key := profileHashKey(features, config, serverPort, dashPort)
+
+	profileCacheMu.RLock()
+	if profileCacheKey == key && profileCacheVal != nil {
+		cached := profileCacheVal
+		profileCacheMu.RUnlock()
+		// Return a shallow copy with fresh timestamp
+		cp := *cached
+		cp.Timestamp = time.Now()
+		return &cp
+	}
+	profileCacheMu.RUnlock()
+
+	p := computeProfileUncached(features, config, serverPort, dashPort)
+
+	profileCacheMu.Lock()
+	profileCacheKey = key
+	profileCacheVal = p
+	profileCacheMu.Unlock()
+
+	return p
+}
+
+func computeProfileUncached(features map[string]bool, config map[string]interface{}, serverPort, dashPort int) *ExpectedProfile {
 	p := &ExpectedProfile{
 		Timestamp:     time.Now(),
 		ServerPort:    serverPort,

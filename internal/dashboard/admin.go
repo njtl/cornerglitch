@@ -3,11 +3,13 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/glitchWebServer/internal/recorder"
@@ -25,7 +27,22 @@ var (
 	autoSaveMu    sync.Mutex
 	autoSaveTimer *time.Timer
 	globalStore   *storage.Store
+
+	// configVersion is incremented on every config change so the request
+	// handler can skip syncConfigToSubsystems when nothing changed.
+	configVersion atomic.Int64
 )
+
+// BumpConfigVersion increments the global config version counter.
+// Called whenever any config value changes (feature flags, admin config, etc.).
+func BumpConfigVersion() {
+	configVersion.Add(1)
+}
+
+// GetConfigVersion returns the current config version counter.
+func GetConfigVersion() int64 {
+	return configVersion.Load()
+}
 
 // SetStateFile configures the path for auto-saving config state.
 func SetStateFile(path string) {
@@ -58,6 +75,7 @@ func GetStore() *storage.Store { return globalStore }
 // TriggerAutoSave schedules a debounced write of the current config to disk.
 // Multiple rapid changes are coalesced into a single write after 500ms of quiet.
 func TriggerAutoSave() {
+	BumpConfigVersion()
 	autoSaveMu.Lock()
 	defer autoSaveMu.Unlock()
 	if stateFilePath == "" {
@@ -149,10 +167,9 @@ func LoadStateFile() bool {
 // Feature Flags — thread-safe toggles for server subsystems
 // ---------------------------------------------------------------------------
 
-// FeatureFlags holds boolean toggles for each server subsystem.
-type FeatureFlags struct {
-	mu sync.RWMutex
-
+// flagValues holds the actual boolean state for all feature flags.
+// Stored inside an atomic.Value for lock-free reads on the hot path.
+type flagValues struct {
 	labyrinth      bool
 	errorInject    bool
 	captcha        bool
@@ -177,9 +194,18 @@ type FeatureFlags struct {
 	spider         bool
 }
 
+// FeatureFlags holds boolean toggles for each server subsystem.
+// Uses atomic.Value for lock-free reads (hot path) and sync.Mutex
+// for copy-on-write updates (admin panel changes, infrequent).
+type FeatureFlags struct {
+	mu sync.Mutex   // write-only lock
+	v  atomic.Value // stores *flagValues
+}
+
 // NewFeatureFlags returns a FeatureFlags with every feature enabled.
 func NewFeatureFlags() *FeatureFlags {
-	return &FeatureFlags{
+	f := &FeatureFlags{}
+	f.v.Store(&flagValues{
 		labyrinth:      true,
 		errorInject:    true,
 		captcha:        true,
@@ -202,223 +228,183 @@ func NewFeatureFlags() *FeatureFlags {
 		privacy:        true,
 		health:         true,
 		spider:         true,
-	}
+	})
+	return f
 }
 
 func (f *FeatureFlags) IsLabyrinthEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.labyrinth
+	return f.v.Load().(*flagValues).labyrinth
 }
 
 func (f *FeatureFlags) IsErrorInjectEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.errorInject
+	return f.v.Load().(*flagValues).errorInject
 }
 
 func (f *FeatureFlags) IsCaptchaEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.captcha
+	return f.v.Load().(*flagValues).captcha
 }
 
 func (f *FeatureFlags) IsHoneypotEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.honeypot
+	return f.v.Load().(*flagValues).honeypot
 }
 
 func (f *FeatureFlags) IsVulnEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.vuln
+	return f.v.Load().(*flagValues).vuln
 }
 
 func (f *FeatureFlags) IsAnalyticsEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.analytics
+	return f.v.Load().(*flagValues).analytics
 }
 
 func (f *FeatureFlags) IsCDNEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.cdn
+	return f.v.Load().(*flagValues).cdn
 }
 
 func (f *FeatureFlags) IsOAuthEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.oauth
+	return f.v.Load().(*flagValues).oauth
 }
 
 func (f *FeatureFlags) IsHeaderCorruptEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.headerCorrupt
+	return f.v.Load().(*flagValues).headerCorrupt
 }
 
 func (f *FeatureFlags) IsCookieTrapsEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.cookieTraps
+	return f.v.Load().(*flagValues).cookieTraps
 }
 
 func (f *FeatureFlags) IsJSTrapsEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.jsTraps
+	return f.v.Load().(*flagValues).jsTraps
 }
 
 func (f *FeatureFlags) IsBotDetectionEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.botDetection
+	return f.v.Load().(*flagValues).botDetection
 }
 
 func (f *FeatureFlags) IsRandomBlockingEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.randomBlocking
+	return f.v.Load().(*flagValues).randomBlocking
 }
 
 func (f *FeatureFlags) IsFrameworkEmulEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.frameworkEmul
+	return f.v.Load().(*flagValues).frameworkEmul
 }
 
 func (f *FeatureFlags) IsSearchEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.search
+	return f.v.Load().(*flagValues).search
 }
 
 func (f *FeatureFlags) IsEmailEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.email
+	return f.v.Load().(*flagValues).email
 }
 
 func (f *FeatureFlags) IsI18nEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.i18n
+	return f.v.Load().(*flagValues).i18n
 }
 
 func (f *FeatureFlags) IsRecorderEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.recorder
+	return f.v.Load().(*flagValues).recorder
 }
 
 func (f *FeatureFlags) IsWebSocketEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.websocket
+	return f.v.Load().(*flagValues).websocket
 }
 
 func (f *FeatureFlags) IsPrivacyEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.privacy
+	return f.v.Load().(*flagValues).privacy
 }
 
 func (f *FeatureFlags) IsHealthEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.health
+	return f.v.Load().(*flagValues).health
 }
 
 func (f *FeatureFlags) IsSpiderEnabled() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.spider
+	return f.v.Load().(*flagValues).spider
 }
 
 // Set toggles a named feature. Returns false if the name is unknown.
+// Uses copy-on-write: copies the current flagValues, modifies, then stores atomically.
 func (f *FeatureFlags) Set(name string, enabled bool) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	old := f.v.Load().(*flagValues)
+	nv := *old // copy
 	switch name {
 	case "labyrinth":
-		f.labyrinth = enabled
+		nv.labyrinth = enabled
 	case "error_inject":
-		f.errorInject = enabled
+		nv.errorInject = enabled
 	case "captcha":
-		f.captcha = enabled
+		nv.captcha = enabled
 	case "honeypot":
-		f.honeypot = enabled
+		nv.honeypot = enabled
 	case "vuln":
-		f.vuln = enabled
+		nv.vuln = enabled
 	case "analytics":
-		f.analytics = enabled
+		nv.analytics = enabled
 	case "cdn":
-		f.cdn = enabled
+		nv.cdn = enabled
 	case "oauth":
-		f.oauth = enabled
+		nv.oauth = enabled
 	case "header_corrupt":
-		f.headerCorrupt = enabled
+		nv.headerCorrupt = enabled
 	case "cookie_traps":
-		f.cookieTraps = enabled
+		nv.cookieTraps = enabled
 	case "js_traps":
-		f.jsTraps = enabled
+		nv.jsTraps = enabled
 	case "bot_detection":
-		f.botDetection = enabled
+		nv.botDetection = enabled
 	case "random_blocking":
-		f.randomBlocking = enabled
+		nv.randomBlocking = enabled
 	case "framework_emul":
-		f.frameworkEmul = enabled
+		nv.frameworkEmul = enabled
 	case "search":
-		f.search = enabled
+		nv.search = enabled
 	case "email":
-		f.email = enabled
+		nv.email = enabled
 	case "i18n":
-		f.i18n = enabled
+		nv.i18n = enabled
 	case "recorder":
-		f.recorder = enabled
+		nv.recorder = enabled
 	case "websocket":
-		f.websocket = enabled
+		nv.websocket = enabled
 	case "privacy":
-		f.privacy = enabled
+		nv.privacy = enabled
 	case "health":
-		f.health = enabled
+		nv.health = enabled
 	case "spider":
-		f.spider = enabled
+		nv.spider = enabled
 	default:
 		return false
 	}
+	f.v.Store(&nv)
 	return true
 }
 
 // Snapshot returns a map of feature name -> enabled for serialisation.
 func (f *FeatureFlags) Snapshot() map[string]bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	v := f.v.Load().(*flagValues)
 	return map[string]bool{
-		"labyrinth":       f.labyrinth,
-		"error_inject":    f.errorInject,
-		"captcha":         f.captcha,
-		"honeypot":        f.honeypot,
-		"vuln":            f.vuln,
-		"analytics":       f.analytics,
-		"cdn":             f.cdn,
-		"oauth":           f.oauth,
-		"header_corrupt":  f.headerCorrupt,
-		"cookie_traps":    f.cookieTraps,
-		"js_traps":        f.jsTraps,
-		"bot_detection":   f.botDetection,
-		"random_blocking": f.randomBlocking,
-		"framework_emul":  f.frameworkEmul,
-		"search":          f.search,
-		"email":           f.email,
-		"i18n":            f.i18n,
-		"recorder":        f.recorder,
-		"websocket":       f.websocket,
-		"privacy":         f.privacy,
-		"health":          f.health,
-		"spider":          f.spider,
+		"labyrinth":       v.labyrinth,
+		"error_inject":    v.errorInject,
+		"captcha":         v.captcha,
+		"honeypot":        v.honeypot,
+		"vuln":            v.vuln,
+		"analytics":       v.analytics,
+		"cdn":             v.cdn,
+		"oauth":           v.oauth,
+		"header_corrupt":  v.headerCorrupt,
+		"cookie_traps":    v.cookieTraps,
+		"js_traps":        v.jsTraps,
+		"bot_detection":   v.botDetection,
+		"random_blocking": v.randomBlocking,
+		"framework_emul":  v.frameworkEmul,
+		"search":          v.search,
+		"email":           v.email,
+		"i18n":            v.i18n,
+		"recorder":        v.recorder,
+		"websocket":       v.websocket,
+		"privacy":         v.privacy,
+		"health":          v.health,
+		"spider":          v.spider,
 	}
 }
 
@@ -1160,6 +1146,19 @@ func GetRecorder() *recorder.Recorder {
 	return globalRecorder
 }
 
+// InitScanRunner eagerly creates the scanner runner so available-scanner
+// discovery (subprocess calls) happens at startup rather than on first request.
+func InitScanRunner(serverPort, dashPort int) {
+	scanRunnerMu.Lock()
+	defer scanRunnerMu.Unlock()
+	if scanRunner == nil {
+		scanRunner = scaneval.NewRunner(scaneval.DefaultRunnerConfig(
+			fmt.Sprintf("http://localhost:%d", serverPort),
+			fmt.Sprintf("http://localhost:%d", dashPort),
+		))
+	}
+}
+
 // getScanRunner returns the singleton scaneval.Runner, creating it on first call.
 func getScanRunner() *scaneval.Runner {
 	scanRunnerMu.Lock()
@@ -1217,28 +1216,31 @@ func sortedKV(m map[string]int, top int) []kvPair {
 func (f *FeatureFlags) SetAll(enabled bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.labyrinth = enabled
-	f.errorInject = enabled
-	f.captcha = enabled
-	f.honeypot = enabled
-	f.vuln = enabled
-	f.analytics = enabled
-	f.cdn = enabled
-	f.oauth = enabled
-	f.headerCorrupt = enabled
-	f.cookieTraps = enabled
-	f.jsTraps = enabled
-	f.botDetection = enabled
-	f.randomBlocking = enabled
-	f.frameworkEmul = enabled
-	f.search = enabled
-	f.email = enabled
-	f.i18n = enabled
-	// f.recorder deliberately excluded — operational, not chaos
-	f.websocket = enabled
-	f.privacy = enabled
-	f.health = enabled
-	f.spider = enabled
+	old := f.v.Load().(*flagValues)
+	nv := *old // copy
+	nv.labyrinth = enabled
+	nv.errorInject = enabled
+	nv.captcha = enabled
+	nv.honeypot = enabled
+	nv.vuln = enabled
+	nv.analytics = enabled
+	nv.cdn = enabled
+	nv.oauth = enabled
+	nv.headerCorrupt = enabled
+	nv.cookieTraps = enabled
+	nv.jsTraps = enabled
+	nv.botDetection = enabled
+	nv.randomBlocking = enabled
+	nv.frameworkEmul = enabled
+	nv.search = enabled
+	nv.email = enabled
+	nv.i18n = enabled
+	// nv.recorder deliberately excluded — operational, not chaos
+	nv.websocket = enabled
+	nv.privacy = enabled
+	nv.health = enabled
+	nv.spider = enabled
+	f.v.Store(&nv)
 }
 
 // ---------------------------------------------------------------------------

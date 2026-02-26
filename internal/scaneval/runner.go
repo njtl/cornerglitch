@@ -67,45 +67,59 @@ type ScanRun struct {
 }
 
 // NewRunner creates a new scanner runner.
+// It eagerly discovers available scanners in the background so the first
+// API request doesn't block on subprocess calls (e.g. wapiti --version ~2s).
 func NewRunner(config *RunnerConfig) *Runner {
 	os.MkdirAll(config.OutputDir, 0o755)
-	return &Runner{
+	r := &Runner{
 		config:  config,
 		results: make([]*ScanRun, 0),
 		running: make(map[string]*ScanRun),
 	}
+	// Warm the scanner cache in a background goroutine.
+	go r.AvailableScanners()
+	return r
 }
 
 // AvailableScanners returns a list of scanners that are installed and usable.
+// Results are cached on first call since installed binaries don't change at runtime.
 func (r *Runner) AvailableScanners() []ScannerInfo {
-	scanners := []ScannerInfo{
-		{Name: "nuclei", Description: "Template-based vulnerability scanner (ProjectDiscovery)", Category: "vuln"},
-		{Name: "httpx", Description: "HTTP probing and header analysis", Category: "recon"},
-		{Name: "ffuf", Description: "Web fuzzer for directory/endpoint discovery", Category: "fuzzer"},
-		{Name: "nikto", Description: "Web server vulnerability scanner", Category: "vuln"},
-		{Name: "nmap", Description: "Network/port scanner with NSE scripts", Category: "network"},
-		{Name: "wapiti", Description: "Web application vulnerability scanner", Category: "vuln"},
-	}
+	scannerCacheOnce.Do(func() {
+		scanners := []ScannerInfo{
+			{Name: "nuclei", Description: "Template-based vulnerability scanner (ProjectDiscovery)", Category: "vuln"},
+			{Name: "httpx", Description: "HTTP probing and header analysis", Category: "recon"},
+			{Name: "ffuf", Description: "Web fuzzer for directory/endpoint discovery", Category: "fuzzer"},
+			{Name: "nikto", Description: "Web server vulnerability scanner", Category: "vuln"},
+			{Name: "nmap", Description: "Network/port scanner with NSE scripts", Category: "network"},
+			{Name: "wapiti", Description: "Web application vulnerability scanner", Category: "vuln"},
+		}
 
-	var available []ScannerInfo
-	for _, s := range scanners {
-		path := findBinary(s.Name)
-		// wapiti may be installed as wapiti3
-		if path == "" && s.Name == "wapiti" {
-			path = findBinary("wapiti3")
+		var available []ScannerInfo
+		for _, s := range scanners {
+			path := findBinary(s.Name)
+			// wapiti may be installed as wapiti3
+			if path == "" && s.Name == "wapiti" {
+				path = findBinary("wapiti3")
+			}
+			if path != "" {
+				s.Installed = true
+				s.Path = path
+				s.Version = getVersion(s.Name, path)
+				available = append(available, s)
+			} else {
+				s.Installed = false
+				available = append(available, s)
+			}
 		}
-		if path != "" {
-			s.Installed = true
-			s.Path = path
-			s.Version = getVersion(s.Name, path)
-			available = append(available, s)
-		} else {
-			s.Installed = false
-			available = append(available, s)
-		}
-	}
-	return available
+		scannerCacheResult = available
+	})
+	return scannerCacheResult
 }
+
+var (
+	scannerCacheOnce   sync.Once
+	scannerCacheResult []ScannerInfo
+)
 
 // ScannerInfo describes an available scanner tool.
 type ScannerInfo struct {
