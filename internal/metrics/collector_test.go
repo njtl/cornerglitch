@@ -21,6 +21,7 @@ func TestRecord_StoresEntry(t *testing.T) {
 	if c.TotalRequests.Load() != 1 {
 		t.Fatalf("expected 1 total request, got %d", c.TotalRequests.Load())
 	}
+	c.Stop() // drain async worker before checking ring buffer
 	recent := c.RecentRecords(10)
 	if len(recent) != 1 {
 		t.Fatalf("expected 1 recent record, got %d", len(recent))
@@ -40,6 +41,7 @@ func TestRecent_ReturnsMostRecent(t *testing.T) {
 			StatusCode: 200,
 		})
 	}
+	c.Stop()
 	recent := c.RecentRecords(3)
 	if len(recent) != 3 {
 		t.Fatalf("expected 3 records, got %d", len(recent))
@@ -64,6 +66,7 @@ func TestRingBuffer_Overflow(t *testing.T) {
 	if c.TotalRequests.Load() != 10050 {
 		t.Fatalf("expected 10050 total requests, got %d", c.TotalRequests.Load())
 	}
+	c.Stop()
 	// RecentRecords should return at most recordSize entries
 	recent := c.RecentRecords(20000)
 	if len(recent) > 10000 {
@@ -86,6 +89,7 @@ func TestTimeSeries(t *testing.T) {
 		Latency:    10 * time.Millisecond,
 	})
 
+	c.Stop()
 	ts := c.TimeSeries(10)
 	// After the ticker has fired and we recorded a request, there should be
 	// at least one bucket with a non-zero Timestamp.
@@ -107,6 +111,7 @@ func TestClientProfile(t *testing.T) {
 			UserAgent:  "TestAgent/1.0",
 		})
 	}
+	c.Stop()
 	cp := c.GetClientProfile("client_xyz")
 	if cp == nil {
 		t.Fatal("expected client profile to exist")
@@ -150,6 +155,7 @@ func TestGetPathsInTimeWindow_WithinWindow(t *testing.T) {
 		StatusCode: 200,
 	})
 
+	c.Stop()
 	// Query a window that includes all records
 	start := base
 	end := base.Add(5 * time.Minute)
@@ -189,6 +195,7 @@ func TestGetPathsInTimeWindow_ExcludesOutside(t *testing.T) {
 		StatusCode: 200,
 	})
 
+	c.Stop()
 	start := base
 	end := base.Add(10 * time.Minute)
 	paths := c.GetPathsInTimeWindow(start, end)
@@ -215,6 +222,7 @@ func TestGetPathsInTimeWindow_EmptyWindow(t *testing.T) {
 		StatusCode: 200,
 	})
 
+	c.Stop()
 	// Query a window that excludes all records
 	start := base.Add(5 * time.Minute)
 	end := base.Add(10 * time.Minute)
@@ -236,6 +244,7 @@ func TestGetPathsInTimeWindow_BoundaryInclusive(t *testing.T) {
 		StatusCode: 200,
 	})
 
+	c.Stop()
 	// Record at exact start time should be included
 	paths := c.GetPathsInTimeWindow(exact, exact.Add(1*time.Minute))
 	if paths["/boundary"] != 1 {

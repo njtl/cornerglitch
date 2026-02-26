@@ -11,26 +11,27 @@ import (
 
 // Engine fingerprints HTTP clients based on header patterns, TLS info, and behavior.
 type Engine struct {
-	mu    sync.RWMutex
-	cache map[string]string // hash(headers) -> clientID
+	cache sync.Map // signature -> clientID
 }
 
 func NewEngine() *Engine {
-	return &Engine{
-		cache: make(map[string]string),
-	}
+	return &Engine{}
 }
 
 // Identify produces a stable client ID from request characteristics.
 func (e *Engine) Identify(r *http.Request) string {
 	// Build a fingerprint from header ordering, presence, and values
 	sig := e.buildSignature(r)
+
+	// Fast path: return cached clientID if we've seen this signature before
+	if id, ok := e.cache.Load(sig); ok {
+		return id.(string)
+	}
+
 	hash := sha256.Sum256([]byte(sig))
 	clientID := fmt.Sprintf("client_%x", hash[:8])
 
-	e.mu.Lock()
-	e.cache[sig] = clientID
-	e.mu.Unlock()
+	e.cache.Store(sig, clientID)
 
 	return clientID
 }

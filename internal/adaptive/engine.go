@@ -163,13 +163,14 @@ func (e *Engine) GetOverrides() map[string]BehaviorMode {
 
 // Decide returns the behavior for a client, evaluating their profile and updating adaptively.
 func (e *Engine) Decide(clientID string, clientClass fingerprint.ClientClass) *ClientBehavior {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	// Phase 1: Read state under RLock
+	e.mu.RLock()
+	existing, ok := e.behaviors[clientID]
 
 	// Check for active block
-	existing, ok := e.behaviors[clientID]
 	if ok && existing.Mode == ModeBlocked {
 		if time.Now().Before(existing.BlockedUntil) {
+			e.mu.RUnlock()
 			return existing // still blocked
 		}
 		// Block expired, fall through to re-evaluate
@@ -177,32 +178,50 @@ func (e *Engine) Decide(clientID string, clientClass fingerprint.ClientClass) *C
 
 	// Check for manual override from admin panel
 	if mode, hasOverride := e.overrides[clientID]; hasOverride {
+		e.mu.RUnlock()
 		behavior := e.buildOverrideBehavior(mode, clientID)
+		e.mu.Lock()
 		e.behaviors[clientID] = behavior
+		e.mu.Unlock()
 		return behavior
 	}
 
 	if ok && time.Since(existing.AssignedAt) < 30*time.Second {
 		// Re-evaluate every 30 seconds
+		e.mu.RUnlock()
 		return existing
 	}
 
+	// Capture config values needed for evaluation
+	blockEnabled := e.blockEnabled
+	blockChance := e.blockChance
+	blockDuration := e.blockDuration
+	aggressiveThreshold := e.aggressiveRPSThreshold
+	labThreshold := e.labyrinthPathsThreshold
+	e.mu.RUnlock()
+
+	// Phase 2: External calls WITHOUT holding any lock
 	profile := e.collector.GetClientProfile(clientID)
-	behavior := e.evaluate(clientID, clientClass, profile)
+
+	// Phase 3: Evaluate using captured config values (no lock needed)
+	behavior := e.evaluateWithConfig(clientID, clientClass, profile, aggressiveThreshold, labThreshold)
 
 	// Random blocking chance (only for non-browser, non-new clients)
-	if e.blockEnabled && profile != nil && profile.TotalRequests > 10 &&
-		clientClass != fingerprint.ClassBrowser && rand.Float64() < e.blockChance {
+	if blockEnabled && profile != nil && profile.TotalRequests > 10 &&
+		clientClass != fingerprint.ClassBrowser && rand.Float64() < blockChance {
 		behavior = &ClientBehavior{
 			Mode:         ModeBlocked,
 			ErrorProfile: errors.DefaultProfile(),
 			AssignedAt:   time.Now(),
-			BlockedUntil: time.Now().Add(e.blockDuration),
+			BlockedUntil: time.Now().Add(blockDuration),
 			Reason:       "random block — temporary denial of service",
 		}
 	}
 
+	// Phase 4: Store result under write lock
+	e.mu.Lock()
 	e.behaviors[clientID] = behavior
+	e.mu.Unlock()
 
 	if profile != nil {
 		profile.AdaptiveProfile = string(behavior.Mode)
@@ -211,7 +230,7 @@ func (e *Engine) Decide(clientID string, clientClass fingerprint.ClientClass) *C
 	return behavior
 }
 
-func (e *Engine) evaluate(clientID string, class fingerprint.ClientClass, profile *metrics.ClientProfile) *ClientBehavior {
+func (e *Engine) evaluateWithConfig(clientID string, class fingerprint.ClientClass, profile *metrics.ClientProfile, aggressiveThreshold float64, labThreshold int) *ClientBehavior {
 	// New clients get normal behavior
 	if profile == nil || profile.TotalRequests < 5 {
 		return &ClientBehavior{
@@ -233,7 +252,7 @@ func (e *Engine) evaluate(clientID string, class fingerprint.ClientClass, profil
 	case fingerprint.ClassLoadTester:
 		return e.loadTesterBehavior(profile, rps)
 	case fingerprint.ClassScriptBot:
-		return e.scriptBotBehavior(profile, rps)
+		return e.scriptBotBehavior(profile, rps, aggressiveThreshold)
 	case fingerprint.ClassSearchBot:
 		return e.searchBotBehavior(profile)
 	case fingerprint.ClassBrowser:
@@ -243,7 +262,7 @@ func (e *Engine) evaluate(clientID string, class fingerprint.ClientClass, profil
 	}
 
 	// Unknown clients: analyze behavior patterns
-	return e.unknownBehavior(profile, rps)
+	return e.unknownBehavior(profile, rps, aggressiveThreshold, labThreshold)
 }
 
 func (e *Engine) aiScraperBehavior(p *metrics.ClientProfile) *ClientBehavior {
@@ -308,8 +327,8 @@ func (e *Engine) loadTesterBehavior(p *metrics.ClientProfile, rps float64) *Clie
 	}
 }
 
-func (e *Engine) scriptBotBehavior(p *metrics.ClientProfile, rps float64) *ClientBehavior {
-	if rps > e.aggressiveRPSThreshold {
+func (e *Engine) scriptBotBehavior(p *metrics.ClientProfile, rps float64, aggressiveThreshold float64) *ClientBehavior {
+	if rps > aggressiveThreshold {
 		// High-rate script bots get aggressive treatment
 		return &ClientBehavior{
 			Mode:            ModeAggressive,
@@ -376,9 +395,9 @@ func (e *Engine) apiTesterBehavior(p *metrics.ClientProfile) *ClientBehavior {
 	}
 }
 
-func (e *Engine) unknownBehavior(p *metrics.ClientProfile, rps float64) *ClientBehavior {
+func (e *Engine) unknownBehavior(p *metrics.ClientProfile, rps float64, aggressiveThreshold float64, labThreshold int) *ClientBehavior {
 	// Heuristic: high request rate + few user agents = bot
-	if rps > e.aggressiveRPSThreshold*2 && len(p.UserAgents) <= 1 {
+	if rps > aggressiveThreshold*2 && len(p.UserAgents) <= 1 {
 		return &ClientBehavior{
 			Mode:            ModeAggressive,
 			ErrorProfile:    errors.AggressiveProfile(),
@@ -390,7 +409,7 @@ func (e *Engine) unknownBehavior(p *metrics.ClientProfile, rps float64) *ClientB
 	}
 
 	// Many unique paths = likely exploration/scanning
-	if len(p.PathsVisited) > e.labyrinthPathsThreshold {
+	if len(p.PathsVisited) > labThreshold {
 		return &ClientBehavior{
 			Mode:            ModeLabyrinth,
 			ErrorProfile:    errors.DefaultProfile(),
