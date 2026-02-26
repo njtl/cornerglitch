@@ -46,14 +46,14 @@ type Collector struct {
 	mu sync.RWMutex
 
 	// Global counters
-	TotalRequests   atomic.Int64
-	TotalErrors     atomic.Int64
-	Total2xx        atomic.Int64
-	Total4xx        atomic.Int64
-	Total5xx        atomic.Int64
-	TotalDelayed    atomic.Int64
-	TotalLabyrinth  atomic.Int64
-	ActiveConns     atomic.Int64
+	TotalRequests  atomic.Int64
+	TotalErrors    atomic.Int64
+	Total2xx       atomic.Int64
+	Total4xx       atomic.Int64
+	Total5xx       atomic.Int64
+	TotalDelayed   atomic.Int64
+	TotalLabyrinth atomic.Int64
+	ActiveConns    atomic.Int64
 
 	// Per-client profiles
 	clients map[string]*ClientProfile
@@ -69,6 +69,11 @@ type Collector struct {
 	bucketSize int
 
 	startTime time.Time
+
+	// Async recording
+	recordCh chan RequestRecord
+	stopCh   chan struct{}
+	done     chan struct{}
 }
 
 type secondBucket struct {
@@ -87,8 +92,12 @@ func NewCollector() *Collector {
 		bucketSize: 300, // 5 minutes of per-second data
 		buckets:    make([]secondBucket, 300),
 		startTime:  time.Now(),
+		recordCh:   make(chan RequestRecord, 4096),
+		stopCh:     make(chan struct{}),
+		done:       make(chan struct{}),
 	}
 	go c.bucketTicker()
+	go c.recordWorker()
 	return c
 }
 
@@ -102,8 +111,10 @@ func (c *Collector) bucketTicker() {
 	}
 }
 
-// Record stores a request record and updates all aggregate metrics.
+// Record updates atomic counters immediately and queues the record
+// for async processing of ring buffer, buckets, and client profiles.
 func (c *Collector) Record(r RequestRecord) {
+	// Atomic counter updates — immediate visibility, no locks
 	c.TotalRequests.Add(1)
 
 	switch {
@@ -123,6 +134,38 @@ func (c *Collector) Record(r RequestRecord) {
 		c.TotalLabyrinth.Add(1)
 	}
 
+	// Non-blocking send to background worker
+	select {
+	case c.recordCh <- r:
+	default:
+		// Channel full, drop record (metrics are best-effort)
+	}
+}
+
+// recordWorker processes queued records in a single goroutine,
+// eliminating write lock contention from concurrent Record() calls.
+func (c *Collector) recordWorker() {
+	for {
+		select {
+		case r := <-c.recordCh:
+			c.processRecord(r)
+		case <-c.stopCh:
+			// Drain remaining records before exiting
+			for {
+				select {
+				case r := <-c.recordCh:
+					c.processRecord(r)
+				default:
+					close(c.done)
+					return
+				}
+			}
+		}
+	}
+}
+
+// processRecord handles the mutex-protected work: ring buffer, buckets, client profiles.
+func (c *Collector) processRecord(r RequestRecord) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -186,6 +229,12 @@ func (c *Collector) Record(r RequestRecord) {
 	}
 
 	cp.mu.Unlock()
+}
+
+// Stop gracefully shuts down the record worker, draining any pending records.
+func (c *Collector) Stop() {
+	close(c.stopCh)
+	<-c.done
 }
 
 // GetClientProfile returns a copy of the profile for a client.

@@ -788,8 +788,19 @@ func TestFileRotation_BySize(t *testing.T) {
 	rec.fileSize = maxFileSize
 	rec.mu.Unlock()
 
-	// Next record should trigger rotation
+	// Next record should trigger rotation (async — writer processes it)
 	rec.RecordFull("GET", "/large", "c1", nil, nil, 200, http.Header{}, 0, 0)
+
+	// Wait for the async writer to process the message and rotate.
+	for i := 0; i < 100; i++ {
+		rec.mu.Lock()
+		sz := rec.fileSize
+		rec.mu.Unlock()
+		if sz < maxFileSize {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	rec.mu.Lock()
 	secondFile := rec.fileName
@@ -829,8 +840,19 @@ func TestFileRotation_ByDuration(t *testing.T) {
 	firstFile := rec.fileName
 	rec.mu.Unlock()
 
-	// Next record should trigger rotation
+	// Next record should trigger rotation (async — writer processes it)
 	rec.RecordFull("GET", "/old", "c1", nil, nil, 200, http.Header{}, 0, 0)
+
+	// Wait for the async writer to process the message and rotate.
+	for i := 0; i < 100; i++ {
+		rec.mu.Lock()
+		fs := rec.fileStart
+		rec.mu.Unlock()
+		if time.Since(fs) < time.Minute {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	rec.mu.Lock()
 	secondFile := rec.fileName
@@ -1564,6 +1586,13 @@ func TestRecorder_StartWithLimits_MaxRequests(t *testing.T) {
 		rec.RecordFull("GET", "/page", "c1", nil, nil, 200, http.Header{}, 0, 0.1)
 	}
 
+	// Stop is async — wait for it to complete.
+	for i := 0; i < 100; i++ {
+		if !rec.IsRecording() {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if rec.IsRecording() {
 		t.Error("expected recording to auto-stop after reaching maxRequests")
 	}
@@ -1604,6 +1633,14 @@ func TestRecorder_GetStatus_Recording(t *testing.T) {
 	// Record a few entries
 	for i := 0; i < 3; i++ {
 		rec.RecordFull("GET", "/test", "c1", nil, nil, 200, http.Header{}, 10, 0.5)
+	}
+
+	// Wait for async writer to flush records to disk.
+	for i := 0; i < 100; i++ {
+		if s := rec.GetStatus(); s.SizeBytes > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	status := rec.GetStatus()
