@@ -187,7 +187,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   /* Toggle switches */
   .toggle-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
     gap: 10px;
   }
   .toggle-row {
@@ -198,18 +198,24 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     border: 1px solid #222;
     border-radius: 6px;
     padding: 10px 14px;
+    gap: 8px;
   }
   .toggle-name {
     font-size: 0.85em;
     color: #ccc;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .toggle-sw {
     position: relative;
     width: 44px;
+    min-width: 44px;
     height: 24px;
     cursor: pointer;
+    flex-shrink: 0;
   }
   .toggle-sw input { display: none; }
   .toggle-track {
@@ -308,12 +314,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     font-size: 0.78em;
   }
   .ew-name {
-    width: 150px;
-    min-width: 150px;
+    min-width: 120px;
     color: #aaa;
     font-size: 0.95em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .ew-opts { display: flex; gap: 2px; flex: 1; }
+  .ew-opts { display: flex; gap: 2px; flex-shrink: 0; }
   .ew-opt {
     padding: 2px 7px;
     border-radius: 3px;
