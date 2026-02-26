@@ -1,12 +1,14 @@
 [Unit]
 Description=Glitch Web Server
-After=network-online.target
+After=network-online.target glitch-postgres.service
 Wants=network-online.target
+Requires=glitch-postgres.service
 
 [Service]
 Type=simple
 User=glitch
 Group=glitch
+Environment=GLITCH_DB_URL=postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable
 ExecStart=/usr/local/bin/glitch -port 8765 -dash-port 8766
 Restart=on-failure
 RestartSec=5

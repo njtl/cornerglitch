@@ -22,6 +22,7 @@ go build -o glitch ./cmd/glitch
 ./glitch -config config.json                # load saved configuration
 ./glitch -nightmare                         # nightmare mode
 GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag, or .env file)
+GLITCH_DB_URL=postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable ./glitch  # with PostgreSQL persistence
 
 # Scanner (client emulator)
 go build -o glitch-scanner ./cmd/glitch-scanner
@@ -37,11 +38,17 @@ glitch-proxy -target http://localhost:8765 --chaos-prob 0.3 --waf-action block
 glitch selftest --mode nightmare --duration 60s
 glitch selftest --mode baseline              # also: scanner-stress, proxy-stress, server-stress, chaos
 
-# Docker
-docker-compose up                            # runs server + dashboard
+# Docker (includes PostgreSQL)
+docker-compose up                            # runs server + dashboard + postgres
+
+# Database management
+make db-up                                   # start standalone PostgreSQL container
+make db-down                                 # stop PostgreSQL container
+make db-reset                                # drop and recreate database
+make db-psql                                 # connect to PostgreSQL with psql
 ```
 
-No external dependencies — stdlib only, go 1.24+.
+One external dependency: `github.com/lib/pq` (PostgreSQL driver). Otherwise stdlib only, go 1.24+.
 
 ## Project Layout
 
@@ -76,6 +83,7 @@ internal/
   recorder/                      Traffic recording (JSONL/PCAP formats)
   replay/                        PCAP/JSONL replay (loader, player, timing modes)
   spider/                        Spider data generation for crawl discovery
+  storage/                       PostgreSQL persistence with insert-only versioning and migrations
 
   # Scanner subsystems
   scanner/
@@ -101,8 +109,8 @@ internal/
   selftest/                      Pipeline orchestration, monitoring, reporting
 
 Dockerfile                       Multi-stage build (non-root, healthcheck)
-docker-compose.yml               Server + dashboard with volumes/env config
-Makefile                         build, test, vet, clean, docker-build, run, cross
+docker-compose.yml               Server + dashboard + PostgreSQL with volumes/env config
+Makefile                         build, test, vet, clean, docker-build, run, cross, db-up/down/reset/psql
 .github/workflows/               CI (lint/test/build) + Docker multi-arch push
 deploy/k8s/                      Kubernetes manifests (deployment, service, configmap, ingress)
 deploy/systemd/                  Systemd service files (glitch-server, glitch-proxy)
@@ -117,7 +125,7 @@ tests/
 
 ## Key Conventions
 
-- **Zero external deps.** Everything uses Go stdlib. Do not add third-party modules.
+- **Minimal external deps.** Only `github.com/lib/pq` (PostgreSQL driver) is allowed. Everything else uses Go stdlib.
 - **All logic is in `internal/`.** Nothing in `internal/` is meant to be imported by external code.
 - **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0. Includes HTTP errors, TCP-level errors, and protocol-level glitches (18 types: version mismatches, header corruption, encoding conflicts, connection tricks). Protocol glitches are togglable via admin config (`protocol_glitch_enabled`, `protocol_glitch_level` 0-4).
 - **Labyrinth pages are deterministic** — seeded from path via SHA-256 so the same URL always yields the same page.
@@ -128,7 +136,8 @@ tests/
 - **Selftest** has 6 modes: baseline, scanner-stress, proxy-stress, server-stress, chaos, nightmare. Crawl budget is capped at 30% of remaining time.
 - **Vuln pages use "Acme Corp Portal" layout** — corporate-looking nav bar, sidebar, breadcrumbs, footer.
 - **Content pages include JS API calls** — `fetch()` calls, `<link rel="prefetch">` hints, and hidden `<a>` tags so scanners discover API endpoints.
-- **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag. Settings auto-save to `.glitch-state.json` on every change and auto-load on startup (unless `-config` flag is used).
+- **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag. Settings auto-save to `.glitch-state.json` on every change and auto-load on startup (unless `-config` flag is used). With PostgreSQL enabled (`GLITCH_DB_URL` or `-db-url`), config is also persisted to the database and restored from DB on startup (falling back to state file if DB is unavailable).
+- **PostgreSQL persistence** is optional — the server works without a database (file-only mode). When enabled, uses insert-only versioning (no UPDATE/DELETE on config data) with auto-incrementing version numbers. Views provide "current state" via `DISTINCT ON`. Schema is managed by embedded SQL migrations (`internal/storage/migrations/`). Tables: `config_versions` (versioned config snapshots), `scan_history` (append-only scan results), `metrics_snapshots` (periodic metrics), `client_profiles` (versioned per-client state), `request_log` (sampled request log), `schema_migrations` (migration tracking).
 - **Recorder is an operational flag** — `FeatureFlags.SetAll()` excludes `recorder` because traffic recording is an operational setting, not a chaos feature. Nightmare mode does not start/stop recording.
 - **Every subsystem is controllable** — all feature toggles and config parameters are wired to their actual subsystems.
 - **Avoid hard numbers in docs** — use qualitative language since counts change as the project evolves.

@@ -1,4 +1,4 @@
-.PHONY: build test vet clean docker-build docker-push k8s-deploy run cross
+.PHONY: build test vet clean docker-build docker-push k8s-deploy run cross db-up db-down db-reset db-psql
 
 BINARY     := glitch
 IMAGE      := ghcr.io/njtl/glitch-server
@@ -35,7 +35,11 @@ docker-push: docker-build
 
 # Deploy to Kubernetes
 k8s-deploy:
+	kubectl apply -f deploy/k8s/namespace.yaml
 	kubectl apply -f deploy/k8s/configmap.yaml -n $(NAMESPACE)
+	kubectl apply -f deploy/k8s/postgres-secret.yaml -n $(NAMESPACE)
+	kubectl apply -f deploy/k8s/postgres-statefulset.yaml -n $(NAMESPACE)
+	kubectl apply -f deploy/k8s/postgres-service.yaml -n $(NAMESPACE)
 	kubectl apply -f deploy/k8s/deployment.yaml -n $(NAMESPACE)
 	kubectl apply -f deploy/k8s/service.yaml -n $(NAMESPACE)
 	kubectl apply -f deploy/k8s/ingress.yaml -n $(NAMESPACE)
@@ -50,3 +54,40 @@ cross:
 	GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o glitch-linux-arm64 ./cmd/glitch
 	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o glitch-darwin-amd64 ./cmd/glitch
 	GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o glitch-darwin-arm64 ./cmd/glitch
+
+# Database targets
+DB_CONTAINER := glitch-postgres
+DB_USER      := glitch
+DB_NAME      := glitch
+DB_PORT      := 5432
+
+# Start PostgreSQL container
+db-up:
+	@docker run -d --name $(DB_CONTAINER) \
+		-e POSTGRES_USER=$(DB_USER) \
+		-e POSTGRES_PASSWORD=$(DB_USER) \
+		-e POSTGRES_DB=$(DB_NAME) \
+		-v glitch-pgdata:/var/lib/postgresql/data \
+		-p $(DB_PORT):5432 \
+		--health-cmd="pg_isready -U $(DB_USER)" \
+		--health-interval=5s \
+		--health-timeout=3s \
+		--health-retries=5 \
+		postgres:16-alpine
+	@echo "PostgreSQL started on port $(DB_PORT)"
+
+# Stop and remove PostgreSQL container
+db-down:
+	@docker stop $(DB_CONTAINER) 2>/dev/null || true
+	@docker rm $(DB_CONTAINER) 2>/dev/null || true
+	@echo "PostgreSQL stopped"
+
+# Drop and recreate database
+db-reset: db-down
+	@docker volume rm glitch-pgdata 2>/dev/null || true
+	@$(MAKE) db-up
+	@echo "Database reset complete"
+
+# Connect to PostgreSQL with psql
+db-psql:
+	@docker exec -it $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME)

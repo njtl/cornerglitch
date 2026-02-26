@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: glitch
+      POSTGRES_PASSWORD: glitch
+      POSTGRES_DB: glitch
+    ports:
+      - "${GLITCH_DB_PORT:-5432}:5432"
+    volumes:
+      - glitch-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "glitch"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    restart: unless-stopped
+
   glitch:
     build:
       context: .
@@ -8,6 +26,7 @@ services:
       - "${GLITCH_DASH_PORT:-8766}:8766"
     environment:
       - GLITCH_CONFIG=${GLITCH_CONFIG:-}
+      - GLITCH_DB_URL=postgres://glitch:glitch@postgres:5432/glitch?sslmode=disable
     volumes:
       - ./config.json:/etc/glitch/config.json:ro
       - ./captures:/data/captures
@@ -23,3 +42,9 @@ services:
       start_period: 5s
       retries: 3
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  glitch-pgdata:

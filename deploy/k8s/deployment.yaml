@@ -40,6 +40,12 @@ spec:
             - "8766"
             - "-config"
             - "/etc/glitch/config.json"
+          env:
+            - name: GLITCH_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: GLITCH_DB_URL
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
