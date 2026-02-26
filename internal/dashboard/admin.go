@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/scaneval"
 	"github.com/glitchWebServer/internal/spider"
+	"github.com/glitchWebServer/internal/storage"
 )
 
 // ---------------------------------------------------------------------------
@@ -22,6 +24,7 @@ var (
 	stateFilePath string
 	autoSaveMu    sync.Mutex
 	autoSaveTimer *time.Timer
+	globalStore   *storage.Store
 )
 
 // SetStateFile configures the path for auto-saving config state.
@@ -30,6 +33,27 @@ func SetStateFile(path string) {
 	defer autoSaveMu.Unlock()
 	stateFilePath = path
 }
+
+// InitStorage initializes the PostgreSQL storage backend.
+// If dbURL is empty, storage is disabled (file-only mode).
+func InitStorage(dbURL string) error {
+	if dbURL == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, err := storage.NewWithDSN(ctx, dbURL)
+	if err != nil {
+		log.Printf("\033[33m[glitch]\033[0m Warning: DB connection failed, using file-only mode: %v", err)
+		return nil // graceful degradation, not fatal
+	}
+	globalStore = store
+	log.Printf("\033[36m[glitch]\033[0m PostgreSQL storage initialized")
+	return nil
+}
+
+// GetStore returns the global storage instance (may be nil if DB disabled).
+func GetStore() *storage.Store { return globalStore }
 
 // TriggerAutoSave schedules a debounced write of the current config to disk.
 // Multiple rapid changes are coalesced into a single write after 500ms of quiet.
@@ -53,12 +77,54 @@ func TriggerAutoSave() {
 			log.Printf("\033[31m[glitch]\033[0m Auto-save write error: %v", err)
 			return
 		}
+
+		// Also persist to DB if available.
+		if globalStore != nil {
+			dbExport := &storage.FullConfigExport{
+				Features:        export.Features,
+				Config:          export.Config,
+				VulnConfig:      export.VulnConfig,
+				ErrorWeights:    export.ErrorWeights,
+				PageTypeWeights: export.PageTypeWeights,
+				Blocking:        export.Blocking,
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := globalStore.SaveFullConfig(ctx, dbExport); err != nil {
+				log.Printf("\033[33m[glitch]\033[0m DB auto-save warning: %v", err)
+			}
+		}
 	})
 }
 
-// LoadStateFile loads config from the state file if it exists.
-// Returns true if a state file was loaded.
+// LoadStateFile loads config from DB (if available) or state file.
+// Returns true if state was loaded from either source.
 func LoadStateFile() bool {
+	// Try DB first if available.
+	if globalStore != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		dbExport, err := globalStore.LoadFullConfig(ctx)
+		if err != nil {
+			log.Printf("\033[33m[glitch]\033[0m DB load warning: %v", err)
+		} else if dbExport != nil {
+			export := &ConfigExport{
+				Version:         "1.0",
+				ExportedAt:      time.Now().UTC().Format(time.RFC3339),
+				Features:        dbExport.Features,
+				Config:          dbExport.Config,
+				VulnConfig:      dbExport.VulnConfig,
+				ErrorWeights:    dbExport.ErrorWeights,
+				PageTypeWeights: dbExport.PageTypeWeights,
+				Blocking:        dbExport.Blocking,
+			}
+			ImportConfig(export)
+			log.Printf("\033[36m[glitch]\033[0m Restored settings from PostgreSQL")
+			return true
+		}
+	}
+
+	// Fall back to state file.
 	autoSaveMu.Lock()
 	path := stateFilePath
 	autoSaveMu.Unlock()

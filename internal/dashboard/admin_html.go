@@ -187,7 +187,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   /* Toggle switches */
   .toggle-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
     gap: 10px;
   }
   .toggle-row {
@@ -198,18 +198,24 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     border: 1px solid #222;
     border-radius: 6px;
     padding: 10px 14px;
+    gap: 8px;
   }
   .toggle-name {
     font-size: 0.85em;
     color: #ccc;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .toggle-sw {
     position: relative;
     width: 44px;
+    min-width: 44px;
     height: 24px;
     cursor: pointer;
+    flex-shrink: 0;
   }
   .toggle-sw input { display: none; }
   .toggle-track {
@@ -308,12 +314,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     font-size: 0.78em;
   }
   .ew-name {
-    width: 150px;
-    min-width: 150px;
+    min-width: 120px;
     color: #aaa;
     font-size: 0.95em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .ew-opts { display: flex; gap: 2px; flex: 1; }
+  .ew-opts { display: flex; gap: 2px; flex-shrink: 0; }
   .ew-opt {
     padding: 2px 7px;
     border-radius: 3px;
@@ -1272,8 +1280,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <div class="label" style="margin-bottom:8px">Upload File</div>
           <div style="display:flex;gap:8px;align-items:center">
             <input type="file" id="replay-upload-file" accept=".pcap,.jsonl"
-              style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px;border-radius:4px;font-family:inherit;font-size:0.82em;flex:1">
-            <button class="scanner-btn" onclick="replayUpload()" style="white-space:nowrap">Upload</button>
+              style="display:none" onchange="document.getElementById('replay-upload-filename').textContent=this.files[0]?this.files[0].name:'No file chosen'">
+            <label for="replay-upload-file" class="scanner-btn" id="replay-upload-label" style="white-space:nowrap;cursor:pointer;margin:0">Choose File</label>
+            <span id="replay-upload-filename" style="color:#0f8;font-size:0.82em;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">No file chosen</span>
+            <button class="scanner-btn" onclick="replayUpload()" style="white-space:nowrap;margin:0">Upload</button>
           </div>
           <div style="color:#555;font-size:0.72em;margin-top:4px">Accepts .pcap and .jsonl files (max 100 MB)</div>
         </div>
@@ -4284,6 +4294,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       if (resp.ok) {
         toast('Uploaded: ' + resp.file + ' (' + resp.size + ')');
         fileInput.value = '';
+        document.getElementById('replay-upload-filename').textContent = 'No file chosen';
         refreshReplayFiles();
       } else {
         toast('Upload error: ' + (resp.error || 'unknown'));
@@ -4629,7 +4640,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     try {
       var d = await api('/api/metrics');
       var upEl = document.getElementById('settings-uptime');
-      if (upEl && d.uptime) upEl.textContent = d.uptime;
+      if (upEl && d.uptime_seconds) upEl.textContent = fmtUptime(d.uptime_seconds);
       // Set port info from current location
       var dashPort = document.getElementById('settings-dash-port');
       if (dashPort) dashPort.textContent = window.location.port || '8766';

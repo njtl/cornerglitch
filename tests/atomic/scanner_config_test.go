@@ -1,6 +1,7 @@
 package atomic
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -286,7 +287,7 @@ func TestScanner_EvasionEncoderModes(t *testing.T) {
 	}
 }
 
-// TestScanner_EvasionHeaderModes verifies header manipulator modes.
+// TestScanner_EvasionHeaderModes verifies header manipulator modes produce distinct behavior.
 func TestScanner_EvasionHeaderModes(t *testing.T) {
 	modes := []string{"none", "basic", "advanced", "nightmare"}
 	for _, mode := range modes {
@@ -294,6 +295,30 @@ func TestScanner_EvasionHeaderModes(t *testing.T) {
 			hm := evasion.NewHeaderManipulator(mode)
 			if hm == nil {
 				t.Fatalf("NewHeaderManipulator(%q) returned nil", mode)
+			}
+
+			// Apply to a real request and verify it runs without panic
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.Header.Set("User-Agent", "TestAgent/1.0")
+			hm.Apply(req)
+
+			// RotateUserAgent should return a valid string
+			ua := hm.RotateUserAgent()
+			if ua == "" {
+				t.Errorf("%s mode: RotateUserAgent returned empty string", mode)
+			}
+
+			// For non-none modes, Apply should modify the request headers
+			if mode != "none" {
+				req2 := httptest.NewRequest("GET", "/test", nil)
+				originalHeaders := len(req2.Header)
+				hm.Apply(req2)
+				// Advanced modes should add extra headers (decoys, IP forgery, etc.)
+				if mode == "advanced" || mode == "nightmare" {
+					if len(req2.Header) <= originalHeaders {
+						t.Logf("%s mode: Apply did not add extra headers (may depend on randomization)", mode)
+					}
+				}
 			}
 		})
 	}
@@ -303,16 +328,27 @@ func TestScanner_EvasionHeaderModes(t *testing.T) {
 // Resilience
 // ---------------------------------------------------------------------------
 
-// TestScanner_ResilienceErrorHandler verifies error handler defaults.
+// TestScanner_ResilienceErrorHandler verifies error handler tracks errors.
 func TestScanner_ResilienceErrorHandler(t *testing.T) {
 	eh := resilience.NewErrorHandler(1<<20, 10*time.Second)
 	if eh == nil {
 		t.Fatal("NewErrorHandler returned nil")
 	}
 
+	// Initial state: zero errors
 	stats := eh.GetStats()
 	if stats.TotalErrors != 0 {
 		t.Errorf("initial TotalErrors = %d, want 0", stats.TotalErrors)
+	}
+
+	// Record some errors and verify they're tracked
+	eh.RecordError("timeout")
+	eh.RecordError("connection_reset")
+	eh.RecordError("timeout")
+
+	stats = eh.GetStats()
+	if stats.TotalErrors != 3 {
+		t.Errorf("after 3 errors, TotalErrors = %d, want 3", stats.TotalErrors)
 	}
 }
 

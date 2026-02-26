@@ -58,6 +58,7 @@ func main() {
 	dashPort := flag.Int("dash-port", 8766, "Dashboard/metrics port")
 	configFile := flag.String("config", "", "Path to config JSON file to import on startup")
 	adminPass := flag.String("admin-password", "", "Admin panel password (env: GLITCH_ADMIN_PASSWORD)")
+	dbURL := flag.String("db-url", "", "PostgreSQL connection URL (env: GLITCH_DB_URL)")
 	flag.Parse()
 
 	// Configure admin password.
@@ -67,6 +68,17 @@ func main() {
 	}
 	if pw != "" {
 		dashboard.SetAdminPassword(pw)
+	}
+
+	// Initialize PostgreSQL storage (optional — graceful degradation).
+	dbConn := *dbURL
+	if dbConn == "" {
+		dbConn = os.Getenv("GLITCH_DB_URL")
+	}
+	if dbConn != "" {
+		if err := dashboard.InitStorage(dbConn); err != nil {
+			log.Printf("\033[33m[glitch]\033[0m Storage init warning: %v", err)
+		}
 	}
 
 	// Set up auto-save state file.
@@ -159,5 +171,8 @@ func main() {
 	dashSrv.Shutdown(ctx)
 	botDet.Stop()
 	contentEng.Stop()
+	if store := dashboard.GetStore(); store != nil {
+		store.Close()
+	}
 	log.Println("\033[32m[glitch]\033[0m Stopped.")
 }
