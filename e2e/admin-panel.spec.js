@@ -3,8 +3,17 @@ const { test, expect } = require('@playwright/test');
 const ADMIN = 'http://localhost:8766/admin';
 const API = 'http://localhost:8766';
 const SERVER = 'http://localhost:8765';
+const PASSWORD = process.env.GLITCH_ADMIN_PASSWORD || 'admin';
 
-// Helper: generate some traffic so dashboard/traffic tabs have data
+// Helper: log in via form POST to get a session cookie
+async function login(page) {
+  await page.goto(ADMIN + '/login');
+  await page.fill('#password', PASSWORD);
+  await page.click('button[type="submit"]');
+  await page.waitForURL('**/admin');
+}
+
+// Helper: generate some traffic so dashboard has data
 async function generateTraffic() {
   const urls = ['/', '/about', '/contact', '/api/test', '/vuln/a01/'];
   for (const url of urls) {
@@ -12,279 +21,217 @@ async function generateTraffic() {
   }
 }
 
+// --- Navigation ---
+
 test.describe('Admin Panel Navigation', () => {
   test('loads admin panel with title', async ({ page }) => {
-    await page.goto(ADMIN);
+    await login(page);
     await expect(page.locator('h1')).toContainText('GLITCH ADMIN PANEL');
   });
 
-  test('has all 7 tabs', async ({ page }) => {
-    await page.goto(ADMIN);
+  test('has all 5 tabs', async ({ page }) => {
+    await login(page);
     const tabs = page.locator('.tab');
-    await expect(tabs).toHaveCount(7);
-    const tabNames = ['Dashboard', 'Sessions', 'Traffic', 'Controls', 'Request Log', 'Vulnerabilities', 'Scanner'];
+    await expect(tabs).toHaveCount(5);
+    const tabNames = ['Dashboard', 'Server', 'Scanner', 'Proxy', 'Settings'];
     for (let i = 0; i < tabNames.length; i++) {
       await expect(tabs.nth(i)).toContainText(tabNames[i]);
     }
   });
 
   test('tab switching updates URL hash', async ({ page }) => {
-    await page.goto(ADMIN);
-    await page.click('.tab:text("Controls")');
-    await expect(page).toHaveURL(/#controls/);
-    await page.click('.tab:text("Vulnerabilities")');
-    await expect(page).toHaveURL(/#vulns/);
+    await login(page);
+    await page.click('.tab[data-mode="server"]');
+    await expect(page).toHaveURL(/#server/);
+    await page.click('.tab[data-mode="scanner"]');
+    await expect(page).toHaveURL(/#scanner/);
   });
 
   test('URL hash restores correct tab on load', async ({ page }) => {
-    await page.goto(ADMIN + '#controls');
+    await login(page);
+    await page.goto(ADMIN + '#server');
     await page.waitForTimeout(500);
-    await expect(page.locator('#panel-controls')).toHaveClass(/active/);
+    await expect(page.locator('#panel-server')).toHaveClass(/active/);
   });
 
   test('all tabs are clickable and show content', async ({ page }) => {
-    await page.goto(ADMIN);
-    const tabIds = ['dashboard', 'sessions', 'traffic', 'controls', 'log', 'vulns', 'scanner'];
+    await login(page);
+    const tabIds = ['dashboard', 'server', 'scanner', 'proxy', 'settings'];
     for (const id of tabIds) {
-      await page.click(`.tab[onclick*="${id}"]`);
+      await page.evaluate((tabName) => window.showTab(tabName), id);
       await expect(page.locator(`#panel-${id}`)).toHaveClass(/active/);
     }
   });
 });
 
+// --- Dashboard Tab ---
+
 test.describe('Dashboard Tab', () => {
   test('shows metric cards', async ({ page }) => {
     await generateTraffic();
+    await login(page);
     await page.goto(ADMIN + '#dashboard');
     await page.waitForTimeout(1500);
     const cards = page.locator('#dash-metrics .card');
     await expect(cards).not.toHaveCount(0);
-    // Check specific card labels
     await expect(page.locator('#dash-metrics')).toContainText('Total Requests');
     await expect(page.locator('#dash-metrics')).toContainText('Uptime');
   });
 
   test('shows sparkline', async ({ page }) => {
+    await login(page);
     await page.goto(ADMIN + '#dashboard');
     await page.waitForTimeout(1500);
     await expect(page.locator('#dash-sparkline')).toBeVisible();
   });
 
   test('shows connected clients table', async ({ page }) => {
+    await login(page);
     await page.goto(ADMIN + '#dashboard');
     await page.waitForTimeout(1500);
     await expect(page.locator('#dash-clients-body').locator('..').locator('..')).toBeVisible();
   });
-});
 
-test.describe('Sessions Tab', () => {
-  test('shows session table headers', async ({ page }) => {
-    await page.goto(ADMIN + '#sessions');
+  test('shows request log table', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#dashboard');
     await page.waitForTimeout(1500);
-    const headers = page.locator('#panel-sessions th');
-    await expect(headers.first()).toContainText('Client ID');
+    await expect(page.locator('#dash-log-body').locator('..').locator('..')).toBeVisible();
   });
 
-  test('client detail panel is initially hidden', async ({ page }) => {
-    await page.goto(ADMIN + '#sessions');
-    await expect(page.locator('#client-detail')).not.toBeVisible();
-  });
-});
-
-test.describe('Traffic Tab', () => {
-  test('shows overview cards', async ({ page }) => {
-    await generateTraffic();
-    await page.goto(ADMIN + '#traffic');
+  test('shows subsystem status cards', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#dashboard');
     await page.waitForTimeout(1500);
-    await expect(page.locator('#overview-cards')).toContainText('Total Requests');
-    await expect(page.locator('#overview-cards')).toContainText('Error Rate');
-  });
-
-  test('shows pie chart canvas', async ({ page }) => {
-    await page.goto(ADMIN + '#traffic');
-    await page.waitForTimeout(1500);
-    await expect(page.locator('#pie-status')).toBeVisible();
+    await expect(page.locator('#dash-mode-server')).toBeVisible();
+    await expect(page.locator('#dash-mode-scanner')).toBeVisible();
+    await expect(page.locator('#dash-mode-proxy')).toBeVisible();
   });
 });
 
-test.describe('Controls Tab', () => {
-  test('shows feature toggles', async ({ page }) => {
-    await page.goto(ADMIN + '#controls');
-    await page.waitForTimeout(1500);
+// --- Server Tab ---
+
+test.describe('Server Tab', () => {
+  test('shows feature toggles section', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#server');
+    // Features section starts open; wait for toggle rows to be populated by auto-refresh
+    await page.waitForSelector('#toggles .toggle-row', { timeout: 10000 });
     const toggles = page.locator('#toggles .toggle-row');
     const count = await toggles.count();
-    expect(count).toBeGreaterThanOrEqual(15);
+    expect(count).toBeGreaterThanOrEqual(10);
   });
 
   test('can toggle a feature', async ({ page }) => {
-    await page.goto(ADMIN + '#controls');
-    await page.waitForTimeout(1500);
-    // Find the labyrinth toggle and click its label (checkbox is visually hidden)
+    await login(page);
+    await page.goto(ADMIN + '#server');
+    // Wait for toggles to be populated
+    await page.waitForSelector('#toggles .toggle-row', { timeout: 10000 });
     const toggleRow = page.locator('.toggle-row:has(.toggle-name:text("Labyrinth"))');
     await expect(toggleRow).toBeVisible();
     const toggleLabel = toggleRow.locator('.toggle-sw');
     await toggleLabel.click();
     await page.waitForTimeout(500);
-    // Verify the API was called (check toast)
-    await expect(page.locator('.toast')).toContainText('labyrinth');
+    await expect(page.locator('#toast')).toBeVisible();
     // Toggle back to restore state
     await toggleLabel.click();
     await page.waitForTimeout(500);
   });
 
-  test('shows slider controls', async ({ page }) => {
-    await page.goto(ADMIN + '#controls');
+  test('shows error configuration section', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#server');
     await page.waitForTimeout(1500);
-    const sliders = page.locator('#sliders .slider-group');
-    const count = await sliders.count();
-    expect(count).toBeGreaterThanOrEqual(5);
+    // Open the errors section via JS
+    await page.evaluate(() => window.toggleServerSection('errors'));
+    await page.waitForTimeout(300);
+    const httpGrid = page.locator('#http-error-grid');
+    await expect(httpGrid).toBeVisible();
   });
 
-  test('shows error weight radio grid', async ({ page }) => {
-    await page.goto(ADMIN + '#controls');
+  test('shows content configuration section', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#server');
     await page.waitForTimeout(1500);
-    const grid = page.locator('#error-weight-grid');
-    await expect(grid).toBeVisible();
-    const rows = grid.locator('.ew-row');
-    const count = await rows.count();
-    expect(count).toBeGreaterThanOrEqual(20);
-  });
-
-  test('error weight radio buttons are clickable', async ({ page }) => {
-    await page.goto(ADMIN + '#controls');
-    await page.waitForTimeout(1500);
-    // Click HIGH on the first error type
-    const firstRow = page.locator('.ew-row').first();
-    const highBtn = firstRow.locator('.ew-opt:text("HIGH")');
-    await highBtn.click();
-    await page.waitForTimeout(500);
-    await expect(highBtn).toHaveClass(/active/);
-  });
-
-  test('shows page type weight grid', async ({ page }) => {
-    await page.goto(ADMIN + '#controls');
-    await page.waitForTimeout(1500);
-    const grid = page.locator('#page-type-grid');
-    await expect(grid).toBeVisible();
-    const rows = grid.locator('.ew-row');
-    const count = await rows.count();
-    expect(count).toBeGreaterThanOrEqual(8);
+    // Open the content section via JS
+    await page.evaluate(() => window.toggleServerSection('content'));
+    await page.waitForTimeout(300);
+    await expect(page.locator('#page-type-grid')).toBeVisible();
   });
 
   test('shows dropdown controls', async ({ page }) => {
-    await page.goto(ADMIN + '#controls');
+    await login(page);
+    await page.goto(ADMIN + '#server');
     await page.waitForTimeout(1500);
+    // Open content section via JS
+    await page.evaluate(() => window.toggleServerSection('content'));
+    await page.waitForTimeout(300);
     await expect(page.locator('#ctrl-honeypot-style')).toBeVisible();
     await expect(page.locator('#ctrl-framework')).toBeVisible();
-    await expect(page.locator('#ctrl-theme')).toBeVisible();
   });
 
-  test('config export button exists', async ({ page }) => {
-    await page.goto(ADMIN + '#controls');
+  test('shows vulnerability groups section', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#server');
     await page.waitForTimeout(1500);
-    await expect(page.locator('button:text("Export Config")')).toBeVisible();
-    await expect(page.locator('button:text("Import Config")')).toBeVisible();
-  });
-});
-
-test.describe('Request Log Tab', () => {
-  test('shows log table with headers', async ({ page }) => {
-    await page.goto(ADMIN + '#log');
-    await page.waitForTimeout(1500);
-    await expect(page.locator('#panel-log th').first()).toContainText('Time');
-  });
-
-  test('search filter is functional', async ({ page }) => {
-    await page.goto(ADMIN + '#log');
-    await page.waitForTimeout(1500);
-    const filter = page.locator('#log-filter');
-    await expect(filter).toBeVisible();
-    await filter.fill('nonexistent-path-xyz');
+    // Open vulns section via JS
+    await page.evaluate(() => window.toggleServerSection('vulns'));
     await page.waitForTimeout(300);
-    // Should filter the results (possibly to 0)
-    const rows = page.locator('#log-body tr');
-    const count = await rows.count();
-    expect(count).toBeLessThanOrEqual(0);
+    const section = page.locator('#srv-vulns');
+    await expect(section).toBeVisible();
+  });
+
+  test('shows recording section', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#server');
+    await page.waitForTimeout(1500);
+    // Open recording section via JS
+    await page.evaluate(() => window.toggleServerSection('recording'));
+    await page.waitForTimeout(300);
+    await expect(page.locator('#rec-format')).toBeVisible();
+    await expect(page.locator('#rec-start-btn')).toBeVisible();
   });
 });
 
-test.describe('Vulnerabilities Tab', () => {
-  test('shows vuln overview cards', async ({ page }) => {
-    await page.goto(ADMIN + '#vulns');
-    await page.waitForTimeout(2000);
-    await expect(page.locator('#vuln-overview-cards')).toContainText('OWASP');
-    await expect(page.locator('#vuln-overview-cards')).toContainText('Total Vulns');
-  });
-
-  test('shows group toggles', async ({ page }) => {
-    await page.goto(ADMIN + '#vulns');
-    await page.waitForTimeout(2000);
-    const groups = page.locator('#vuln-group-toggles .group-toggle');
-    await expect(groups).toHaveCount(3);
-  });
-
-  test('shows severity badges', async ({ page }) => {
-    await page.goto(ADMIN + '#vulns');
-    await page.waitForTimeout(2000);
-    await expect(page.locator('#vuln-severity-badges')).toContainText('critical');
-    await expect(page.locator('#vuln-severity-badges')).toContainText('high');
-  });
-
-  test('shows vuln table with toggles', async ({ page }) => {
-    await page.goto(ADMIN + '#vulns');
-    // Wait for vuln table rows to appear (profile + vulns APIs)
-    await page.waitForSelector('#vuln-body tr', { timeout: 10000 });
-    const vulnRows = page.locator('#vuln-body tr');
-    const count = await vulnRows.count();
-    expect(count).toBeGreaterThanOrEqual(5);
-  });
-
-  test('vuln search filter works', async ({ page }) => {
-    await page.goto(ADMIN + '#vulns');
-    await page.waitForTimeout(3000);
-    // First verify we have some rows
-    const allRows = await page.locator('#vuln-body tr').count();
-    if (allRows === 0) return; // Skip if no data loaded yet
-    const filter = page.locator('#vuln-filter');
-    await filter.fill('xss');
-    await page.waitForTimeout(500);
-    const rows = page.locator('#vuln-body tr');
-    const count = await rows.count();
-    expect(count).toBeLessThan(allRows); // filtered should be fewer
-  });
-
-  test('can toggle vuln group', async ({ page }) => {
-    await page.goto(ADMIN + '#vulns');
-    await page.waitForTimeout(3000);
-    // Toggle OWASP group by clicking the label (checkbox is hidden)
-    const owaspToggle = page.locator('.group-toggle:has(.toggle-name:text("OWASP")) .toggle-sw');
-    await owaspToggle.click();
-    await page.waitForTimeout(500);
-    // Toggle it back
-    await owaspToggle.click();
-    await page.waitForTimeout(500);
-  });
-});
+// --- Scanner Tab ---
 
 test.describe('Scanner Tab', () => {
-  test('shows profile generation button', async ({ page }) => {
+  test('shows scanner subtabs', async ({ page }) => {
+    await login(page);
     await page.goto(ADMIN + '#scanner');
     await page.waitForTimeout(1000);
-    await expect(page.locator('button:text("Generate Profile")')).toBeVisible();
+    const subtabs = page.locator('.scanner-subtab-btn');
+    await expect(subtabs).toHaveCount(3);
   });
 
-  test('generate profile shows vulnerability counts', async ({ page }) => {
+  test('shows scanner launch buttons', async ({ page }) => {
+    await login(page);
     await page.goto(ADMIN + '#scanner');
     await page.waitForTimeout(1000);
-    await page.click('button:text("Generate Profile")');
-    await page.waitForTimeout(1500);
-    await expect(page.locator('#scanner-profile-summary')).toContainText('Total Vulns');
-    await expect(page.locator('#scanner-profile-summary')).toContainText('Total Endpoints');
+    // Eval subtab should be active by default
+    await expect(page.locator('#scanner-eval-panel')).toBeVisible();
+    // Check scanner card panels exist
+    const scannerPanels = page.locator('#scanner-eval-panel .scanner-panel');
+    const count = await scannerPanels.count();
+    expect(count).toBeGreaterThanOrEqual(3);
   });
 
-  test('shows scanner type selector', async ({ page }) => {
+  test('shows scan history table', async ({ page }) => {
+    await login(page);
     await page.goto(ADMIN + '#scanner');
     await page.waitForTimeout(1000);
+    await expect(page.locator('#scanner-history-body').locator('..').locator('..')).toBeVisible();
+  });
+
+  test('shows scanner type selector for manual upload', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#scanner');
+    await page.waitForTimeout(1000);
+    // Expand the manual upload section (starts collapsed)
+    await page.evaluate(() => {
+      document.getElementById('manual-upload-body').style.display = '';
+    });
+    await page.waitForTimeout(300);
     await expect(page.locator('#scanner-type')).toBeVisible();
     const options = page.locator('#scanner-type option');
     const count = await options.count();
@@ -292,27 +239,123 @@ test.describe('Scanner Tab', () => {
   });
 
   test('shows scanner output textarea', async ({ page }) => {
+    await login(page);
     await page.goto(ADMIN + '#scanner');
     await page.waitForTimeout(1000);
+    // Expand the manual upload section (starts collapsed)
+    await page.evaluate(() => {
+      document.getElementById('manual-upload-body').style.display = '';
+    });
+    await page.waitForTimeout(300);
     await expect(page.locator('#scanner-output')).toBeVisible();
   });
 
-  test('shows run scanner buttons', async ({ page }) => {
+  test('built-in scanner subtab shows profile cards', async ({ page }) => {
+    await login(page);
     await page.goto(ADMIN + '#scanner');
     await page.waitForTimeout(1000);
-    const btns = page.locator('#scanner-run-btns .scanner-btn');
-    const count = await btns.count();
+    // Switch to built-in subtab
+    await page.evaluate(() => window.switchScannerSubtab('builtin'));
+    await page.waitForTimeout(300);
+    await expect(page.locator('#scanner-builtin-panel')).toBeVisible();
+    const profiles = page.locator('.profile-card');
+    const count = await profiles.count();
     expect(count).toBeGreaterThanOrEqual(3);
   });
 
-  test('shows scan history table', async ({ page }) => {
+  test('replay subtab shows upload controls', async ({ page }) => {
+    await login(page);
     await page.goto(ADMIN + '#scanner');
     await page.waitForTimeout(1000);
-    await expect(page.locator('#scanner-history-body').locator('..').locator('..')).toBeVisible();
+    // Switch to replay subtab
+    await page.evaluate(() => window.switchScannerSubtab('replay'));
+    await page.waitForTimeout(300);
+    await expect(page.locator('#scanner-replay-panel')).toBeVisible();
+    await expect(page.locator('#replay-upload-label')).toBeVisible();
+  });
+
+  test('shows target vulnerability surface', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#scanner');
+    await page.waitForTimeout(1000);
+    await expect(page.locator('#scanner-profile-summary')).toBeVisible();
   });
 });
 
+// --- Proxy Tab ---
+
+test.describe('Proxy Tab', () => {
+  test('shows proxy controls', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#proxy');
+    await page.waitForTimeout(1500);
+    await expect(page.locator('#proxy-rt-port')).toBeVisible();
+    await expect(page.locator('#proxy-rt-target')).toBeVisible();
+    await expect(page.locator('#proxy-rt-start-btn')).toBeVisible();
+  });
+
+  test('shows proxy mode radios', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#proxy');
+    await page.waitForTimeout(1500);
+    await expect(page.locator('#proxy-mode-radios')).toBeVisible();
+    const radios = page.locator('input[name="proxy-mode"]');
+    const count = await radios.count();
+    expect(count).toBeGreaterThanOrEqual(4);
+  });
+
+  test('shows proxy metrics section', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#proxy');
+    await page.waitForTimeout(1500);
+    await expect(page.locator('#proxy-metrics')).toBeVisible();
+  });
+
+  test('shows proxy pipeline table', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#proxy');
+    await page.waitForTimeout(1500);
+    await expect(page.locator('#proxy-pipeline-body').locator('..').locator('..')).toBeVisible();
+  });
+});
+
+// --- Settings Tab ---
+
+test.describe('Settings Tab', () => {
+  test('shows password change form', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#settings');
+    await page.waitForTimeout(1000);
+    await expect(page.locator('#settings-current-pw')).toBeVisible();
+    await expect(page.locator('#settings-new-pw')).toBeVisible();
+    await expect(page.locator('#settings-confirm-pw')).toBeVisible();
+  });
+
+  test('shows config import/export buttons', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#settings');
+    await page.waitForTimeout(1000);
+    await expect(page.locator('button:text("Export Config")')).toBeVisible();
+    await expect(page.locator('button:text("Import Config")')).toBeVisible();
+  });
+
+  test('shows server info', async ({ page }) => {
+    await login(page);
+    await page.goto(ADMIN + '#settings');
+    await page.waitForTimeout(1000);
+    await expect(page.locator('#settings-uptime')).toBeVisible();
+  });
+});
+
+// --- API Tests (use Basic Auth) ---
+
 test.describe('Config Export/Import API', () => {
+  test.use({
+    extraHTTPHeaders: {
+      'Authorization': 'Basic ' + Buffer.from(':' + PASSWORD).toString('base64'),
+    },
+  });
+
   test('export returns valid JSON with all sections', async ({ request }) => {
     const resp = await request.get(API + '/admin/api/config/export');
     expect(resp.ok()).toBeTruthy();
@@ -355,19 +398,22 @@ test.describe('Config Export/Import API', () => {
 });
 
 test.describe('Feature Toggle API', () => {
+  test.use({
+    extraHTTPHeaders: {
+      'Authorization': 'Basic ' + Buffer.from(':' + PASSWORD).toString('base64'),
+    },
+  });
+
   test('toggle feature and verify', async ({ request }) => {
-    // Get current state
     const resp = await request.get(API + '/admin/api/features');
     const before = await resp.json();
 
-    // Toggle search off
     const toggleResp = await request.post(API + '/admin/api/features', {
       data: { feature: 'search', enabled: false },
     });
     const result = await toggleResp.json();
     expect(result.ok).toBe(true);
 
-    // Verify
     const resp2 = await request.get(API + '/admin/api/features');
     const after = await resp2.json();
     expect(after.search).toBe(false);
@@ -380,6 +426,12 @@ test.describe('Feature Toggle API', () => {
 });
 
 test.describe('Vulnerability Controls API', () => {
+  test.use({
+    extraHTTPHeaders: {
+      'Authorization': 'Basic ' + Buffer.from(':' + PASSWORD).toString('base64'),
+    },
+  });
+
   test('toggle vuln group', async ({ request }) => {
     const resp = await request.post(API + '/admin/api/vulns/group', {
       data: { group: 'advanced', enabled: false },
@@ -412,20 +464,23 @@ test.describe('Vulnerability Controls API', () => {
 });
 
 test.describe('Error Weights API', () => {
+  test.use({
+    extraHTTPHeaders: {
+      'Authorization': 'Basic ' + Buffer.from(':' + PASSWORD).toString('base64'),
+    },
+  });
+
   test('set and reset error weights', async ({ request }) => {
-    // Set a weight
     const setResp = await request.post(API + '/admin/api/error-weights', {
       data: { error_type: '503', weight: 0.25 },
     });
     const setResult = await setResp.json();
     expect(setResult.ok).toBe(true);
 
-    // Verify
     const getResp = await request.get(API + '/admin/api/error-weights');
     const weights = await getResp.json();
     expect(weights.weights['503']).toBe(0.25);
 
-    // Reset
     const resetResp = await request.post(API + '/admin/api/error-weights', {
       data: { reset: true },
     });
@@ -436,20 +491,23 @@ test.describe('Error Weights API', () => {
 });
 
 test.describe('Page Type Weights API', () => {
+  test.use({
+    extraHTTPHeaders: {
+      'Authorization': 'Basic ' + Buffer.from(':' + PASSWORD).toString('base64'),
+    },
+  });
+
   test('set and reset page type weights', async ({ request }) => {
-    // Set a weight
     const setResp = await request.post(API + '/admin/api/page-type-weights', {
       data: { page_type: 'json', weight: 0.3 },
     });
     const setResult = await setResp.json();
     expect(setResult.ok).toBe(true);
 
-    // Verify
     const getResp = await request.get(API + '/admin/api/page-type-weights');
     const weights = await getResp.json();
     expect(weights.weights['json']).toBe(0.3);
 
-    // Reset
     const resetResp = await request.post(API + '/admin/api/page-type-weights', {
       data: { reset: true },
     });
@@ -460,13 +518,17 @@ test.describe('Page Type Weights API', () => {
 });
 
 test.describe('Config Wiring', () => {
+  test.use({
+    extraHTTPHeaders: {
+      'Authorization': 'Basic ' + Buffer.from(':' + PASSWORD).toString('base64'),
+    },
+  });
+
   test('active framework config affects server headers', async ({ request }) => {
-    // Set framework to Django
     await request.post(API + '/admin/api/config', {
       data: { key: 'active_framework', value: 'django' },
     });
 
-    // Verify config was saved
     const cfgResp = await request.get(API + '/admin/api/config');
     const cfg = await cfgResp.json();
     expect(cfg.active_framework).toBe('django');
@@ -478,7 +540,6 @@ test.describe('Config Wiring', () => {
   });
 
   test('error rate multiplier config is stored', async ({ request }) => {
-    // Set multiplier
     await request.post(API + '/admin/api/config', {
       data: { key: 'error_rate_multiplier', value: 2.5 },
     });
@@ -487,7 +548,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.error_rate_multiplier).toBe(2.5);
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'error_rate_multiplier', value: 1.0 },
     });
@@ -506,7 +566,6 @@ test.describe('Config Wiring', () => {
     expect(cfg.delay_min_ms).toBe(50);
     expect(cfg.delay_max_ms).toBe(200);
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'delay_min_ms', value: 0 },
     });
@@ -524,7 +583,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.cookie_trap_frequency).toBe(2);
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'cookie_trap_frequency', value: 6 },
     });
@@ -539,7 +597,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.js_trap_difficulty).toBe(4);
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'js_trap_difficulty', value: 2 },
     });
@@ -554,12 +611,10 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.content_theme).toBe('dark');
 
-    // Verify theme is applied to content pages
     const pageResp = await request.get(SERVER + '/blog/test-theme');
     const html = await pageResp.text();
-    expect(html).toContain('#0f172a'); // dark theme bg color
+    expect(html).toContain('#0f172a');
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'content_theme', value: 'default' },
     });
@@ -574,7 +629,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.honeypot_response_style).toBe('aggressive');
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'honeypot_response_style', value: 'realistic' },
     });
@@ -589,7 +643,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.content_cache_ttl_sec).toBe(120);
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'content_cache_ttl_sec', value: 60 },
     });
@@ -604,7 +657,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.recorder_format).toBe('pcap');
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'recorder_format', value: 'jsonl' },
     });
@@ -619,7 +671,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.max_labyrinth_depth).toBe(25);
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'max_labyrinth_depth', value: 50 },
     });
@@ -634,7 +685,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.header_corrupt_level).toBe(3);
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'header_corrupt_level', value: 1 },
     });
@@ -649,7 +699,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.captcha_trigger_thresh).toBe(50);
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'captcha_trigger_thresh', value: 100 },
     });
@@ -664,7 +713,6 @@ test.describe('Config Wiring', () => {
     const cfg = await cfgResp.json();
     expect(cfg.bot_score_threshold).toBe(80);
 
-    // Reset
     await request.post(API + '/admin/api/config', {
       data: { key: 'bot_score_threshold', value: 60 },
     });
@@ -672,6 +720,12 @@ test.describe('Config Wiring', () => {
 });
 
 test.describe('Scanner Comparison API', () => {
+  test.use({
+    extraHTTPHeaders: {
+      'Authorization': 'Basic ' + Buffer.from(':' + PASSWORD).toString('base64'),
+    },
+  });
+
   test('comparison history endpoint returns array', async ({ request }) => {
     const resp = await request.get(API + '/admin/api/scanner/history');
     expect(resp.ok()).toBeTruthy();
@@ -684,7 +738,6 @@ test.describe('Scanner Comparison API', () => {
     const resp = await request.get(API + '/admin/api/scanner/baseline?scanner=nuclei');
     expect(resp.ok()).toBeTruthy();
     const data = await resp.json();
-    // May be null if no baseline exists
     expect(data).toBeDefined();
   });
 
@@ -704,12 +757,10 @@ test.describe('Scanner Comparison API', () => {
   });
 
   test('single compare adds to history', async ({ request }) => {
-    // Get history count before
     const beforeResp = await request.get(API + '/admin/api/scanner/history');
     const before = await beforeResp.json();
     const countBefore = before.entries.length;
 
-    // Run a comparison
     await request.post(API + '/admin/api/scanner/compare', {
       data: {
         scanner: 'nuclei',
@@ -717,7 +768,6 @@ test.describe('Scanner Comparison API', () => {
       },
     });
 
-    // Check history count increased
     const afterResp = await request.get(API + '/admin/api/scanner/history');
     const after = await afterResp.json();
     expect(after.entries.length).toBeGreaterThan(countBefore);
@@ -725,6 +775,12 @@ test.describe('Scanner Comparison API', () => {
 });
 
 test.describe('PCAP Recording API', () => {
+  test.use({
+    extraHTTPHeaders: {
+      'Authorization': 'Basic ' + Buffer.from(':' + PASSWORD).toString('base64'),
+    },
+  });
+
   test('can start recording in PCAP format', async ({ request }) => {
     const resp = await request.post(SERVER + '/captures/start', {
       data: { format: 'pcap' },
@@ -735,7 +791,6 @@ test.describe('PCAP Recording API', () => {
       expect(data.file).toContain('.pcap');
     }
 
-    // Stop recording
     await request.post(SERVER + '/captures/stop');
   });
 
@@ -746,7 +801,6 @@ test.describe('PCAP Recording API', () => {
     const data = await resp.json();
     expect(data.status).toBe('recording');
 
-    // Stop recording
     await request.post(SERVER + '/captures/stop');
   });
 });

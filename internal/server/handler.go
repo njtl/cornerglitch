@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
@@ -75,9 +76,10 @@ type Handler struct {
 	cookieT   *cookies.Tracker
 	jsEng     *jstrap.Engine
 	botDet    *botdetect.Detector
-	spiderH   *spider.Handler
-	flags     *dashboard.FeatureFlags
-	config    *dashboard.AdminConfig
+	spiderH            *spider.Handler
+	flags              *dashboard.FeatureFlags
+	config             *dashboard.AdminConfig
+	lastConfigVersion  atomic.Int64
 }
 
 func NewHandler(
@@ -599,6 +601,12 @@ func (h *Handler) applyConfiguredDelay() {
 // This is called on every request but only performs lightweight reads and
 // conditional writes (subsystems ignore no-op updates internally).
 func (h *Handler) syncConfigToSubsystems() {
+	v := dashboard.GetConfigVersion()
+	if v == h.lastConfigVersion.Load() {
+		return // config unchanged, skip sync
+	}
+	h.lastConfigVersion.Store(v)
+
 	cfg := h.config.Get()
 
 	// Sync active framework to framework emulator

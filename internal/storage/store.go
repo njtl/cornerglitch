@@ -44,8 +44,8 @@ func NewWithDSN(ctx context.Context, dsn string) (*Store, error) {
 	}
 
 	// Connection pool settings
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
 	// Verify connectivity

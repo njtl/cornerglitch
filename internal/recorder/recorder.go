@@ -18,6 +18,25 @@ const maxFileSize = 50 * 1024 * 1024
 // maxFileDuration is the maximum duration for a single capture file before rotation (1 hour).
 const maxFileDuration = time.Hour
 
+// writeMsg carries pre-marshaled data to the background writer goroutine.
+type writeMsg struct {
+	data []byte   // marshaled JSON + newline (for JSONL)
+	pcap *pcapMsg // for PCAP format
+}
+
+// pcapMsg carries PCAP write parameters to the background writer.
+type pcapMsg struct {
+	hasRequest  bool
+	method      string
+	path        string
+	host        string
+	reqHeaders  map[string]string
+	reqBody     string
+	statusCode  int
+	respHeaders map[string]string
+	respBodySz  int64
+}
+
 // CaptureInfo describes a single capture file on disk.
 type CaptureInfo struct {
 	Filename  string    `json:"filename"`
@@ -67,11 +86,25 @@ type Recorder struct {
 	fileSize    int64
 	recordCount atomic.Int64
 
+	// Async writer
+	writeCh    chan writeMsg
+	writerDone chan struct{} // closed when writer goroutine exits
+
 	// Recording limits
 	maxDuration time.Duration // 0 = unlimited
 	maxRequests int64         // 0 = unlimited
 	stopTimer   *time.Timer
 	startedAt   time.Time
+
+	// Cache for closed-file record counts (filename -> count).
+	// Closed capture files are immutable so counts never change.
+	recordCountCache sync.Map
+
+	// Cached result of GetCaptures() to avoid repeated ReadDir + Stat on every
+	// dashboard refresh. Invalidated after capturesCacheTTL or when recording
+	// state changes.
+	capturesCache    []CaptureInfo
+	capturesCacheAt  time.Time
 }
 
 // NewRecorder creates a new Recorder that stores captures in capturesDir.
@@ -115,31 +148,55 @@ func (rec *Recorder) Start() {
 	if rec.recording {
 		return
 	}
+	rec.startLocked()
+}
+
+// startLocked sets up a new capture session. Must be called with mu held.
+func (rec *Recorder) startLocked() {
 	rec.openNewFile()
 	rec.recording = true
 	rec.startedAt = time.Now()
+	rec.capturesCache = nil // invalidate
+	rec.writeCh = make(chan writeMsg, 8192)
+	rec.writerDone = make(chan struct{})
+	go rec.writerLoop(rec.writeCh, rec.writerDone)
 }
 
 // Stop ends the current capture session. If not recording, this is a no-op.
+// It signals the background writer to drain pending writes, waits for it to
+// finish, then closes the capture file.
 func (rec *Recorder) Stop() {
 	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	rec.stopLocked()
-}
-
-// stopLocked performs the actual stop while mu is held.
-func (rec *Recorder) stopLocked() {
 	if !rec.recording {
+		rec.mu.Unlock()
 		return
 	}
+	rec.recording = false
 	if rec.stopTimer != nil {
 		rec.stopTimer.Stop()
 		rec.stopTimer = nil
 	}
-	rec.closeFile()
-	rec.recording = false
 	rec.maxDuration = 0
 	rec.maxRequests = 0
+	ch := rec.writeCh
+	done := rec.writerDone
+	rec.writeCh = nil
+	rec.writerDone = nil
+	rec.capturesCache = nil // invalidate
+	rec.mu.Unlock()
+
+	// Close the channel so the writer drains and exits.
+	if ch != nil {
+		close(ch)
+	}
+	if done != nil {
+		<-done
+	}
+
+	// Now safe to close the file — writer is done.
+	rec.mu.Lock()
+	rec.closeFile()
+	rec.mu.Unlock()
 }
 
 // StartWithLimits begins a new capture session with optional limits.
@@ -163,9 +220,7 @@ func (rec *Recorder) StartWithLimits(maxDurationSec int, maxRequests int64) {
 		rec.maxRequests = 0
 	}
 
-	rec.openNewFile()
-	rec.recording = true
-	rec.startedAt = time.Now()
+	rec.startLocked()
 
 	if rec.maxDuration > 0 {
 		rec.stopTimer = time.AfterFunc(rec.maxDuration, func() {
@@ -216,31 +271,20 @@ func (rec *Recorder) RecordRequest(r *http.Request, body []byte) {
 
 // RecordResponse captures a response and writes a combined request+response record.
 // The caller should pass the original request's method, path, headers, and body.
+// Data is marshaled outside the mutex and sent to a buffered channel for async disk I/O.
 func (rec *Recorder) RecordResponse(statusCode int, headers http.Header, body []byte, clientID string, path string) {
 	rec.mu.Lock()
-	defer rec.mu.Unlock()
 	if !rec.recording {
+		rec.mu.Unlock()
 		return
 	}
+	format := rec.format
+	ch := rec.writeCh
+	maxReq := rec.maxRequests
+	rec.mu.Unlock()
 
-	rec.maybeRotate()
-
-	// PCAP format: write response as a packet.
-	if rec.format == "pcap" && rec.pcapWriter != nil {
-		respHeaders := make(map[string]string, len(headers))
-		for k := range headers {
-			respHeaders[k] = headers.Get(k)
-		}
-		_ = rec.pcapWriter.WriteHTTPResponse(statusCode, respHeaders, int64(len(body)))
-		rec.fileSize = rec.pcapWriter.Size()
-		newCount := rec.recordCount.Add(1)
-		if rec.maxRequests > 0 && newCount >= rec.maxRequests {
-			rec.stopLocked()
-		}
-		return
-	}
-
-	if rec.file == nil {
+	// Pre-check: reject if maxRequests already reached (async stop may be in flight).
+	if maxReq > 0 && rec.recordCount.Load() >= maxReq {
 		return
 	}
 
@@ -249,50 +293,67 @@ func (rec *Recorder) RecordResponse(statusCode int, headers http.Header, body []
 		respHeaders[k] = headers.Get(k)
 	}
 
-	entry := captureRecord{
-		Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
-		ClientID:        clientID,
-		Method:          "", // filled in by caller if needed; path is authoritative
-		Path:            path,
-		RequestHeaders:  nil,
-		RequestBody:     "",
-		StatusCode:      statusCode,
-		ResponseHeaders: respHeaders,
-		ResponseBodySz:  int64(len(body)),
-		LatencyMs:       0,
+	var msg writeMsg
+	if format == "pcap" {
+		msg = writeMsg{
+			pcap: &pcapMsg{
+				statusCode:  statusCode,
+				respHeaders: respHeaders,
+				respBodySz:  int64(len(body)),
+			},
+		}
+	} else {
+		entry := captureRecord{
+			Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
+			ClientID:        clientID,
+			Path:            path,
+			StatusCode:      statusCode,
+			ResponseHeaders: respHeaders,
+			ResponseBodySz:  int64(len(body)),
+		}
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return
+		}
+		data = append(data, '\n')
+		msg = writeMsg{data: data}
 	}
 
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return
-	}
-	data = append(data, '\n')
-
-	n, err := rec.file.Write(data)
-	if err != nil {
-		return
-	}
-	rec.fileSize += int64(n)
-	newCount := rec.recordCount.Add(1)
-	if rec.maxRequests > 0 && newCount >= rec.maxRequests {
-		rec.stopLocked()
+	if safeSend(ch, msg) {
+		newCount := rec.recordCount.Add(1)
+		if rec.maxRequests > 0 && newCount >= rec.maxRequests {
+			go rec.Stop()
+		}
 	}
 }
 
 // RecordFull writes a complete request+response record with all fields populated.
 // This is the preferred recording method when the caller has full round-trip data.
+// Data is marshaled outside the mutex and sent to a buffered channel for async disk I/O.
 func (rec *Recorder) RecordFull(method, path, clientID string, reqHeaders map[string]string, reqBody []byte,
 	statusCode int, respHeaders http.Header, respBodySize int64, latencyMs float64) {
 	rec.mu.Lock()
-	defer rec.mu.Unlock()
 	if !rec.recording {
+		rec.mu.Unlock()
+		return
+	}
+	format := rec.format
+	ch := rec.writeCh
+	maxReq := rec.maxRequests
+	rec.mu.Unlock()
+
+	// Pre-check: reject if maxRequests already reached (async stop may be in flight).
+	if maxReq > 0 && rec.recordCount.Load() >= maxReq {
 		return
 	}
 
-	rec.maybeRotate()
+	rh := make(map[string]string, len(respHeaders))
+	for k := range respHeaders {
+		rh[k] = respHeaders.Get(k)
+	}
 
-	// PCAP format: write request and response as separate packets.
-	if rec.format == "pcap" && rec.pcapWriter != nil {
+	var msg writeMsg
+	if format == "pcap" {
 		host := ""
 		if reqHeaders != nil {
 			host = reqHeaders["Host"]
@@ -306,64 +367,91 @@ func (rec *Recorder) RecordFull(method, path, clientID string, reqHeaders map[st
 			bodyStr = string(reqBody)
 		}
 
-		rh := make(map[string]string, len(respHeaders))
-		for k := range respHeaders {
-			rh[k] = respHeaders.Get(k)
+		msg = writeMsg{
+			pcap: &pcapMsg{
+				hasRequest:  true,
+				method:      method,
+				path:        path,
+				host:        host,
+				reqHeaders:  reqHeaders,
+				reqBody:     bodyStr,
+				statusCode:  statusCode,
+				respHeaders: rh,
+				respBodySz:  respBodySize,
+			},
+		}
+	} else {
+		var bodyStr string
+		if len(reqBody) > 0 {
+			bodyStr = string(reqBody)
 		}
 
-		_ = rec.pcapWriter.WriteHTTPRequest(method, path, host, reqHeaders, bodyStr)
-		_ = rec.pcapWriter.WriteHTTPResponse(statusCode, rh, respBodySize)
+		entry := captureRecord{
+			Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
+			ClientID:        clientID,
+			Method:          method,
+			Path:            path,
+			RequestHeaders:  reqHeaders,
+			RequestBody:     bodyStr,
+			StatusCode:      statusCode,
+			ResponseHeaders: rh,
+			ResponseBodySz:  respBodySize,
+			LatencyMs:       latencyMs,
+		}
 
-		rec.fileSize = rec.pcapWriter.Size()
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return
+		}
+		data = append(data, '\n')
+		msg = writeMsg{data: data}
+	}
+
+	if safeSend(ch, msg) {
 		newCount := rec.recordCount.Add(1)
 		if rec.maxRequests > 0 && newCount >= rec.maxRequests {
-			rec.stopLocked()
+			go rec.Stop()
 		}
-		return
 	}
+}
 
-	// JSONL format (default).
-	if rec.file == nil {
-		return
+// writerLoop is the background goroutine that performs disk I/O for recorded
+// traffic. It reads from ch until the channel is closed, then exits. All file
+// writes and rotations happen under rec.mu so they remain safe.
+func (rec *Recorder) writerLoop(ch chan writeMsg, done chan struct{}) {
+	defer close(done)
+	for msg := range ch {
+		rec.mu.Lock()
+		rec.maybeRotate()
+		if msg.pcap != nil {
+			if rec.pcapWriter != nil {
+				if msg.pcap.hasRequest {
+					_ = rec.pcapWriter.WriteHTTPRequest(msg.pcap.method, msg.pcap.path, msg.pcap.host, msg.pcap.reqHeaders, msg.pcap.reqBody)
+				}
+				_ = rec.pcapWriter.WriteHTTPResponse(msg.pcap.statusCode, msg.pcap.respHeaders, msg.pcap.respBodySz)
+				rec.fileSize = rec.pcapWriter.Size()
+			}
+		} else if msg.data != nil {
+			if rec.file != nil {
+				n, _ := rec.file.Write(msg.data)
+				rec.fileSize += int64(n)
+			}
+		}
+		rec.mu.Unlock()
 	}
+}
 
-	rh := make(map[string]string, len(respHeaders))
-	for k := range respHeaders {
-		rh[k] = respHeaders.Get(k)
-	}
-
-	var bodyStr string
-	if len(reqBody) > 0 {
-		bodyStr = string(reqBody)
-	}
-
-	entry := captureRecord{
-		Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
-		ClientID:        clientID,
-		Method:          method,
-		Path:            path,
-		RequestHeaders:  reqHeaders,
-		RequestBody:     bodyStr,
-		StatusCode:      statusCode,
-		ResponseHeaders: rh,
-		ResponseBodySz:  respBodySize,
-		LatencyMs:       latencyMs,
-	}
-
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return
-	}
-	data = append(data, '\n')
-
-	n, err := rec.file.Write(data)
-	if err != nil {
-		return
-	}
-	rec.fileSize += int64(n)
-	newCount := rec.recordCount.Add(1)
-	if rec.maxRequests > 0 && newCount >= rec.maxRequests {
-		rec.stopLocked()
+// safeSend attempts a non-blocking send to ch. Returns true if the message was
+// sent. Returns false if the channel is full (back-pressure) or closed (race
+// with Stop). Recording is best-effort under extreme load, so drops are
+// acceptable.
+func safeSend(ch chan writeMsg, msg writeMsg) (sent bool) {
+	defer func() { recover() }()
+	select {
+	case ch <- msg:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -425,11 +513,51 @@ func (rec *Recorder) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
 }
 
 // GetCaptures returns information about all capture files on disk.
+const capturesCacheTTL = 2 * time.Second
+
 func (rec *Recorder) GetCaptures() []CaptureInfo {
 	rec.mu.Lock()
 	activeFile := rec.fileName
+	activeCount := rec.recordCount.Load()
+	cached := rec.capturesCache
+	cachedAt := rec.capturesCacheAt
 	rec.mu.Unlock()
 
+	// Return cached result if fresh. For the active file, patch in the live
+	// record count so the dashboard shows real-time progress.
+	if cached != nil && time.Since(cachedAt) < capturesCacheTTL {
+		if activeFile == "" {
+			return cached
+		}
+		// Shallow-copy and patch active file's record count.
+		result := make([]CaptureInfo, len(cached))
+		copy(result, cached)
+		for i := range result {
+			if result[i].IsActive {
+				result[i].Records = activeCount
+			}
+		}
+		return result
+	}
+
+	captures := rec.getCapuresUncached(activeFile, activeCount)
+
+	rec.mu.Lock()
+	rec.capturesCache = captures
+	rec.capturesCacheAt = time.Now()
+	rec.mu.Unlock()
+
+	return captures
+}
+
+// InvalidateCapturesCache forces the next GetCaptures call to re-scan the directory.
+func (rec *Recorder) InvalidateCapturesCache() {
+	rec.mu.Lock()
+	rec.capturesCache = nil
+	rec.mu.Unlock()
+}
+
+func (rec *Recorder) getCapuresUncached(activeFile string, activeCount int64) []CaptureInfo {
 	entries, err := os.ReadDir(rec.capturesDir)
 	if err != nil {
 		return nil
@@ -452,18 +580,66 @@ func (rec *Recorder) GetCaptures() []CaptureInfo {
 		}
 
 		startTime := parseFilenameTime(name)
-		records := countLines(filepath.Join(rec.capturesDir, name))
+		isActive := name == activeFile
+
+		var records int64
+		if isActive {
+			records = activeCount
+		} else if c, ok := rec.recordCountCache.Load(name); ok {
+			records = c.(int64)
+		} else {
+			records = countRecords(filepath.Join(rec.capturesDir, name), name)
+			rec.recordCountCache.Store(name, records)
+		}
 
 		captures = append(captures, CaptureInfo{
 			Filename:  name,
 			StartTime: startTime,
 			Records:   records,
 			SizeBytes: info.Size(),
-			IsActive:  name == activeFile,
+			IsActive:  isActive,
 		})
 	}
 
 	return captures
+}
+
+// countRecords returns the record count for a capture file.
+// For JSONL files, it counts newlines. For PCAP files, it counts packet headers.
+func countRecords(path, name string) int64 {
+	if strings.HasSuffix(name, ".pcap") {
+		return countPCAPRecords(path)
+	}
+	return countLines(path)
+}
+
+// countPCAPRecords counts the number of PCAP packet records by scanning headers.
+func countPCAPRecords(path string) int64 {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	// Skip 24-byte global header.
+	if _, err := f.Seek(24, 0); err != nil {
+		return 0
+	}
+
+	var count int64
+	hdr := make([]byte, 16) // each packet record header is 16 bytes
+	for {
+		if _, err := f.Read(hdr); err != nil {
+			break
+		}
+		// inclLen is at offset 8, 4 bytes, little-endian.
+		inclLen := int64(hdr[8]) | int64(hdr[9])<<8 | int64(hdr[10])<<16 | int64(hdr[11])<<24
+		if _, err := f.Seek(inclLen, 1); err != nil {
+			break
+		}
+		count++
+	}
+	return count
 }
 
 // --- internal methods ---
@@ -552,8 +728,7 @@ func (rec *Recorder) handleStart(w http.ResponseWriter, r *http.Request) int {
 		} else if reqBody.Format == "jsonl" || reqBody.Format == "" {
 			rec.format = "jsonl"
 		}
-		rec.openNewFile()
-		rec.recording = true
+		rec.startLocked()
 	}
 	filename := rec.fileName
 	format := rec.format
@@ -573,14 +748,11 @@ func (rec *Recorder) handleStart(w http.ResponseWriter, r *http.Request) int {
 
 // handleStop stops recording and returns the response.
 func (rec *Recorder) handleStop(w http.ResponseWriter) int {
-	rec.mu.Lock()
-	wasRecording := rec.recording
+	wasRecording := rec.IsRecording()
 	records := rec.recordCount.Load()
 	if wasRecording {
-		rec.closeFile()
-		rec.recording = false
+		rec.Stop()
 	}
-	rec.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -683,6 +855,9 @@ func (rec *Recorder) handleDelete(w http.ResponseWriter, filename string) int {
 		_, _ = w.Write([]byte(`{"error":"delete failed"}`))
 		return http.StatusInternalServerError
 	}
+
+	rec.InvalidateCapturesCache()
+	rec.recordCountCache.Delete(filename)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
