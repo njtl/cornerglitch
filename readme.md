@@ -2,7 +2,7 @@
 
 **Break everything before production does.**
 
-A 3-in-1 chaos testing framework that emulates every layer of the HTTP stack -- client, proxy, and server -- so you can find out what breaks before your users do. Zero external dependencies. Go stdlib only.
+A 3-in-1 chaos testing framework that emulates every layer of the HTTP stack -- client, proxy, and server -- so you can find out what breaks before your users do. Go stdlib + PostgreSQL driver only.
 
 ---
 
@@ -60,6 +60,7 @@ go build -o glitch ./cmd/glitch
 ./glitch -config config.json                # load saved configuration (overrides auto-saved state)
 ./glitch -nightmare                         # nightmare mode
 GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag, or .env file)
+GLITCH_DB_URL=postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable ./glitch  # with PostgreSQL persistence
 ```
 
 ### Glitch Scanner
@@ -81,9 +82,13 @@ go build -o glitch-proxy ./cmd/glitch-proxy
 ### Docker
 
 ```bash
-docker-compose up                           # runs server + dashboard
+docker-compose up                           # runs server + dashboard + PostgreSQL
 make docker-build                           # build image
 make k8s-deploy                             # deploy to Kubernetes
+make db-up                                  # start standalone PostgreSQL container
+make db-down                                # stop PostgreSQL container
+make db-reset                               # drop and recreate database
+make db-psql                                # connect to PostgreSQL with psql
 ```
 
 ---
@@ -116,6 +121,7 @@ make k8s-deploy                             # deploy to Kubernetes
 - Spider data generation for crawler discovery
 - Full admin panel with 5-tab layout (Dashboard, Server, Scanner, Proxy, Settings), three-column dashboard grouping by subsystem, clickable clients with detail/override, group-level preset buttons (All On/Off, Off/Low/Med/High/Max), per-mode nightmare toggles, feature flags, tunable parameters, and config import/export
 - Settings auto-persist across restarts (saved to `.glitch-state.json` on every change, auto-loaded on startup)
+- Optional PostgreSQL persistence (`GLITCH_DB_URL` or `-db-url`) with insert-only versioning -- all config changes, scan results, metrics snapshots, and client profiles are stored with full version history. Server degrades gracefully to file-only mode if the database is unavailable. Schema managed by embedded SQL migrations.
 - Password-protected admin panel via `GLITCH_ADMIN_PASSWORD` env var (or `.env` file) or `-admin-password` flag
 
 ### Glitch Scanner (client emulator)
@@ -166,21 +172,25 @@ glitch selftest --mode nightmare             # maximum adversarial
 ### Docker
 
 ```bash
-docker-compose up                            # server + dashboard
+docker-compose up                            # server + dashboard + PostgreSQL
 docker build -t glitch .                     # standalone build
 ```
+
+Docker Compose includes a PostgreSQL 16 container with health checks, named volumes for data persistence, and automatic `GLITCH_DB_URL` configuration. The server waits for PostgreSQL to be healthy before starting.
 
 ### Kubernetes
 
 ```bash
-kubectl apply -f deploy/k8s/                 # full deployment (namespace, deployment, service, ingress, configmap)
+kubectl apply -f deploy/k8s/                 # full deployment (namespace, deployment, service, ingress, configmap, postgres)
 ```
+
+Includes PostgreSQL StatefulSet with persistent volume claim, service, and secrets.
 
 ### Systemd
 
 ```bash
 sudo cp deploy/systemd/*.service /etc/systemd/system/
-sudo systemctl enable --now glitch-server glitch-proxy
+sudo systemctl enable --now glitch-postgres glitch-server glitch-proxy
 ```
 
 ### Makefile
@@ -192,6 +202,10 @@ make docker-build   # build Docker image
 make k8s-deploy     # deploy to Kubernetes
 make run            # build and run locally
 make cross          # cross-compile for multiple platforms
+make db-up          # start PostgreSQL container
+make db-down        # stop PostgreSQL container
+make db-reset       # drop and recreate database
+make db-psql        # connect to PostgreSQL with psql
 ```
 
 ---
@@ -204,7 +218,7 @@ The server, scanner, and proxy are separate binaries built from `cmd/`. All inte
 
 ## Contributing
 
-Glitch is Go stdlib only -- no external dependencies. Build with `go build ./...`, run static analysis with `go vet ./...`, and test with `go test ./...`.
+Glitch uses Go stdlib plus `github.com/lib/pq` (PostgreSQL driver). Build with `go build ./...`, run static analysis with `go vet ./...`, and test with `go test ./...`. Storage tests require a running PostgreSQL instance (skipped automatically if unavailable).
 
 ## License
 

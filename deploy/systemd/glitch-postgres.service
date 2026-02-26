@@ -1,0 +1,27 @@
+[Unit]
+Description=Glitch PostgreSQL Database
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker rm -f glitch-postgres
+ExecStart=/usr/bin/docker run --name glitch-postgres \
+    -e POSTGRES_USER=glitch \
+    -e POSTGRES_PASSWORD=glitch \
+    -e POSTGRES_DB=glitch \
+    -v glitch-pgdata:/var/lib/postgresql/data \
+    -p 5432:5432 \
+    --health-cmd="pg_isready -U glitch" \
+    --health-interval=5s \
+    --health-timeout=3s \
+    --health-retries=5 \
+    postgres:16-alpine
+ExecStop=/usr/bin/docker stop glitch-postgres
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
