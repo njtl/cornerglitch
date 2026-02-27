@@ -529,16 +529,19 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   .severity-filter.sf-low { background:#069;color:#fff }
   .severity-filter.sf-info { background:#333;color:#aaa }
   .findings-group { margin-bottom:6px }
-  .findings-group summary { cursor:pointer;padding:8px 12px;background:#1a1a1a;border:1px solid #333;border-radius:4px;color:#ddd;font-size:0.85em;list-style:none;display:flex;align-items:center;gap:8px }
+  .findings-group summary { cursor:pointer;padding:8px 12px;background:#1a1a1a;border:1px solid #333;border-radius:4px;color:#ddd;font-size:0.85em;list-style:none;display:flex;align-items:center;gap:8px;user-select:none }
   .findings-group summary::-webkit-details-marker { display:none }
-  .findings-group summary::before { content:'\\25B6';font-size:0.7em;transition:transform .2s }
-  .findings-group[open] summary::before { transform:rotate(90deg) }
+  .findings-group summary .fg-arrow { display:inline-block;font-size:0.65em;transition:transform .2s;color:#888;width:12px }
+  .findings-group[open] summary .fg-arrow { transform:rotate(90deg) }
   .findings-group summary .fg-count { color:#888;font-size:0.85em }
   .findings-group table { margin:0 }
   .findings-container { max-height:600px;overflow-y:auto }
   .findings-url { max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle }
   #builtin-history-body tr.history-clickable { cursor:pointer }
   #builtin-history-body tr.history-clickable:hover { background:#1a2a3a }
+  .history-viewing-banner { background:#1a2a3a;border:1px solid #0af;border-radius:6px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;color:#88ccff;font-size:0.85em }
+  .history-viewing-banner button { background:#333;color:#aaa;border:1px solid #555;border-radius:4px;padding:4px 14px;cursor:pointer;font-family:inherit;font-size:0.82em }
+  .history-viewing-banner button:hover { background:#444;color:#fff }
 
   /* Collapsible server sections */
   .srv-section { margin-bottom: 2px; }
@@ -1266,7 +1269,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <!-- Scan Results -->
     <div class="section" id="builtin-results-section" style="display:none">
       <h2>// Scan Results</h2>
-      <div id="builtin-results-cards" class="grid" style="margin-bottom:14px"></div>
+      <div id="builtin-results-cards" style="margin-bottom:14px"></div>
       <div id="builtin-coverage-table" style="margin-bottom:14px"></div>
       <div id="builtin-scores" style="margin-bottom:14px"></div>
       <div id="builtin-findings-table"></div>
@@ -3582,6 +3585,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   // ------ Built-in Scanner Tab ------
   var builtinPollTimer = null;
+  var viewingHistoryReport = false;
 
   window.switchScannerSubtab = function(tab) {
     document.getElementById('scanner-eval-panel').style.display = tab === 'eval' ? '' : 'none';
@@ -3671,10 +3675,12 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           document.getElementById('builtin-run-btn').style.display = '';
           document.getElementById('builtin-stop-btn').style.display = 'none';
           document.getElementById('builtin-progress-wrap').style.display = 'none';
-          try {
-            var results = await api('/admin/api/scanner/builtin/results');
-            renderBuiltinResults(results);
-          } catch(e) { /* no results yet */ }
+          if (!viewingHistoryReport) {
+            try {
+              var results = await api('/admin/api/scanner/builtin/results');
+              renderBuiltinResults(results);
+            } catch(e) { /* no results yet */ }
+          }
         } else {
           document.getElementById('builtin-run-btn').style.display = '';
           document.getElementById('builtin-stop-btn').style.display = 'none';
@@ -3772,7 +3778,26 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
             var results = await api('/admin/api/scanner/builtin/results');
             renderBuiltinResults(results);
           } catch(e) { /* no results */ }
-          refreshBuiltinScanner();
+          // Refresh history list only (not full scanner panel to avoid filter reset)
+          try {
+            var histData = await api('/admin/api/scanner/builtin/history');
+            var history = histData.history || histData || [];
+            var tbody = document.getElementById('builtin-history-body');
+            if (Array.isArray(history) && history.length > 0) {
+              var rows = history.slice().reverse().map(function(h) {
+                var covPct = h.coverage_pct !== undefined ? h.coverage_pct.toFixed(1) + '%%' : '-';
+                var resPct = h.resilience_pct !== undefined ? h.resilience_pct.toFixed(1) + '%%' : '-';
+                return '<tr class="history-clickable" onclick="loadHistoryReport(\'' + escapeHtml(h.id || '') + '\')">' +
+                  '<td style="color:#888">' + (h.timestamp ? new Date(h.timestamp).toLocaleString() : '-') + '</td>' +
+                  '<td>' + escapeHtml(h.profile || '-') + '</td>' +
+                  '<td>' + (h.findings || 0) + '</td>' +
+                  '<td>' + covPct + '</td>' +
+                  '<td>' + resPct + '</td>' +
+                  '</tr>';
+              }).join('');
+              tbody.innerHTML = rows;
+            }
+          } catch(e) { /* history refresh failed */ }
         } else {
           document.getElementById('builtin-progress-wrap').style.display = 'none';
         }
@@ -3798,6 +3823,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     document.getElementById('builtin-progress-text').textContent = '0%%';
     document.getElementById('builtin-status-text').textContent = 'Starting...';
     document.getElementById('builtin-results-section').style.display = 'none';
+    viewingHistoryReport = false;
 
     try {
       await api('/admin/api/scanner/builtin/run', {
@@ -3830,7 +3856,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) { toast('Failed to stop scan'); }
   };
 
-  function renderBuiltinResults(report) {
+  function renderBuiltinResults(report, historyId) {
     var findings = report.findings || [];
     var coverage = report.coverage || {};
     var categories = report.categories || [];
@@ -3847,14 +3873,25 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
     document.getElementById('builtin-results-section').style.display = '';
 
+    // Banner for historical report viewing
+    var bannerHtml = '';
+    if (historyId) {
+      bannerHtml = '<div class="history-viewing-banner">' +
+        '<span>Viewing historical scan: ' + escapeHtml(historyId) + '</span>' +
+        '<button onclick="clearHistoryView()">Close</button>' +
+        '</div>';
+    }
+
     // Findings count cards
-    document.getElementById('builtin-results-cards').innerHTML =
-      '<div class="card"><div class="label">Critical</div><div class="value" style="color:#a00">' + sevCounts.critical + '</div></div>' +
-      '<div class="card"><div class="label">High</div><div class="value" style="color:#c50">' + sevCounts.high + '</div></div>' +
-      '<div class="card"><div class="label">Medium</div><div class="value" style="color:#a80">' + sevCounts.medium + '</div></div>' +
-      '<div class="card"><div class="label">Low</div><div class="value" style="color:#069">' + sevCounts.low + '</div></div>' +
+    document.getElementById('builtin-results-cards').innerHTML = bannerHtml +
+      '<div class="grid">' +
+      '<div class="card"><div class="label">Critical</div><div class="value" style="color:#ff2244">' + sevCounts.critical + '</div></div>' +
+      '<div class="card"><div class="label">High</div><div class="value" style="color:#ff8800">' + sevCounts.high + '</div></div>' +
+      '<div class="card"><div class="label">Medium</div><div class="value" style="color:#ffcc00">' + sevCounts.medium + '</div></div>' +
+      '<div class="card"><div class="label">Low</div><div class="value" style="color:#4488ff">' + sevCounts.low + '</div></div>' +
       '<div class="card"><div class="label">Info</div><div class="value" style="color:#888">' + sevCounts.info + '</div></div>' +
-      '<div class="card"><div class="label">Total</div><div class="value v-ok">' + findings.length + '</div></div>';
+      '<div class="card"><div class="label">Total</div><div class="value v-ok">' + findings.length + '</div></div>' +
+      '</div>';
 
     // Coverage by category
     if (Array.isArray(categories) && categories.length > 0) {
@@ -3869,16 +3906,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       document.getElementById('builtin-coverage-table').innerHTML = '';
     }
 
-    // Overall scores
+    // Overall scores — clamp width to 100%% max for display
     var covPct = overallCoverage.toFixed(1);
     var resPct = resilience.toFixed(1);
+    var covWidth = Math.min(parseFloat(covPct), 100).toFixed(1);
+    var resWidth = Math.min(parseFloat(resPct), 100).toFixed(1);
     document.getElementById('builtin-scores').innerHTML =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
         '<div><div style="color:#aaa;font-size:0.85em;margin-bottom:4px">Overall Coverage</div>' +
-          '<div class="prog-bar"><div class="prog-fill prog-green" style="width:' + covPct + '%%"></div></div>' +
+          '<div class="prog-bar"><div class="prog-fill prog-green" style="width:' + covWidth + '%%"></div></div>' +
           '<div style="color:#0f8;font-size:0.85em">' + covPct + '%%</div></div>' +
         '<div><div style="color:#aaa;font-size:0.85em;margin-bottom:4px">Resilience Score</div>' +
-          '<div class="prog-bar"><div class="prog-fill prog-yellow" style="width:' + resPct + '%%"></div></div>' +
+          '<div class="prog-bar"><div class="prog-fill prog-yellow" style="width:' + resWidth + '%%"></div></div>' +
           '<div style="color:#ffcc00;font-size:0.85em">' + resPct + '%%</div></div>' +
       '</div>';
 
@@ -3904,7 +3943,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         groups[cat].push(f);
       });
 
-      var showLimit = 100;
+      // Sort groups: highest severity first, then by count
+      var sevOrder = {critical:0,high:1,medium:2,low:3,info:4};
+      groupOrder.sort(function(a, b) {
+        var aItems = groups[a], bItems = groups[b];
+        var aMax = 4, bMax = 4;
+        aItems.forEach(function(f) { var s = sevOrder[(f.severity||'info').toLowerCase()]; if (s !== undefined && s < aMax) aMax = s; });
+        bItems.forEach(function(f) { var s = sevOrder[(f.severity||'info').toLowerCase()]; if (s !== undefined && s < bMax) bMax = s; });
+        if (aMax !== bMax) return aMax - bMax;
+        return bItems.length - aItems.length;
+      });
+
+      var showLimit = 200;
       var totalShown = 0;
       var groupHtml = '<div class="findings-container" id="findings-container">';
       groupOrder.forEach(function(cat) {
@@ -3920,8 +3970,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           if (gSev[s] > 0) sevSummary += '<span class="severity-badge sev-' + s + '" style="margin-left:4px">' + gSev[s] + '</span>';
         });
 
-        groupHtml += '<details class="findings-group" data-category="' + escapeHtml(cat) + '" open>';
-        groupHtml += '<summary><span>' + escapeHtml(cat) + '</span><span class="fg-count">(' + items.length + ')</span>' + sevSummary + '</summary>';
+        groupHtml += '<details class="findings-group" data-category="' + escapeHtml(cat) + '">';
+        groupHtml += '<summary><span class="fg-arrow">\u25B6</span><span>' + escapeHtml(cat) + '</span><span class="fg-count">(' + items.length + ')</span>' + sevSummary + '</summary>';
         groupHtml += '<table><thead><tr><th>Severity</th><th>URL</th><th>Description</th></tr></thead><tbody>';
         items.forEach(function(f) {
           var sev = (f.severity || 'info').toLowerCase();
@@ -3976,16 +4026,24 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var groups = document.querySelectorAll('.findings-group');
     groups.forEach(function(g) {
       var rows = g.querySelectorAll('.finding-row');
-      var visibleCount = 0;
+      var matchCount = 0;
       rows.forEach(function(r) {
         if (r.hasAttribute('data-overflow')) return;
         var sev = r.getAttribute('data-sev');
         var searchData = r.getAttribute('data-search') || '';
         var show = activeSevs[sev] && (query === '' || searchData.indexOf(query) !== -1);
         r.style.display = show ? '' : 'none';
-        if (show) visibleCount++;
+        if (show) matchCount++;
       });
-      g.style.display = visibleCount > 0 ? '' : 'none';
+      // Hide group entirely if no rows match, but don't force open/close
+      if (matchCount === 0) {
+        g.style.display = 'none';
+      } else {
+        g.style.display = '';
+      }
+      // Update the group count to reflect filtered results
+      var countEl = g.querySelector('.fg-count');
+      if (countEl) countEl.textContent = '(' + matchCount + ')';
     });
   }
 
@@ -3999,7 +4057,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     try {
       var report = await api('/admin/api/scanner/builtin/history/detail?id=' + encodeURIComponent(id));
       if (report && report.findings) {
-        renderBuiltinResults(report);
+        viewingHistoryReport = true;
+        renderBuiltinResults(report, id);
         document.getElementById('builtin-results-section').style.display = '';
         document.getElementById('builtin-results-section').scrollIntoView({behavior:'smooth'});
       } else {
@@ -4008,6 +4067,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) {
       toast('Failed to load historical report');
     }
+  };
+
+  window.clearHistoryView = function() {
+    viewingHistoryReport = false;
+    document.getElementById('builtin-results-section').style.display = 'none';
   };
 
   // ------ Proxy Tab ------
