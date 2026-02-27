@@ -3,12 +3,14 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/glitchWebServer/internal/scanner"
 	"github.com/glitchWebServer/internal/scanner/attacks"
+	"github.com/glitchWebServer/internal/storage"
 )
 
 // ---------------------------------------------------------------------------
@@ -42,6 +44,62 @@ type builtinHistoryEntry struct {
 	Resil     float64 `json:"resilience_pct"`
 	Duration  int64   `json:"duration_ms"`
 	Requests  int     `json:"total_requests"`
+}
+
+// LoadBuiltinScanHistory restores built-in scanner history from PostgreSQL on startup.
+func LoadBuiltinScanHistory() {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	scans, err := store.ListScans(ctx, 50)
+	if err != nil {
+		log.Printf("\033[33m[glitch]\033[0m Failed to load scan history from DB: %v", err)
+		return
+	}
+	if len(scans) == 0 {
+		return
+	}
+
+	builtinHistoryMu.Lock()
+	builtinReportsMu.Lock()
+	defer builtinHistoryMu.Unlock()
+	defer builtinReportsMu.Unlock()
+
+	// scans are newest-first from DB, we want oldest-first in our ring buffer
+	for i := len(scans) - 1; i >= 0; i-- {
+		rec := scans[i]
+		// Decode the stored report to extract metadata
+		var report scanner.Report
+		if err := json.Unmarshal(rec.Report, &report); err != nil {
+			continue
+		}
+
+		entry := builtinHistoryEntry{
+			ID:        rec.CreatedAt.Format("20060102-150405"),
+			Timestamp: rec.CreatedAt.UTC().Format(time.RFC3339),
+			Profile:   rec.ScannerName,
+			Findings:  len(report.Findings),
+			Requests:  report.TotalRequests,
+		}
+		if report.Summary != nil {
+			entry.Coverage = report.Summary.OverallCoverage
+			entry.Resil = report.Summary.OverallResilience
+		}
+		if rec.Grade != "" {
+			entry.Profile = rec.ScannerName
+		}
+
+		builtinHistory = append(builtinHistory, entry)
+		// Store full report for click-through
+		reportCopy := report
+		builtinReports[entry.ID] = &reportCopy
+	}
+
+	log.Printf("\033[36m[glitch]\033[0m Restored %d scan history entries from PostgreSQL", len(scans))
 }
 
 // RegisterBuiltinScannerRoutes registers the built-in scanner API endpoints.
@@ -189,6 +247,11 @@ func adminAPIBuiltinRun(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			builtinReportsMu.Unlock()
+
+			// Persist to PostgreSQL if available
+			if store := GetStore(); store != nil {
+				go persistScanToDB(store, cfg.Profile, report)
+			}
 		}
 
 		builtinCancel = nil
@@ -294,4 +357,14 @@ func adminAPIBuiltinHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(builtinHistory)
+}
+
+func persistScanToDB(store *storage.Store, profile string, report *scanner.Report) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := store.SaveScanFromReport(ctx, "builtin:"+profile, "completed", "", 0, report)
+	if err != nil {
+		log.Printf("\033[33m[glitch]\033[0m Failed to persist scan to DB: %v", err)
+	}
 }
