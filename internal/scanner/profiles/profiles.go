@@ -193,6 +193,8 @@ func nightmareProfile() *Profile {
 				// Protocol abuse modules specific to nightmare.
 				"request-flooding", "slowloris", "header-bomb",
 				"body-bomb", "connection-exhaustion",
+				// Chaos module for malformed/impossible requests.
+				"chaos",
 			},
 			EvasionMode: "nightmare",
 			UserAgent:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",

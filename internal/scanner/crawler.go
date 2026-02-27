@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // CrawlResult holds information discovered for a single crawled URL.
@@ -53,95 +55,161 @@ type crawlItem struct {
 	depth int
 }
 
-// Crawl performs a breadth-first crawl starting from startURL.
-// It respects the configured crawl depth and context cancellation.
+// Crawl performs a parallel crawl starting from startURL using a
+// channel-based worker pool. It respects the configured crawl depth
+// and context cancellation.
 func (c *Crawler) Crawl(ctx context.Context, startURL string) ([]CrawlResult, error) {
 	base, err := url.Parse(startURL)
 	if err != nil {
 		return nil, err
 	}
 
-	queue := []crawlItem{{url: startURL, depth: 0}}
+	concurrency := c.config.CrawlConcurrency
+	if concurrency <= 0 {
+		concurrency = 10
+	}
+
+	// Channel for work items.
+	queue := make(chan crawlItem, 1000)
+	var wg sync.WaitGroup
+	var activeCount atomic.Int64
+	var closed atomic.Bool
+
+	// safeSend attempts to send an item to the queue without panicking
+	// if the channel has been closed.
+	safeSend := func(item crawlItem) bool {
+		if closed.Load() {
+			return false
+		}
+		select {
+		case queue <- item:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	// Seed initial URLs.
 	c.markVisited(startURL)
 
-	// Also try to discover paths from robots.txt.
+	// Fetch robots.txt synchronously first.
 	robotsLinks := c.fetchRobotsTxt(ctx, base)
+
+	// Track all initial items to send.
+	initialItems := []crawlItem{{url: startURL, depth: 0}}
 	for _, link := range robotsLinks {
 		norm := c.normalizeURL(base, link)
 		if norm != "" && !c.isVisited(norm) {
 			c.markVisited(norm)
-			queue = append(queue, crawlItem{url: norm, depth: 1})
+			initialItems = append(initialItems, crawlItem{url: norm, depth: 1})
 		}
 	}
 
-	for len(queue) > 0 {
+	// Start workers.
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range queue {
+				if ctx.Err() != nil {
+					activeCount.Add(-1)
+					continue
+				}
+				if item.depth > c.config.CrawlDepth {
+					activeCount.Add(-1)
+					continue
+				}
+
+				result, err := c.fetchPage(ctx, item.url)
+				if err != nil {
+					activeCount.Add(-1)
+					continue
+				}
+
+				c.mu.Lock()
+				c.results = append(c.results, *result)
+				c.mu.Unlock()
+
+				if item.depth < c.config.CrawlDepth {
+					// Discover and enqueue new URLs.
+					var newItems []crawlItem
+					for _, link := range result.Links {
+						norm := c.normalizeURL(base, link)
+						if norm != "" && c.isSameHost(base, norm) && !c.isVisited(norm) {
+							c.markVisited(norm)
+							newItems = append(newItems, crawlItem{url: norm, depth: item.depth + 1})
+						}
+					}
+					for _, form := range result.Forms {
+						if form.Action == "" {
+							continue
+						}
+						norm := c.normalizeURL(base, form.Action)
+						if norm != "" && c.isSameHost(base, norm) && !c.isVisited(norm) {
+							c.markVisited(norm)
+							newItems = append(newItems, crawlItem{url: norm, depth: item.depth + 1})
+						}
+					}
+					for _, ep := range result.APIEndpoints {
+						norm := c.normalizeURL(base, ep)
+						if norm != "" && c.isSameHost(base, norm) && !c.isVisited(norm) {
+							c.markVisited(norm)
+							newItems = append(newItems, crawlItem{url: norm, depth: item.depth + 1})
+						}
+					}
+
+					// Enqueue discovered items.
+					for _, ni := range newItems {
+						activeCount.Add(1)
+						if !safeSend(ni) {
+							activeCount.Add(-1)
+						}
+					}
+				}
+
+				activeCount.Add(-1)
+			}
+		}()
+	}
+
+	// Send initial items.
+	activeCount.Store(int64(len(initialItems)))
+	go func() {
+		for _, item := range initialItems {
+			if !safeSend(item) {
+				activeCount.Add(-1)
+			}
+		}
+	}()
+
+	// Wait for all work to complete — poll activeCount.
+	// Use a short stabilization counter to avoid premature close.
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	stableZero := 0
+	for {
 		select {
 		case <-ctx.Done():
+			closed.Store(true)
+			close(queue)
+			wg.Wait()
 			return c.getResults(), ctx.Err()
-		default:
-		}
-
-		item := queue[0]
-		queue = queue[1:]
-
-		if item.depth > c.config.CrawlDepth {
-			continue
-		}
-
-		result, err := c.fetchPage(ctx, item.url)
-		if err != nil {
-			continue
-		}
-
-		c.mu.Lock()
-		c.results = append(c.results, *result)
-		c.mu.Unlock()
-
-		if item.depth >= c.config.CrawlDepth {
-			continue
-		}
-
-		// Enqueue newly discovered links.
-		for _, link := range result.Links {
-			norm := c.normalizeURL(base, link)
-			if norm == "" {
-				continue
+		case <-ticker.C:
+			if activeCount.Load() <= 0 {
+				stableZero++
+				// Require 3 consecutive zero readings to avoid race with
+				// goroutines that are about to increment activeCount.
+				if stableZero >= 3 {
+					closed.Store(true)
+					close(queue)
+					wg.Wait()
+					return c.getResults(), nil
+				}
+			} else {
+				stableZero = 0
 			}
-			if !c.isSameHost(base, norm) {
-				continue
-			}
-			if c.isVisited(norm) {
-				continue
-			}
-			c.markVisited(norm)
-			queue = append(queue, crawlItem{url: norm, depth: item.depth + 1})
-		}
-
-		// Also enqueue form actions.
-		for _, form := range result.Forms {
-			if form.Action == "" {
-				continue
-			}
-			norm := c.normalizeURL(base, form.Action)
-			if norm == "" || !c.isSameHost(base, norm) || c.isVisited(norm) {
-				continue
-			}
-			c.markVisited(norm)
-			queue = append(queue, crawlItem{url: norm, depth: item.depth + 1})
-		}
-
-		// And discovered API endpoints.
-		for _, ep := range result.APIEndpoints {
-			norm := c.normalizeURL(base, ep)
-			if norm == "" || !c.isSameHost(base, norm) || c.isVisited(norm) {
-				continue
-			}
-			c.markVisited(norm)
-			queue = append(queue, crawlItem{url: norm, depth: item.depth + 1})
 		}
 	}
-
-	return c.getResults(), nil
 }
 
 // fetchPage performs an HTTP GET and extracts links, forms, and API
