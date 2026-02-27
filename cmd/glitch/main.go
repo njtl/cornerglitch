@@ -100,6 +100,9 @@ func main() {
 		dashboard.LoadStateFile()
 	}
 
+	// Restore scan history from DB if available.
+	dashboard.LoadBuiltinScanHistory()
+
 	collector := metrics.NewCollector()
 	fp := fingerprint.NewEngine()
 	adapt := adaptive.NewEngine(collector, fp)
