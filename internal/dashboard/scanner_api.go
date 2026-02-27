@@ -27,6 +27,10 @@ var (
 	// History of built-in scanner runs (ring buffer, max 50)
 	builtinHistory   []builtinHistoryEntry
 	builtinHistoryMu sync.RWMutex
+
+	// Full reports keyed by history ID for click-through
+	builtinReports   = make(map[string]*scanner.Report)
+	builtinReportsMu sync.RWMutex
 )
 
 type builtinHistoryEntry struct {
@@ -47,6 +51,7 @@ func RegisterBuiltinScannerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/scanner/builtin/stop", adminAPIBuiltinStop)
 	mux.HandleFunc("/admin/api/scanner/builtin/results", adminAPIBuiltinResults)
 	mux.HandleFunc("/admin/api/scanner/builtin/history", adminAPIBuiltinHistory)
+	mux.HandleFunc("/admin/api/scanner/builtin/history/detail", adminAPIBuiltinHistoryDetail)
 	mux.HandleFunc("/admin/api/scanner/builtin/modules", adminAPIBuiltinModules)
 }
 
@@ -164,6 +169,26 @@ func adminAPIBuiltinRun(w http.ResponseWriter, r *http.Request) {
 				builtinHistory = builtinHistory[len(builtinHistory)-50:]
 			}
 			builtinHistoryMu.Unlock()
+
+			// Store full report for history click-through
+			builtinReportsMu.Lock()
+			builtinReports[entry.ID] = report
+			// Trim old reports to match history size
+			if len(builtinReports) > 50 {
+				// Build set of valid IDs
+				builtinHistoryMu.RLock()
+				validIDs := make(map[string]bool, len(builtinHistory))
+				for _, h := range builtinHistory {
+					validIDs[h.ID] = true
+				}
+				builtinHistoryMu.RUnlock()
+				for id := range builtinReports {
+					if !validIDs[id] {
+						delete(builtinReports, id)
+					}
+				}
+			}
+			builtinReportsMu.Unlock()
 		}
 
 		builtinCancel = nil
@@ -193,6 +218,10 @@ func adminAPIBuiltinStatus(w http.ResponseWriter, r *http.Request) {
 		if total > 0 {
 			resp["progress_pct"] = float64(completed) / float64(total) * 100
 		}
+		detail := builtinEngine.ProgressDetail()
+		resp["crawled_urls"] = detail.CrawledURLs
+		resp["generated_attacks"] = detail.GeneratedAttacks
+		resp["current_url"] = detail.CurrentURL
 	}
 
 	if builtinState == "error" {
@@ -233,6 +262,26 @@ func adminAPIBuiltinResults(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(builtinReport)
+}
+
+func adminAPIBuiltinHistoryDetail(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "id parameter required"})
+		return
+	}
+
+	builtinReportsMu.RLock()
+	report, ok := builtinReports[id]
+	builtinReportsMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	if !ok || report == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "report not found"})
+		return
+	}
+	json.NewEncoder(w).Encode(report)
 }
 
 func adminAPIBuiltinHistory(w http.ResponseWriter, r *http.Request) {

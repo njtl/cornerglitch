@@ -75,6 +75,7 @@ func (s *Server) apiMetrics(w http.ResponseWriter, r *http.Request) {
 		"total_labyrinth":    s.collector.TotalLabyrinth.Load(),
 		"active_connections": s.collector.ActiveConns.Load(),
 		"unique_clients":     len(s.collector.GetAllClientProfiles()),
+		"current_rps":        s.collector.CurrentRPS(),
 	}
 
 	total := s.collector.TotalRequests.Load()
