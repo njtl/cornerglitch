@@ -63,6 +63,11 @@ type Engine struct {
 	// Phase tracking for UI feedback during crawl/generation phases.
 	phase atomic.Value // string: "init", "crawling", "generating", "scanning", "done"
 
+	// Detailed progress tracking.
+	crawledURLs      atomic.Int64
+	generatedAttacks atomic.Int64
+	currentURL       atomic.Value // string
+
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
@@ -155,7 +160,11 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 		crawlBudget := 15 * time.Second // default
 		if deadline, ok := ctx.Deadline(); ok {
 			remaining := time.Until(deadline)
-			crawlBudget = time.Duration(float64(remaining) * 0.3)
+			crawlFraction := 0.3
+			if e.config.Profile == "nightmare" {
+				crawlFraction = 0.15
+			}
+			crawlBudget = time.Duration(float64(remaining) * crawlFraction)
 			if crawlBudget < 5*time.Second {
 				crawlBudget = 5 * time.Second
 			}
@@ -170,6 +179,8 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 		}
 	}
 
+	e.crawledURLs.Store(int64(len(crawlResults)))
+
 	// Check if the parent context was cancelled (not just crawl budget).
 	if ctx.Err() != nil {
 		completedAt := time.Now()
@@ -180,6 +191,7 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 	e.phase.Store("generating")
 	requests := e.generateRequests(crawlResults)
 	e.total.Store(int64(len(requests)))
+	e.generatedAttacks.Store(int64(len(requests)))
 	e.completed.Store(0)
 	e.found.Store(0)
 
@@ -230,6 +242,34 @@ func (e *Engine) Phase() string {
 	return v.(string)
 }
 
+// ProgressInfo holds detailed scan progress information.
+type ProgressInfo struct {
+	Phase            string `json:"phase"`
+	Completed        int    `json:"completed"`
+	Total            int    `json:"total"`
+	Findings         int    `json:"findings"`
+	CrawledURLs      int    `json:"crawled_urls"`
+	GeneratedAttacks int    `json:"generated_attacks"`
+	CurrentURL       string `json:"current_url"`
+}
+
+// ProgressDetail returns detailed progress information for the current scan.
+func (e *Engine) ProgressDetail() ProgressInfo {
+	currentURL := ""
+	if v := e.currentURL.Load(); v != nil {
+		currentURL = v.(string)
+	}
+	return ProgressInfo{
+		Phase:            e.Phase(),
+		Completed:        int(e.completed.Load()),
+		Total:            int(e.total.Load()),
+		Findings:         int(e.found.Load()),
+		CrawledURLs:      int(e.crawledURLs.Load()),
+		GeneratedAttacks: int(e.generatedAttacks.Load()),
+		CurrentURL:       currentURL,
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Request generation
 // ---------------------------------------------------------------------------
@@ -276,7 +316,81 @@ func (e *Engine) generateRequests(crawlResults []CrawlResult) []AttackRequest {
 		}
 	}
 
+	// Nightmare mode: generate additional chaotic variants from base requests.
+	if e.config.Profile == "nightmare" {
+		base := make([]AttackRequest, len(requests))
+		copy(base, requests)
+
+		requests = append(requests, e.generateNightmareVariants(requests)...)
+
+		// Ensure nightmare produces at least 500 requests.
+		if len(requests) < 500 {
+			for len(requests) < 500 {
+				idx := len(requests) % len(base)
+				req := base[idx]
+				requests = append(requests, AttackRequest{
+					Method:      req.Method,
+					Path:        req.Path + fmt.Sprintf("?nightmare_pad=%d", len(requests)),
+					Category:    "chaos",
+					SubCategory: "nightmare-padding",
+					Description: fmt.Sprintf("Nightmare padding request #%d", len(requests)),
+					Headers:     map[string]string{"X-Nightmare": "true"},
+				})
+			}
+		}
+	}
+
 	return requests
+}
+
+// generateNightmareVariants creates corrupted-header and malformed-body
+// variants from the base request set for nightmare mode stress testing.
+func (e *Engine) generateNightmareVariants(base []AttackRequest) []AttackRequest {
+	var variants []AttackRequest
+
+	// For every 3rd request, create a corrupted-header variant.
+	for i := 0; i < len(base); i += 3 {
+		req := base[i]
+		variant := AttackRequest{
+			Method:      req.Method,
+			Path:        req.Path,
+			Body:        req.Body,
+			BodyType:    req.BodyType,
+			Category:    req.Category,
+			SubCategory: req.SubCategory + "-nightmare-corrupt",
+			Description: req.Description + " (nightmare: corrupted headers)",
+			Headers:     make(map[string]string),
+		}
+		for k, v := range req.Headers {
+			variant.Headers[k] = v
+		}
+		variant.Headers["X-Nightmare-Chaos"] = strings.Repeat("CHAOS", 200)
+		variant.Headers["X-Forwarded-For"] = "127.0.0.1, 10.0.0.1, 192.168.1.1, ::1, 0.0.0.0"
+		variant.Headers["X-Nightmare-ID"] = fmt.Sprintf("nightmare-%d", i)
+		variants = append(variants, variant)
+	}
+
+	// For every 5th request, create a malformed-body variant.
+	for i := 0; i < len(base); i += 5 {
+		req := base[i]
+		variant := AttackRequest{
+			Method:      "POST",
+			Path:        req.Path,
+			Body:        strings.Repeat("\x00\xff\xfe\x00", 256),
+			BodyType:    "application/octet-stream",
+			Category:    req.Category,
+			SubCategory: req.SubCategory + "-nightmare-malformed",
+			Description: req.Description + " (nightmare: malformed body)",
+			Headers:     make(map[string]string),
+		}
+		for k, v := range req.Headers {
+			variant.Headers[k] = v
+		}
+		variant.Headers["Content-Length"] = "99999"
+		variants = append(variants, variant)
+	}
+
+	return variants
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +423,7 @@ func (e *Engine) executeAll(ctx context.Context, requests []AttackRequest) error
 		go func() {
 			defer wg.Done()
 			for req := range work {
+				e.currentURL.Store(req.Path)
 				result := e.executeRequest(ctx, req)
 				e.reporter.AddResult(result)
 				e.completed.Add(1)
