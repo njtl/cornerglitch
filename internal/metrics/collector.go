@@ -314,6 +314,27 @@ func (c *Collector) GetPathsInTimeWindow(start, end time.Time) map[string]int {
 	return paths
 }
 
+// CurrentRPS returns the real-time requests per second averaged over the last 5 buckets.
+func (c *Collector) CurrentRPS() float64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var sum int
+	var count int
+	idx := c.bucketIdx
+	for i := 0; i < 5; i++ {
+		b := c.buckets[idx]
+		if !b.Timestamp.IsZero() {
+			sum += b.Requests
+			count++
+		}
+		idx = (idx - 1 + c.bucketSize) % c.bucketSize
+	}
+	if count == 0 {
+		return 0
+	}
+	return float64(sum) / float64(count)
+}
+
 // Uptime returns server uptime.
 func (c *Collector) Uptime() time.Duration {
 	return time.Since(c.startTime)

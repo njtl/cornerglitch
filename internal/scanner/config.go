@@ -16,28 +16,30 @@ type Config struct {
 	EvasionMode    string            // none, basic, advanced, nightmare
 	UserAgent      string            // default User-Agent header
 	CustomHeaders  map[string]string // extra headers sent on every request
-	ProxyURL       string            // HTTP proxy URL (for testing through Glitch Proxy)
-	OutputFile     string            // report output file path
-	OutputFormat   string            // json, html (default json)
-	Verbose        bool              // enable verbose logging
+	ProxyURL         string            // HTTP proxy URL (for testing through Glitch Proxy)
+	OutputFile       string            // report output file path
+	OutputFormat     string            // json, html (default json)
+	Verbose          bool              // enable verbose logging
+	CrawlConcurrency int              // parallel crawler worker count (default 10)
 }
 
 // DefaultConfig returns a balanced configuration suitable for general use.
 func DefaultConfig() *Config {
 	return &Config{
-		Concurrency:    10,
-		RateLimit:      100,
-		Timeout:        10 * time.Second,
-		MaxBodyRead:    1 << 20, // 1 MB
-		CrawlFirst:     false,
-		CrawlDepth:     3,
-		Profile:        "default",
-		EnabledModules: nil,
-		EvasionMode:    "none",
-		UserAgent:      "GlitchScanner/1.0",
-		CustomHeaders:  make(map[string]string),
-		OutputFormat:   "json",
-		Verbose:        false,
+		Concurrency:      10,
+		RateLimit:        100,
+		Timeout:          10 * time.Second,
+		MaxBodyRead:      1 << 20, // 1 MB
+		CrawlFirst:       false,
+		CrawlDepth:       3,
+		Profile:          "default",
+		EnabledModules:   nil,
+		EvasionMode:      "none",
+		UserAgent:        "GlitchScanner/1.0",
+		CustomHeaders:    make(map[string]string),
+		OutputFormat:     "json",
+		Verbose:          false,
+		CrawlConcurrency: 10,
 	}
 }
 
@@ -53,6 +55,7 @@ func NightmareConfig() *Config {
 	c.CrawlDepth = 5
 	c.Profile = "nightmare"
 	c.EvasionMode = "nightmare"
+	c.CrawlConcurrency = 50
 	c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 	return c
 }
@@ -68,6 +71,7 @@ func StealthConfig() *Config {
 	c.CrawlDepth = 2
 	c.Profile = "stealth"
 	c.EvasionMode = "advanced"
+	c.CrawlConcurrency = 2
 	c.UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
 	return c
 }
@@ -84,6 +88,7 @@ func AggressiveConfig() *Config {
 	c.CrawlDepth = 4
 	c.Profile = "aggressive"
 	c.EvasionMode = "none"
+	c.CrawlConcurrency = 20
 	c.UserAgent = "GlitchScanner/1.0 (Aggressive)"
 	return c
 }
@@ -99,6 +104,7 @@ func ComplianceConfig() *Config {
 	c.CrawlDepth = 2
 	c.Profile = "compliance"
 	c.EvasionMode = "none"
+	c.CrawlConcurrency = 5
 	c.UserAgent = "GlitchScanner/1.0 (Compliance)"
 	return c
 }
