@@ -3950,20 +3950,20 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }
   }
 
-  // Severity filter toggle
-  function toggleSevFilter(el) {
+  // Severity filter toggle (global so onclick can reach it)
+  window.toggleSevFilter = function(el) {
     el.classList.toggle('active');
     applyFindingsFilters();
-  }
+  };
 
-  // Show all findings (remove overflow limit)
-  function showAllFindings() {
+  // Show all findings (remove overflow limit, global for onclick)
+  window.showAllFindings = function() {
     var rows = document.querySelectorAll('.finding-row[data-overflow]');
     rows.forEach(function(r) { r.style.display = ''; r.removeAttribute('data-overflow'); });
     var btn = document.getElementById('show-all-findings-btn');
     if (btn) btn.parentNode.remove();
     applyFindingsFilters();
-  }
+  };
 
   // Apply search + severity filters to findings
   function applyFindingsFilters() {
@@ -3994,8 +3994,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     if (e.target && e.target.id === 'findings-search') applyFindingsFilters();
   });
 
-  // Load a historical report by ID
-  async function loadHistoryReport(id) {
+  // Load a historical report by ID (global so onclick can reach it)
+  window.loadHistoryReport = async function(id) {
     try {
       var report = await api('/admin/api/scanner/builtin/history/detail?id=' + encodeURIComponent(id));
       if (report && report.findings) {
@@ -4008,7 +4008,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) {
       toast('Failed to load historical report');
     }
-  }
+  };
 
   // ------ Proxy Tab ------
   var proxyModeDescriptions = {
