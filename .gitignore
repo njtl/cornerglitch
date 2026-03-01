@@ -28,6 +28,8 @@ playwright-report/
 
 # Runtime state
 .glitch-state.json
+.glitch.pid
+.build/
 
 # OS
 .DS_Store
