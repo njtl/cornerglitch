@@ -224,7 +224,7 @@ func (e *Engine) Decide(clientID string, clientClass fingerprint.ClientClass) *C
 	e.mu.Unlock()
 
 	if profile != nil {
-		profile.AdaptiveProfile = string(behavior.Mode)
+		profile.SetAdaptiveProfile(string(behavior.Mode))
 	}
 
 	return behavior

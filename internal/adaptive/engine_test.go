@@ -1,7 +1,9 @@
 package adaptive
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/metrics"
@@ -101,4 +103,58 @@ func TestSetOverride(t *testing.T) {
 	if _, ok := overrides["client-override"]; ok {
 		t.Fatal("override should be cleared")
 	}
+}
+
+func TestDecide_ConcurrentNoRace(t *testing.T) {
+	c := metrics.NewCollector()
+	defer c.Stop()
+	fp := fingerprint.NewEngine()
+	e := NewEngine(c, fp)
+	e.SetBlockEnabled(false)
+
+	// Seed some request history so profiles exist and evaluate() runs non-trivial paths
+	classes := []fingerprint.ClientClass{
+		fingerprint.ClassBrowser,
+		fingerprint.ClassScriptBot,
+		fingerprint.ClassSearchBot,
+		fingerprint.ClassAPITester,
+		fingerprint.ClassUnknown,
+	}
+	clientIDs := make([]string, len(classes))
+	for i, cls := range classes {
+		id := "race-client-" + string(cls)
+		clientIDs[i] = id
+		for j := 0; j < 20; j++ {
+			c.Record(metrics.RequestRecord{
+				Timestamp:  time.Now(),
+				ClientID:   id,
+				Method:     "GET",
+				Path:       "/test",
+				StatusCode: 200,
+				UserAgent:  "test-agent",
+			})
+		}
+	}
+
+	// Let the collector process all records
+	time.Sleep(50 * time.Millisecond)
+
+	// Hammer Decide concurrently — the race detector will flag unsynchronized access
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			id := clientIDs[idx%len(clientIDs)]
+			cls := classes[idx%len(classes)]
+			for j := 0; j < 100; j++ {
+				b := e.Decide(id, cls)
+				if b == nil {
+					t.Error("Decide returned nil")
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
 }
