@@ -476,7 +476,7 @@ func (h *Handler) servePage(w http.ResponseWriter, r *http.Request, behavior *ad
 	// Try content engine first for rich HTML pages
 	if h.content != nil && h.content.ShouldHandle(r.URL.Path) {
 		accept := r.Header.Get("Accept")
-		if accept == "" || contains(accept, "text/html") || contains(accept, "*/*") {
+		if accept == "" || strings.Contains(accept, "text/html") || strings.Contains(accept, "*/*") {
 			return h.content.Serve(w, r)
 		}
 	}
@@ -502,15 +502,15 @@ func (h *Handler) selectPageType(r *http.Request, behavior *adaptive.ClientBehav
 	// Check Accept header preferences
 	accept := r.Header.Get("Accept")
 	switch {
-	case contains(accept, "application/json"):
+	case strings.Contains(accept, "application/json"):
 		return pages.PageJSON
-	case contains(accept, "application/xml"):
+	case strings.Contains(accept, "application/xml"):
 		return pages.PageXML
-	case contains(accept, "text/event-stream"):
+	case strings.Contains(accept, "text/event-stream"):
 		return pages.PageSSE
-	case contains(accept, "text/csv"):
+	case strings.Contains(accept, "text/csv"):
 		return pages.PageCSV
-	case contains(accept, "text/markdown"):
+	case strings.Contains(accept, "text/markdown"):
 		return pages.PageMarkdown
 	}
 
@@ -562,19 +562,6 @@ func (h *Handler) errTypeToStatus(errType errors.ErrorType) int {
 	default:
 		return 200
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && containsStr(s, substr)
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // applyConfiguredDelay adds an artificial delay based on delay_min_ms / delay_max_ms config.
