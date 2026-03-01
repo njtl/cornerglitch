@@ -255,7 +255,7 @@ func TestScannerMode_Compliance(t *testing.T) {
 	cfg := scanner.ComplianceConfig()
 	cfg.Target = ts.Server.URL
 
-	report := runScan(t, cfg, 30*time.Second)
+	report := runScan(t, cfg, 5*time.Second)
 
 	// --- Universal assertions ---
 	if report == nil {
@@ -308,7 +308,7 @@ func TestScannerMode_Aggressive(t *testing.T) {
 	cfg := scanner.AggressiveConfig()
 	cfg.Target = ts.Server.URL
 
-	report := runScan(t, cfg, 30*time.Second)
+	report := runScan(t, cfg, 5*time.Second)
 
 	// --- Universal assertions ---
 	if report == nil {
@@ -365,7 +365,7 @@ func TestScannerMode_Stealth(t *testing.T) {
 	cfg := scanner.StealthConfig()
 	cfg.Target = ts.Server.URL
 
-	report := runScan(t, cfg, 30*time.Second)
+	report := runScan(t, cfg, 5*time.Second)
 
 	// --- Universal assertions ---
 	if report == nil {
@@ -435,7 +435,7 @@ func TestScannerMode_Nightmare(t *testing.T) {
 	cfg := scanner.NightmareConfig()
 	cfg.Target = ts.Server.URL
 
-	report := runScan(t, cfg, 30*time.Second)
+	report := runScan(t, cfg, 5*time.Second)
 
 	// --- Universal assertions ---
 	if report == nil {
@@ -503,14 +503,14 @@ func TestScannerMode_RequestCounts(t *testing.T) {
 	// Run aggressive mode
 	aggressiveCfg := scanner.AggressiveConfig()
 	aggressiveCfg.Target = ts.Server.URL
-	aggressiveReport := runScan(t, aggressiveCfg, 30*time.Second)
+	aggressiveReport := runScan(t, aggressiveCfg, 5*time.Second)
 
 	ts.reset()
 
 	// Run nightmare mode
 	nightmareCfg := scanner.NightmareConfig()
 	nightmareCfg.Target = ts.Server.URL
-	nightmareReport := runScan(t, nightmareCfg, 30*time.Second)
+	nightmareReport := runScan(t, nightmareCfg, 5*time.Second)
 
 	if aggressiveReport == nil || nightmareReport == nil {
 		t.Fatal("both reports should be non-nil")
@@ -552,7 +552,7 @@ func TestScannerMode_ReportStructure(t *testing.T) {
 			cfg := mode.config()
 			cfg.Target = ts.Server.URL
 
-			report := runScan(t, cfg, 30*time.Second)
+			report := runScan(t, cfg, 5*time.Second)
 
 			if report == nil {
 				t.Fatal("report should not be nil")
