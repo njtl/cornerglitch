@@ -1,6 +1,7 @@
 package errors
 
 import (
+	crand "crypto/rand"
 	"fmt"
 	"math/rand"
 	"net"
@@ -291,7 +292,7 @@ func (g *Generator) Apply(w http.ResponseWriter, r *http.Request, errType ErrorT
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		garbage := make([]byte, rand.Intn(1024)+256)
-		rand.Read(garbage)
+		crand.Read(garbage)
 		w.Write(garbage)
 		return true
 
@@ -380,7 +381,7 @@ func (g *Generator) Apply(w http.ResponseWriter, r *http.Request, errType ErrorT
 				buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html>")
 				buf.Flush()
 				garbage := make([]byte, rand.Intn(512)+128)
-				rand.Read(garbage)
+				crand.Read(garbage)
 				conn.Write(garbage)
 				conn.Close()
 			}
