@@ -9,13 +9,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/dashboard"
+	"github.com/glitchWebServer/internal/fingerprint"
+	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/scaneval"
 	"github.com/glitchWebServer/internal/scanner"
 	"github.com/glitchWebServer/internal/storage"
@@ -494,4 +499,149 @@ func TestRegression_Task1_ConcurrentSaveConfig(t *testing.T) {
 
 	// Clean up test data
 	_, _ = store.DB().ExecContext(ctx, `DELETE FROM config_versions WHERE entity = $1`, entity)
+}
+
+// ---------------------------------------------------------------------------
+// Bug: Deploy test script used wrong admin API paths (deploy-test discovery)
+//
+// Root cause: Documentation and assumptions about admin API routes were wrong.
+// The deploy-test.sh script initially used incorrect paths:
+//   - /admin/api/export      → correct: /admin/api/config/export
+//   - /admin/api/metrics     → correct: /api/metrics (on admin port, no /admin prefix)
+//   - /admin/api/features/toggle with {"name":...} → correct: /admin/api/features with {"feature":...}
+//   - Expected 401 from /admin/ → correct: 302 redirect to /admin/login
+//
+// Fix: Updated deploy-test.sh with correct paths. This regression test
+// verifies the admin dashboard routes are registered at their expected paths.
+// ---------------------------------------------------------------------------
+
+func TestRegression_DeployTest_AdminAPIPaths(t *testing.T) {
+	// Create a dashboard server to inspect its route registrations
+	collector := metrics.NewCollector()
+	defer collector.Stop()
+	fp := fingerprint.NewEngine()
+	adapt := adaptive.NewEngine(collector, fp)
+
+	// Set a password so auth middleware is active
+	dashboard.SetAdminPassword("test-regression-pass")
+
+	srv := dashboard.NewServer(collector, fp, adapt, 0)
+	handler := srv.Handler()
+
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int // expected status without auth
+	}{
+		// /api/metrics is auth-exempt (used by selftest pipeline) — returns 200 without auth
+		{"metrics lives at /api/metrics", "/api/metrics", http.StatusOK},
+		// /admin/api/config/export should exist (not /admin/api/export)
+		{"config export at /admin/api/config/export", "/admin/api/config/export", http.StatusUnauthorized},
+		// /admin/api/features should exist (not /admin/api/features/toggle)
+		{"features at /admin/api/features", "/admin/api/features", http.StatusUnauthorized},
+		// /admin/api/config should exist
+		{"config at /admin/api/config", "/admin/api/config", http.StatusUnauthorized},
+		// /admin/ should redirect to login (302, not 401)
+		{"admin panel redirects to login", "/admin/", http.StatusFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.path, nil)
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Errorf("GET %s: got status %d, want %d", tt.path, rr.Code, tt.wantStatus)
+			}
+		})
+	}
+
+	// Verify that wrong paths do NOT match the expected routes
+	wrongPaths := []string{
+		"/admin/api/export",         // wrong — should be /admin/api/config/export
+		"/admin/api/metrics",        // wrong — should be /api/metrics
+		"/admin/api/features/toggle", // wrong — should be /admin/api/features
+	}
+	for _, path := range wrongPaths {
+		t.Run("wrong path: "+path, func(t *testing.T) {
+			req := httptest.NewRequest("GET", path, nil)
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			// These wrong paths should either 404 or redirect to admin (302),
+			// not return 200 or a valid API response
+			if rr.Code == http.StatusOK {
+				body := rr.Body.String()
+				// If it returned 200 with actual API data, the route exists
+				// at the wrong path — that's a problem
+				if strings.Contains(body, "total_requests") ||
+					strings.Contains(body, "features") ||
+					strings.Contains(body, "error_rate") {
+					t.Errorf("GET %s: returned 200 with API data — route should not exist at this path", path)
+				}
+			}
+		})
+	}
+}
+
+// TestRegression_DeployTest_FeatureTogglePayload verifies the feature toggle
+// API uses {"feature": "...", "enabled": bool} not {"name": "...", "enabled": bool}.
+func TestRegression_DeployTest_FeatureTogglePayload(t *testing.T) {
+	collector := metrics.NewCollector()
+	defer collector.Stop()
+	fp := fingerprint.NewEngine()
+	adapt := adaptive.NewEngine(collector, fp)
+
+	dashboard.SetAdminPassword("test-regression-pass")
+
+	srv := dashboard.NewServer(collector, fp, adapt, 0)
+	handler := srv.Handler()
+
+	// Correct payload: {"feature": "labyrinth", "enabled": false}
+	correctPayload := `{"feature":"labyrinth","enabled":false}`
+	req := httptest.NewRequest("POST", "/admin/api/features", strings.NewReader(correctPayload))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("admin", "test-regression-pass")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST /admin/api/features with correct payload: got %d, want 200", rr.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if resp["ok"] != true {
+		t.Errorf("expected ok=true, got %v", resp["ok"])
+	}
+
+	// Re-enable labyrinth
+	resetPayload := `{"feature":"labyrinth","enabled":true}`
+	req = httptest.NewRequest("POST", "/admin/api/features", strings.NewReader(resetPayload))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("admin", "test-regression-pass")
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// Wrong payload: {"name": "labyrinth", "enabled": false} — should fail
+	wrongPayload := `{"name":"labyrinth","enabled":false}`
+	req = httptest.NewRequest("POST", "/admin/api/features", strings.NewReader(wrongPayload))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("admin", "test-regression-pass")
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// The "name" field is not recognized — "feature" will be empty string,
+	// which should result in an "unknown feature" error
+	if rr.Code == http.StatusOK {
+		var wrongResp map[string]interface{}
+		if err := json.Unmarshal(rr.Body.Bytes(), &wrongResp); err == nil {
+			if wrongResp["ok"] == true {
+				t.Error("POST with {\"name\":...} should not succeed — API expects {\"feature\":...}")
+			}
+		}
+	}
 }
