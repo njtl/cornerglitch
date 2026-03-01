@@ -41,6 +41,11 @@ spec:
             - "-config"
             - "/etc/glitch/config.json"
           env:
+            - name: GLITCH_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: GLITCH_ADMIN_PASSWORD
             - name: GLITCH_DB_URL
               valueFrom:
                 secretKeyRef:

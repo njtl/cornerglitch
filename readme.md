@@ -179,45 +179,109 @@ glitch selftest --mode nightmare             # maximum adversarial
 
 ---
 
+## Configuration
+
+The server auto-loads `.env` from the working directory on startup. No need to manually `source` it. CLI flags and explicit env vars always take precedence over `.env` values.
+
+```bash
+cp .env.example .env    # then edit with your values
+```
+
+| Variable | Required | Purpose | Default |
+|----------|----------|---------|---------|
+| `GLITCH_ADMIN_PASSWORD` | Recommended | Dashboard login password | Auto-generated (printed to stderr) |
+| `GLITCH_DB_URL` | **Yes** for persistence | PostgreSQL connection string | None (memory-only mode) |
+
+> **Warning**: Without `GLITCH_DB_URL`, the server runs in memory-only mode. All metrics, scan history, client profiles, and configuration are lost on restart. The server logs a warning when no database URL is configured.
+
 ## Deployment
 
-### Docker
+### Local Development
+
+```bash
+# Quick start
+cp .env.example .env                        # configure password + database
+make db-up                                  # start PostgreSQL (Docker)
+make start                                  # build + start in background
+
+# Lifecycle
+make start          # build + start in background (logs: /tmp/glitch.log)
+make stop           # graceful shutdown (saves metrics to DB)
+make restart        # stop + start
+make status         # check if running
+make logs           # tail -f /tmp/glitch.log
+make run            # build + run in foreground
+```
+
+### Docker Compose
 
 ```bash
 docker-compose up                            # server + dashboard + PostgreSQL
-docker build -t glitch .                     # standalone build
+docker-compose up -d                         # detached mode
 ```
 
-Docker Compose includes a PostgreSQL 16 container with health checks, named volumes for data persistence, and automatic `GLITCH_DB_URL` configuration. The server waits for PostgreSQL to be healthy before starting.
+Includes PostgreSQL 16 with health checks, named volumes for data persistence, and automatic `GLITCH_DB_URL` wiring. The server waits for PostgreSQL to be healthy before starting. Set `GLITCH_ADMIN_PASSWORD` in your `.env` or environment.
 
 ### Kubernetes
 
 ```bash
-kubectl apply -f deploy/k8s/                 # full deployment (namespace, deployment, service, ingress, configmap, postgres)
+# Edit the secret first — change the base64-encoded GLITCH_ADMIN_PASSWORD
+vim deploy/k8s/postgres-secret.yaml
+
+kubectl apply -f deploy/k8s/                 # full deployment
 ```
 
-Includes PostgreSQL StatefulSet with persistent volume claim, service, and secrets.
+Includes: namespace, deployment, service, ingress, configmap, PostgreSQL StatefulSet with persistent volume claim, and secrets for database credentials and admin password.
 
 ### Systemd
 
 ```bash
+# Install environment file
+sudo mkdir -p /etc/glitch
+sudo cp deploy/systemd/glitch.env /etc/glitch/glitch.env
+sudo chmod 600 /etc/glitch/glitch.env
+sudo vim /etc/glitch/glitch.env              # set GLITCH_ADMIN_PASSWORD
+
+# Install and enable services
 sudo cp deploy/systemd/*.service /etc/systemd/system/
-sudo systemctl enable --now glitch-postgres glitch-server glitch-proxy
+sudo systemctl daemon-reload
+sudo systemctl enable --now glitch-postgres glitch-server
+
+# Optional: proxy
+sudo systemctl enable --now glitch-proxy
 ```
 
-### Makefile
+The server service loads environment from `/etc/glitch/glitch.env` and depends on the PostgreSQL service. Configure `glitch.env` from the provided template before starting.
+
+### Makefile Reference
 
 ```bash
-make build          # build all binaries
-make test           # run all tests
+# Build
+make build          # build server binary
+make cross          # cross-compile for Linux/Darwin (amd64/arm64)
 make docker-build   # build Docker image
-make k8s-deploy     # deploy to Kubernetes
-make run            # build and run locally
-make cross          # cross-compile for multiple platforms
+
+# Test
+make test           # run all tests
+make vet            # static analysis
+
+# Run
+make start          # build + start in background
+make stop           # graceful shutdown
+make restart        # stop + start
+make status         # check if running
+make logs           # tail server logs
+make run            # build + run in foreground
+
+# Database
 make db-up          # start PostgreSQL container
 make db-down        # stop PostgreSQL container
 make db-reset       # drop and recreate database
 make db-psql        # connect to PostgreSQL with psql
+
+# Deploy
+make docker-push    # push image to GHCR
+make k8s-deploy     # deploy to Kubernetes
 ```
 
 ---

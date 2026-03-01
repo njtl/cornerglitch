@@ -25,6 +25,7 @@ services:
       - "${GLITCH_PORT:-8765}:8765"
       - "${GLITCH_DASH_PORT:-8766}:8766"
     environment:
+      - GLITCH_ADMIN_PASSWORD=${GLITCH_ADMIN_PASSWORD:-admin}
       - GLITCH_CONFIG=${GLITCH_CONFIG:-}
       - GLITCH_DB_URL=postgres://glitch:glitch@postgres:5432/glitch?sslmode=disable
     volumes:
