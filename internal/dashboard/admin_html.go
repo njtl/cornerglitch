@@ -1135,6 +1135,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <thead><tr>
             <th>Timestamp</th>
             <th>Scanner</th>
+            <th>Duration</th>
             <th>Grade</th>
             <th>Detection</th>
             <th>Status</th>
@@ -1295,6 +1296,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <thead><tr>
             <th>Timestamp</th>
             <th>Profile</th>
+            <th>Duration</th>
             <th>Findings</th>
             <th>Coverage</th>
             <th>Resilience</th>
@@ -3253,7 +3255,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
     window._crashInfos = [];
     var html = '<h3 style="color:#00ccaa;font-size:0.9em;margin-bottom:12px">Multi-Scanner Comparison</h3>';
-    html += '<table class="findings-tbl"><thead><tr><th>Scanner</th><th>Grade</th><th>Detection</th><th>False Pos.</th><th>Accuracy</th><th>Crashed</th></tr></thead><tbody>';
+    html += '<table class="findings-tbl"><thead><tr><th>Scanner</th><th>Duration</th><th>Grade</th><th>Detection</th><th>False Pos.</th><th>Accuracy</th><th>Crashed</th></tr></thead><tbody>';
     names.forEach(function(name) {
       var c = scannerBest[name].comparison;
       var run = scannerBest[name];
@@ -3266,6 +3268,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       }
       html += '<tr>' +
         '<td style="font-weight:bold">' + escapeHtml(name) + '</td>' +
+        '<td style="color:#aaa">' + escapeHtml(run.duration || '-') + '</td>' +
         '<td class="' + gradeClass + '" style="font-weight:bold;font-size:1.1em">' + escapeHtml(c.grade || '?') + '</td>' +
         '<td>' + ((c.detection_rate || 0) * 100).toFixed(1) + '%%</td>' +
         '<td>' + ((c.false_positive_rate || 0) * 100).toFixed(1) + '%%</td>' +
@@ -3375,9 +3378,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var accPct = (report.accuracy || 0).toFixed(1);
     var displayName = scannerName || report.scanner || 'Scanner';
 
+    var durStr = '';
+    if (run && run.duration) durStr = run.duration;
+    else if (report.duration_ms) { var ds = Math.round(report.duration_ms/1000000000); durStr = ds >= 60 ? Math.floor(ds/60)+'m '+ds%%60+'s' : ds+'s'; }
     var html = '<div style="margin-bottom:10px;display:flex;align-items:center;gap:10px">' +
       '<span style="color:#00ccaa;font-weight:bold;font-size:1.1em">' + escapeHtml(displayName) + '</span>' +
       '<span style="color:#555;font-size:0.82em">|</span>' +
+      (durStr ? '<span style="color:#888;font-size:0.82em">Duration: ' + escapeHtml(durStr) + '</span><span style="color:#555;font-size:0.82em">|</span>' : '') +
       '<span style="color:#888;font-size:0.82em">Expected: ' + (report.expected_vulns || 0) + ' vulns</span>' +
       '<span style="color:#888;font-size:0.82em">Found: ' + (report.found_vulns || 0) + '</span>' +
       '</div>';
@@ -3497,8 +3504,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       rows.push('<tr style="background:#1a1a00">' +
         '<td style="color:#ffaa00">' + (r.started_at ? new Date(r.started_at).toLocaleString() : '-') + '</td>' +
         '<td>' + escapeHtml(r.scanner || '') + '</td>' +
+        '<td style="color:#ffaa00">' + escapeHtml(r.elapsed || '-') + '</td>' +
         '<td style="font-weight:bold;color:#ffaa00">...</td>' +
-        '<td style="color:#888">' + escapeHtml(r.elapsed || '-') + '</td>' +
+        '<td style="color:#888">-</td>' +
         '<td><span style="color:#ffaa00">RUNNING</span></td>' +
         '<td></td>' +
         '</tr>');
@@ -3540,6 +3548,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       rows.push('<tr>' +
         '<td style="color:#888">' + (r.completed_at ? new Date(r.completed_at).toLocaleString() : r.started_at ? new Date(r.started_at).toLocaleString() : '-') + '</td>' +
         '<td>' + escapeHtml(r.scanner || '') + '</td>' +
+        '<td style="color:#aaa">' + escapeHtml(r.duration || '-') + '</td>' +
         '<td' + (gradeClass ? ' class="' + gradeClass + '"' : '') + ' style="font-weight:bold;font-size:1.2em">' + escapeHtml(grade) + '</td>' +
         '<td>' + detStr + '</td>' +
         '<td style="color:' + statusColor + '">' + statusCell + '</td>' +
@@ -3547,7 +3556,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         '</tr>');
     });
 
-    tbody.innerHTML = rows.join('') || '<tr><td colspan="6" style="color:#555;text-align:center">No scans yet</td></tr>';
+    tbody.innerHTML = rows.join('') || '<tr><td colspan="7" style="color:#555;text-align:center">No scans yet</td></tr>';
 
     // Store for click-to-view
     window._completedRuns = completed || [];
@@ -3775,9 +3784,12 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           var rows = history.slice().reverse().map(function(h) {
             var covPct = h.coverage_pct !== undefined ? h.coverage_pct.toFixed(1) + '%%' : '-';
             var resPct = h.resilience_pct !== undefined ? h.resilience_pct.toFixed(1) + '%%' : '-';
+            var dur = '-';
+            if (h.duration_ms) { var s = Math.round(h.duration_ms/1000); dur = s >= 60 ? Math.floor(s/60)+'m '+s%%60+'s' : s+'s'; }
             return '<tr class="history-clickable" onclick="loadHistoryReport(\'' + escapeHtml(h.id || '') + '\')">' +
               '<td style="color:#888">' + (h.timestamp ? new Date(h.timestamp).toLocaleString() : '-') + '</td>' +
               '<td>' + escapeHtml(h.profile || '-') + '</td>' +
+              '<td style="color:#aaa">' + dur + '</td>' +
               '<td>' + (h.findings || 0) + '</td>' +
               '<td>' + covPct + '</td>' +
               '<td>' + resPct + '</td>' +
@@ -3785,10 +3797,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           }).join('');
           tbody.innerHTML = rows;
         } else {
-          tbody.innerHTML = '<tr><td colspan="5" style="color:#555;text-align:center">No scans yet</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" style="color:#555;text-align:center">No scans yet</td></tr>';
         }
       } catch(e) {
-        document.getElementById('builtin-history-body').innerHTML = '<tr><td colspan="5" style="color:#555;text-align:center">No scans yet</td></tr>';
+        document.getElementById('builtin-history-body').innerHTML = '<tr><td colspan="6" style="color:#555;text-align:center">No scans yet</td></tr>';
       }
 
       // Set default target
