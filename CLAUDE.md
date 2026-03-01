@@ -15,9 +15,21 @@
 ## Build & Run
 
 ```bash
+# Quick start (recommended)
+cp .env.example .env                         # configure password + database URL
+make start                                   # build, start in background, show logs
+
+# Lifecycle commands
+make start                                   # build + start in background (logs: /tmp/glitch.log)
+make stop                                    # graceful shutdown
+make restart                                 # stop + start
+make status                                  # check if running
+make logs                                    # tail -f /tmp/glitch.log
+make run                                     # build + run in foreground
+
 # Server (backend emulator)
 go build -o glitch ./cmd/glitch
-./glitch                                    # ports 8765 + 8766
+./glitch                                    # ports 8765 + 8766, auto-loads .env
 ./glitch -port 9000 -dash-port 9001         # custom ports
 ./glitch -config config.json                # load saved configuration
 ./glitch -nightmare                         # nightmare mode
@@ -47,6 +59,19 @@ make db-down                                 # stop PostgreSQL container
 make db-reset                                # drop and recreate database
 make db-psql                                 # connect to PostgreSQL with psql
 ```
+
+### Environment Configuration
+
+The server auto-loads `.env` from the working directory on startup. No need to manually `source` it. Explicit env vars and CLI flags always take precedence.
+
+**Required `.env` variables** (see `.env.example`):
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `GLITCH_ADMIN_PASSWORD` | Dashboard login password | Auto-generated (printed to stderr) |
+| `GLITCH_DB_URL` | PostgreSQL connection string | None (no persistence — data lost on restart) |
+
+**Warning**: Without `GLITCH_DB_URL`, the server runs in memory-only mode — all metrics, scan history, and client profiles are lost on restart. The server logs a warning when no DB URL is configured.
 
 One external dependency: `github.com/lib/pq` (PostgreSQL driver). Otherwise stdlib only, go 1.24+.
 

@@ -54,14 +54,26 @@ If your service survives Glitch, it can handle production.
 ### Glitch Server
 
 ```bash
+# Recommended: configure .env first
+cp .env.example .env                        # set admin password + database URL
+make start                                  # build, start in background, show logs
+
+# Lifecycle
+make start                                  # build + start (logs: /tmp/glitch.log)
+make stop                                   # graceful shutdown
+make restart                                # stop + start
+make status                                 # check if running
+make logs                                   # tail server logs
+
+# Direct usage (auto-loads .env)
 go build -o glitch ./cmd/glitch
 ./glitch                                    # serves on :8765, dashboard on :8766
 ./glitch -port 9000 -dash-port 9001         # custom ports
 ./glitch -config config.json                # load saved configuration (overrides auto-saved state)
 ./glitch -nightmare                         # nightmare mode
-GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag, or .env file)
-GLITCH_DB_URL=postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable ./glitch  # with PostgreSQL persistence
 ```
+
+> **Important**: Set `GLITCH_DB_URL` in your `.env` to enable PostgreSQL persistence. Without it, all metrics, scan history, and client data are lost on restart.
 
 ### Glitch Scanner
 
