@@ -8,7 +8,13 @@ Requires=glitch-postgres.service
 Type=simple
 User=glitch
 Group=glitch
+
+# Load environment from file (create from .env.example)
+EnvironmentFile=-/etc/glitch/glitch.env
+
+# Fallback defaults (overridden by EnvironmentFile)
 Environment=GLITCH_DB_URL=postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable
+
 ExecStart=/usr/local/bin/glitch -port 8765 -dash-port 8766
 Restart=on-failure
 RestartSec=5
