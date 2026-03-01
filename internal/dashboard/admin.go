@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/scaneval"
 	"github.com/glitchWebServer/internal/spider"
@@ -1204,6 +1205,116 @@ func LoadExternalScanHistory() {
 	}
 	if loaded > 0 {
 		log.Printf("[glitch] Restored %d external scan runs from DB", loaded)
+	}
+}
+
+// RestoreMetrics loads the latest metrics snapshot from PostgreSQL and restores
+// cumulative counters on the collector so the dashboard doesn't start from zero.
+func RestoreMetrics(collector *metrics.Collector) {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	snapshots, err := store.ListMetricsSnapshots(ctx, 1)
+	if err != nil {
+		log.Printf("[glitch] Failed to load metrics snapshot: %v", err)
+		return
+	}
+	if len(snapshots) == 0 {
+		return
+	}
+	snap := snapshots[0]
+	cs := metrics.CounterSnapshot{
+		TotalRequests: snap.TotalRequests,
+		TotalErrors:   snap.TotalErrors,
+		Total2xx:      snap.Total2xx,
+		Total4xx:      snap.Total4xx,
+		Total5xx:      snap.Total5xx,
+	}
+	// Restore extended counters from snapshot_data if available.
+	if len(snap.SnapshotData) > 0 {
+		var extra struct {
+			TotalDelayed   int64 `json:"total_delayed"`
+			TotalLabyrinth int64 `json:"total_labyrinth"`
+		}
+		if json.Unmarshal(snap.SnapshotData, &extra) == nil {
+			cs.TotalDelayed = extra.TotalDelayed
+			cs.TotalLabyrinth = extra.TotalLabyrinth
+		}
+	}
+	collector.RestoreCounters(cs)
+	log.Printf("[glitch] Restored metrics from DB (total_requests=%d, last snapshot: %s)",
+		cs.TotalRequests, snap.CreatedAt.Format(time.RFC3339))
+}
+
+// StartMetricsSnapshotter launches a background goroutine that periodically
+// saves metrics to PostgreSQL. Returns a stop function.
+func StartMetricsSnapshotter(collector *metrics.Collector) func() {
+	store := GetStore()
+	if store == nil {
+		return func() {}
+	}
+	stopCh := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				cs := collector.GetCounterSnapshot()
+				extraData, _ := json.Marshal(map[string]int64{
+					"total_delayed":   cs.TotalDelayed,
+					"total_labyrinth": cs.TotalLabyrinth,
+				})
+				snap := &storage.MetricsSnapshot{
+					TotalRequests:     cs.TotalRequests,
+					TotalErrors:       cs.TotalErrors,
+					Total2xx:          cs.Total2xx,
+					Total4xx:          cs.Total4xx,
+					Total5xx:          cs.Total5xx,
+					ActiveConnections: int(collector.ActiveConns.Load()),
+					UniqueClients:     len(collector.GetAllClientProfiles()),
+					SnapshotData:      extraData,
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				store.SaveMetricsSnapshot(ctx, snap)
+				cancel()
+			case <-stopCh:
+				return
+			}
+		}
+	}()
+	return func() { close(stopCh) }
+}
+
+// SaveMetricsNow immediately saves a metrics snapshot to the database.
+// Called during graceful shutdown to ensure no data is lost.
+func SaveMetricsNow(collector *metrics.Collector) {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+	cs := collector.GetCounterSnapshot()
+	extraData, _ := json.Marshal(map[string]int64{
+		"total_delayed":   cs.TotalDelayed,
+		"total_labyrinth": cs.TotalLabyrinth,
+	})
+	snap := &storage.MetricsSnapshot{
+		TotalRequests:     cs.TotalRequests,
+		TotalErrors:       cs.TotalErrors,
+		Total2xx:          cs.Total2xx,
+		Total4xx:          cs.Total4xx,
+		Total5xx:          cs.Total5xx,
+		ActiveConnections: int(collector.ActiveConns.Load()),
+		UniqueClients:     len(collector.GetAllClientProfiles()),
+		SnapshotData:      extraData,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := store.SaveMetricsSnapshot(ctx, snap); err != nil {
+		log.Printf("[glitch] Failed to save final metrics snapshot: %v", err)
 	}
 }
 
