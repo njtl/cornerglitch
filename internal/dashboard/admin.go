@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1156,6 +1157,53 @@ func InitScanRunner(serverPort, dashPort int) {
 			fmt.Sprintf("http://localhost:%d", serverPort),
 			fmt.Sprintf("http://localhost:%d", dashPort),
 		))
+		scanRunner.OnComplete = persistExternalScanRun
+	}
+}
+
+// persistExternalScanRun saves an external scanner run to PostgreSQL.
+func persistExternalScanRun(run *scaneval.ScanRun) {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := store.SaveScanFromReport(ctx, "external:"+run.Scanner, run.Status, "", 0, run)
+	if err != nil {
+		log.Printf("[glitch] Failed to persist external scan run: %v", err)
+	}
+}
+
+// LoadExternalScanHistory restores external scanner runs from PostgreSQL on startup.
+func LoadExternalScanHistory() {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	scans, err := store.ListScans(ctx, 200)
+	if err != nil {
+		log.Printf("[glitch] Failed to load external scan history: %v", err)
+		return
+	}
+	runner := getScanRunner()
+	loaded := 0
+	for i := len(scans) - 1; i >= 0; i-- {
+		rec := scans[i]
+		if !strings.HasPrefix(rec.ScannerName, "external:") {
+			continue
+		}
+		var run scaneval.ScanRun
+		if err := json.Unmarshal(rec.Report, &run); err != nil {
+			continue
+		}
+		runner.AddResult(&run)
+		loaded++
+	}
+	if loaded > 0 {
+		log.Printf("[glitch] Restored %d external scan runs from DB", loaded)
 	}
 }
 

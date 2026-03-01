@@ -40,10 +40,11 @@ func DefaultRunnerConfig(targetURL, dashURL string) *RunnerConfig {
 
 // Runner manages scanner execution and result collection.
 type Runner struct {
-	mu      sync.Mutex
-	config  *RunnerConfig
-	results []*ScanRun
-	running map[string]*ScanRun // scanner name -> active run
+	mu         sync.Mutex
+	config     *RunnerConfig
+	results    []*ScanRun
+	running    map[string]*ScanRun // scanner name -> active run
+	OnComplete func(run *ScanRun)  // called after each run completes (for persistence)
 }
 
 // ScanRun tracks a single scanner execution.
@@ -388,6 +389,11 @@ func (r *Runner) executeScanner(run *ScanRun, profile *ExpectedProfile) {
 				if ctx.Err() == context.DeadlineExceeded {
 					result.TimedOut = true
 				}
+				if run.Crashed {
+					result.Crashed = true
+					result.CrashSignal = run.CrashSignal
+					result.CrashStderr = run.StderrExcerpt
+				}
 				run.Result = result
 
 				// Compare against profile if we have one
@@ -417,8 +423,19 @@ func (r *Runner) finishRun(run *ScanRun, err error) {
 
 func (r *Runner) completeRun(run *ScanRun, _ error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	delete(r.running, run.Scanner)
+	r.results = append(r.results, run)
+	cb := r.OnComplete
+	r.mu.Unlock()
+	if cb != nil {
+		cb(run)
+	}
+}
+
+// AddResult adds a previously-completed run (e.g. loaded from DB).
+func (r *Runner) AddResult(run *ScanRun) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.results = append(r.results, run)
 }
 

@@ -56,6 +56,8 @@ type ScanResult struct {
 	Findings     []Finding     `json:"findings"`
 	Errors       []string      `json:"errors"`
 	Crashed      bool          `json:"crashed"`
+	CrashSignal  string        `json:"crash_signal,omitempty"`
+	CrashStderr  string        `json:"crash_stderr,omitempty"`
 	TimedOut     bool          `json:"timed_out"`
 	RequestCount int           `json:"request_count"`
 }
@@ -93,6 +95,9 @@ type ComparisonReport struct {
 	ScannerCrashed  bool     `json:"scanner_crashed"`
 	ScannerTimedOut bool     `json:"scanner_timed_out"`
 	ScannerErrors   []string `json:"scanner_errors"`
+	CrashExitCode   int      `json:"crash_exit_code,omitempty"`
+	CrashSignal     string   `json:"crash_signal,omitempty"`
+	CrashStderr     string   `json:"crash_stderr,omitempty"`
 
 	ClassifiedFN []ClassifiedFalseNegative `json:"classified_false_negatives,omitempty"`
 
@@ -277,6 +282,9 @@ func CompareResults(profile *ExpectedProfile, result *ScanResult) *ComparisonRep
 		ScannerCrashed:  result.Crashed,
 		ScannerTimedOut: result.TimedOut,
 		ScannerErrors:   result.Errors,
+		CrashExitCode:   result.ExitCode,
+		CrashSignal:     result.CrashSignal,
+		CrashStderr:     result.CrashStderr,
 	}
 
 	// Only consider detectable vulns for matching
