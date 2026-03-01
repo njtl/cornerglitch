@@ -23,6 +23,45 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// Pagination helpers
+// ---------------------------------------------------------------------------
+
+// parsePagination extracts limit and offset query parameters.
+// Defaults: limit=100, offset=0. Max limit=1000.
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit = 100
+	offset = 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+			if limit > 1000 {
+				limit = 1000
+			}
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	return
+}
+
+// paginateSlice applies offset and limit to a slice length, returning
+// the start and end indices to use for slicing.
+func paginateSlice(total, limit, offset int) (start, end int) {
+	start = offset
+	if start > total {
+		start = total
+	}
+	end = start + limit
+	if end > total {
+		end = total
+	}
+	return
+}
+
+// ---------------------------------------------------------------------------
 // Route registration
 // ---------------------------------------------------------------------------
 
@@ -481,17 +520,13 @@ func adminAPILog(w http.ResponseWriter, r *http.Request, s *Server) {
 	setCORS(w)
 	w.Header().Set("Content-Type", "application/json")
 
-	limit := 200
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
-			limit = n
-		}
-	}
+	limit, offset := parsePagination(r)
 	filter := strings.ToLower(r.URL.Query().Get("filter"))
 
-	records := s.collector.RecentRecords(limit)
+	// Fetch a large window of records for filtering
+	records := s.collector.RecentRecords(1000)
 
-	data := make([]map[string]interface{}, 0, len(records))
+	all := make([]map[string]interface{}, 0, len(records))
 	for _, rec := range records {
 		if filter != "" {
 			match := strings.Contains(strings.ToLower(rec.Path), filter) ||
@@ -510,7 +545,7 @@ func adminAPILog(w http.ResponseWriter, r *http.Request, s *Server) {
 			mode = string(behavior.Mode)
 		}
 
-		data = append(data, map[string]interface{}{
+		all = append(all, map[string]interface{}{
 			"timestamp":     rec.Timestamp.Format(time.RFC3339),
 			"client_id":     rec.ClientID,
 			"method":        rec.Method,
@@ -523,9 +558,17 @@ func adminAPILog(w http.ResponseWriter, r *http.Request, s *Server) {
 		})
 	}
 
+	total := len(all)
+	start, end := paginateSlice(total, limit, offset)
+	page := all[start:end]
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"records": data,
-		"count":   len(data),
+		"data":    page,
+		"records": page,
+		"total":   total,
+		"limit":   limit,
+		"offset":  offset,
+		"count":   len(page),
 	})
 }
 
@@ -1312,6 +1355,7 @@ func adminAPIScannerHistory(w http.ResponseWriter, r *http.Request, s *Server) {
 	setCORS(w)
 	w.Header().Set("Content-Type", "application/json")
 
+	limit, offset := parsePagination(r)
 	scannerFilter := r.URL.Query().Get("scanner")
 	var entries []scaneval.HistoryEntry
 	if scannerFilter != "" {
@@ -1320,9 +1364,17 @@ func adminAPIScannerHistory(w http.ResponseWriter, r *http.Request, s *Server) {
 		entries = comparisonHistory.GetAll()
 	}
 
+	total := len(entries)
+	start, end := paginateSlice(total, limit, offset)
+	page := entries[start:end]
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"entries": entries,
-		"count":   len(entries),
+		"data":    page,
+		"entries": page,
+		"total":   total,
+		"limit":   limit,
+		"offset":  offset,
+		"count":   len(page),
 	})
 }
 

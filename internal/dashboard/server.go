@@ -91,8 +91,10 @@ func (s *Server) apiClients(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
+	limit, offset := parsePagination(r)
+
 	profiles := s.collector.GetAllClientProfiles()
-	clients := make([]map[string]interface{}, 0, len(profiles))
+	allClients := make([]map[string]interface{}, 0, len(profiles))
 
 	for _, p := range profiles {
 		snap := p.Snapshot()
@@ -126,7 +128,7 @@ func (s *Server) apiClients(w http.ResponseWriter, r *http.Request) {
 			pathsMap[pc.Path] = pc.Count
 		}
 
-		clients = append(clients, map[string]interface{}{
+		allClients = append(allClients, map[string]interface{}{
 			"client_id":        snap.ClientID,
 			"first_seen":       snap.FirstSeen.Format(time.RFC3339),
 			"last_seen":        snap.LastSeen.Format(time.RFC3339),
@@ -144,9 +146,17 @@ func (s *Server) apiClients(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	total := len(allClients)
+	start, end := paginateSlice(total, limit, offset)
+	page := allClients[start:end]
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"clients": clients,
-		"count":   len(clients),
+		"data":    page,
+		"clients": page,
+		"total":   total,
+		"limit":   limit,
+		"offset":  offset,
+		"count":   len(page),
 	})
 }
 

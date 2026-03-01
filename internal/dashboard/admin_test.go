@@ -1085,3 +1085,91 @@ func TestGetNightmareState_Singleton(t *testing.T) {
 		t.Error("GetNightmareState should return the same singleton")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Pagination helpers tests
+// ---------------------------------------------------------------------------
+
+func TestParsePagination_Defaults(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test", nil)
+	limit, offset := parsePagination(r)
+	if limit != 100 {
+		t.Errorf("default limit: got %d, want 100", limit)
+	}
+	if offset != 0 {
+		t.Errorf("default offset: got %d, want 0", offset)
+	}
+}
+
+func TestParsePagination_CustomValues(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?limit=50&offset=25", nil)
+	limit, offset := parsePagination(r)
+	if limit != 50 {
+		t.Errorf("limit: got %d, want 50", limit)
+	}
+	if offset != 25 {
+		t.Errorf("offset: got %d, want 25", offset)
+	}
+}
+
+func TestParsePagination_MaxLimit(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?limit=5000", nil)
+	limit, _ := parsePagination(r)
+	if limit != 1000 {
+		t.Errorf("limit should be capped at 1000: got %d", limit)
+	}
+}
+
+func TestParsePagination_InvalidValues(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?limit=abc&offset=-5", nil)
+	limit, offset := parsePagination(r)
+	if limit != 100 {
+		t.Errorf("invalid limit should use default: got %d, want 100", limit)
+	}
+	if offset != 0 {
+		t.Errorf("negative offset should use default: got %d, want 0", offset)
+	}
+}
+
+func TestParsePagination_ZeroLimit(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?limit=0", nil)
+	limit, _ := parsePagination(r)
+	if limit != 100 {
+		t.Errorf("zero limit should use default: got %d, want 100", limit)
+	}
+}
+
+func TestPaginateSlice_Normal(t *testing.T) {
+	start, end := paginateSlice(50, 10, 0)
+	if start != 0 || end != 10 {
+		t.Errorf("got start=%d end=%d, want 0,10", start, end)
+	}
+}
+
+func TestPaginateSlice_WithOffset(t *testing.T) {
+	start, end := paginateSlice(50, 10, 20)
+	if start != 20 || end != 30 {
+		t.Errorf("got start=%d end=%d, want 20,30", start, end)
+	}
+}
+
+func TestPaginateSlice_OffsetBeyondTotal(t *testing.T) {
+	start, end := paginateSlice(10, 5, 20)
+	if start != 10 || end != 10 {
+		t.Errorf("offset beyond total: got start=%d end=%d, want 10,10", start, end)
+	}
+}
+
+func TestPaginateSlice_LimitBeyondEnd(t *testing.T) {
+	start, end := paginateSlice(10, 100, 5)
+	if start != 5 || end != 10 {
+		t.Errorf("limit beyond end: got start=%d end=%d, want 5,10", start, end)
+	}
+}
+
+func TestPaginateSlice_EmptySlice(t *testing.T) {
+	start, end := paginateSlice(0, 10, 0)
+	if start != 0 || end != 0 {
+		t.Errorf("empty slice: got start=%d end=%d, want 0,0", start, end)
+	}
+}
