@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,7 +46,43 @@ import (
 	"github.com/glitchWebServer/internal/websocket"
 )
 
+// loadEnvFile reads a .env file and sets environment variables that are not
+// already set in the environment. This ensures explicit env vars and CLI flags
+// always take precedence over .env file values.
+func loadEnvFile(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return // .env is optional
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		// Remove surrounding quotes if present.
+		if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+			val = val[1 : len(val)-1]
+		}
+		// Don't override existing environment variables.
+		if _, exists := os.LookupEnv(key); !exists {
+			os.Setenv(key, val)
+		}
+	}
+}
+
 func main() {
+	// Auto-load .env file (won't override existing env vars).
+	loadEnvFile(".env")
+
 	// Check for subcommands before flag parsing.
 	if len(os.Args) > 1 && os.Args[1] == "selftest" {
 		if err := selftest.RunCLI(os.Args[2:]); err != nil {
@@ -78,7 +116,11 @@ func main() {
 	if dbConn != "" {
 		if err := dashboard.InitStorage(dbConn); err != nil {
 			log.Printf("\033[33m[glitch]\033[0m Storage init warning: %v", err)
+		} else {
+			log.Printf("\033[36m[glitch]\033[0m PostgreSQL connected")
 		}
+	} else {
+		log.Printf("\033[33m[glitch]\033[0m No GLITCH_DB_URL set — running without database persistence")
 	}
 
 	// Set up auto-save state file.

@@ -1,4 +1,4 @@
-.PHONY: build test vet clean docker-build docker-push k8s-deploy run cross db-up db-down db-reset db-psql
+.PHONY: build test vet clean docker-build docker-push k8s-deploy run start stop restart logs status cross db-up db-down db-reset db-psql
 
 BINARY     := glitch
 IMAGE      := ghcr.io/njtl/glitch-server
@@ -44,9 +44,43 @@ k8s-deploy:
 	kubectl apply -f deploy/k8s/service.yaml -n $(NAMESPACE)
 	kubectl apply -f deploy/k8s/ingress.yaml -n $(NAMESPACE)
 
-# Run locally
+# Run locally (auto-loads .env)
 run: build
 	./$(BINARY)
+
+# Run in background with logging
+start: build
+	@echo "Starting Glitch server..."
+	@nohup ./$(BINARY) > /tmp/glitch.log 2>&1 & echo "$$!" > .glitch.pid
+	@sleep 1 && head -10 /tmp/glitch.log
+	@echo "PID: $$(cat .glitch.pid) — logs: /tmp/glitch.log"
+
+# Stop background server
+stop:
+	@if [ -f .glitch.pid ]; then \
+		kill $$(cat .glitch.pid) 2>/dev/null && echo "Stopped PID $$(cat .glitch.pid)" || echo "Process not running"; \
+		rm -f .glitch.pid; \
+	else \
+		echo "No .glitch.pid file found"; \
+	fi
+
+# Restart background server
+restart: stop
+	@sleep 2
+	@$(MAKE) start
+
+# Show server logs
+logs:
+	@tail -f /tmp/glitch.log
+
+# Show server status
+status:
+	@if [ -f .glitch.pid ] && kill -0 $$(cat .glitch.pid) 2>/dev/null; then \
+		echo "Glitch is running (PID $$(cat .glitch.pid))"; \
+	else \
+		echo "Glitch is not running"; \
+		rm -f .glitch.pid 2>/dev/null; \
+	fi
 
 # Build for multiple platforms
 cross:
