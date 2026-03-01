@@ -3104,6 +3104,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   function startScanPolling() {
     if (scanPollTimer) return;
+    window._viewingSpecificRun = null;
     scanPollTimer = setInterval(pollScannerStatus, 1500);
     pollScannerStatus();
   }
@@ -3220,7 +3221,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     html += '</div>';
     tabsEl.innerHTML = html;
 
-    // Show selected tab content
+    // Show selected tab content — skip if user is viewing a specific run
+    if (window._viewingSpecificRun != null) return;
     if (!window._activeResultTab || window._activeResultTab === 'latest') {
       var latest = completed[completed.length - 1];
       if (latest.comparison) renderComparison(latest.comparison, latest.scanner, latest);
@@ -3237,6 +3239,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   window.showResultTab = function(tab) {
     window._activeResultTab = tab;
+    window._viewingSpecificRun = null;
     var completed = window._completedRuns || [];
     buildResultTabs(completed);
   };
@@ -3605,6 +3608,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var runs = window._completedRuns || [];
     if (idx >= 0 && idx < runs.length) {
       var run = runs[idx];
+      window._viewingSpecificRun = idx;
       if (run.comparison) renderComparison(run.comparison, run.scanner, run);
       else renderScanResult(run);
     }
