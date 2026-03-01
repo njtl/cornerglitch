@@ -762,6 +762,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         <tbody id="dash-log-body"></tbody>
       </table>
     </div>
+    <button id="dash-log-load-more" class="cfg-btn" onclick="dashLogLoadMore()" style="display:none;margin-top:8px;width:100%%">Load More</button>
   </div>
 
   <!-- Quick Actions -->
@@ -1038,6 +1039,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         <tbody id="sess-body"></tbody>
       </table>
     </div>
+    <button id="sess-load-more" class="cfg-btn" onclick="sessLoadMore()" style="display:none;margin-top:8px;width:100%%">Load More Clients</button>
   </div>
   <div class="section" id="client-detail" style="display:none">
     <h2>// Client Detail: <span id="detail-cid" style="color:#00ffcc"></span></h2>
@@ -2025,15 +2027,34 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
       // Request log (dashboard)
       try {
-        var logResp = await api('/admin/api/log?limit=200');
-        dashLogData = logResp.records || [];
+        var logResp = await api('/admin/api/log?limit=200&offset=0');
+        dashLogData = logResp.records || logResp.data || [];
+        dashLogTotal = logResp.total || dashLogData.length;
+        dashLogOffset = dashLogData.length;
         renderDashLog(dashLogData);
+        var loadMoreBtn = document.getElementById('dash-log-load-more');
+        if (loadMoreBtn) loadMoreBtn.style.display = dashLogOffset < dashLogTotal ? '' : 'none';
       } catch(le) {}
     } catch(e) { console.error('dashboard:', e); }
   }
 
   // ------ Dashboard Log + Client Detail ------
   var dashLogData = [];
+  var dashLogTotal = 0;
+  var dashLogOffset = 0;
+
+  window.dashLogLoadMore = async function() {
+    try {
+      var logResp = await api('/admin/api/log?limit=200&offset=' + dashLogOffset);
+      var more = logResp.records || logResp.data || [];
+      dashLogData = dashLogData.concat(more);
+      dashLogTotal = logResp.total || dashLogData.length;
+      dashLogOffset += more.length;
+      renderDashLog(dashLogData);
+      var loadMoreBtn = document.getElementById('dash-log-load-more');
+      if (loadMoreBtn) loadMoreBtn.style.display = dashLogOffset < dashLogTotal ? '' : 'none';
+    } catch(e) { console.error('dash log load more:', e); }
+  };
 
   function renderDashLog(records) {
     var tbody = document.getElementById('dash-log-body');
@@ -2126,30 +2147,57 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   // ------ Sessions ------
   let selectedClient = null;
+  let sessClients = [];
+  let sessTotal = 0;
+  let sessOffset = 0;
+
+  function renderSessionRows(clients) {
+    return clients.map(c => {
+      const ago = timeSince(c.last_seen);
+      const cid = escapeHtml(c.client_id);
+      const short = escapeHtml(shortID(c.client_id));
+      return '<tr>' +
+        '<td><a href="#" onclick="viewClient(\'' + cid + '\');return false" style="color:#44aaff">' + short + '</a></td>' +
+        '<td>' + c.total_requests + '</td>' +
+        '<td>' + (c.requests_per_sec||0).toFixed(1) + '</td>' +
+        '<td class="' + (c.errors_received > 0 ? 's5' : '') + '">' + c.errors_received + '</td>' +
+        '<td>' + c.unique_paths + '</td>' +
+        '<td>' + (c.labyrinth_depth||0) + '</td>' +
+        '<td class="' + mClass(c.adaptive_mode) + '">' + (c.adaptive_mode||'pending') + '</td>' +
+        '<td style="color:#888">' + ago + '</td>' +
+        '<td><a href="#" onclick="viewClient(\'' + cid + '\');return false" style="color:#888;font-size:0.8em">details</a></td>' +
+        '</tr>';
+    }).join('');
+  }
+
   async function refreshSessions() {
     try {
-      const data = await api('/api/clients');
-      const clients = (data.clients || []);
-      clients.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen) || (a.client_id || '').localeCompare(b.client_id || ''));
+      const data = await api('/api/clients?limit=100&offset=0');
+      sessClients = (data.clients || data.data || []);
+      sessClients.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen) || (a.client_id || '').localeCompare(b.client_id || ''));
+      sessTotal = data.total || sessClients.length;
+      sessOffset = sessClients.length;
       const tbody = document.getElementById('sess-body');
-      tbody.innerHTML = clients.map(c => {
-        const ago = timeSince(c.last_seen);
-        const cid = escapeHtml(c.client_id);
-        const short = escapeHtml(shortID(c.client_id));
-        return '<tr>' +
-          '<td><a href="#" onclick="viewClient(\'' + cid + '\');return false" style="color:#44aaff">' + short + '</a></td>' +
-          '<td>' + c.total_requests + '</td>' +
-          '<td>' + (c.requests_per_sec||0).toFixed(1) + '</td>' +
-          '<td class="' + (c.errors_received > 0 ? 's5' : '') + '">' + c.errors_received + '</td>' +
-          '<td>' + c.unique_paths + '</td>' +
-          '<td>' + (c.labyrinth_depth||0) + '</td>' +
-          '<td class="' + mClass(c.adaptive_mode) + '">' + (c.adaptive_mode||'pending') + '</td>' +
-          '<td style="color:#888">' + ago + '</td>' +
-          '<td><a href="#" onclick="viewClient(\'' + cid + '\');return false" style="color:#888;font-size:0.8em">details</a></td>' +
-          '</tr>';
-      }).join('');
+      tbody.innerHTML = renderSessionRows(sessClients);
+      var btn = document.getElementById('sess-load-more');
+      if (btn) btn.style.display = sessOffset < sessTotal ? '' : 'none';
     } catch(e) { console.error('sessions:', e); }
   }
+
+  window.sessLoadMore = async function() {
+    try {
+      const data = await api('/api/clients?limit=100&offset=' + sessOffset);
+      const more = (data.clients || data.data || []);
+      sessClients = sessClients.concat(more);
+      sessClients.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen) || (a.client_id || '').localeCompare(b.client_id || ''));
+      sessTotal = data.total || sessClients.length;
+      sessOffset += more.length;
+      const tbody = document.getElementById('sess-body');
+      tbody.innerHTML = renderSessionRows(sessClients);
+      var btn = document.getElementById('sess-load-more');
+      if (btn) btn.style.display = sessOffset < sessTotal ? '' : 'none';
+    } catch(e) { console.error('sess load more:', e); }
+  };
 
   window.viewClient = async function(clientID) {
     selectedClient = clientID;
