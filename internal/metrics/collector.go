@@ -139,11 +139,17 @@ func NewCollector() *Collector {
 
 func (c *Collector) bucketTicker() {
 	ticker := time.NewTicker(time.Second)
-	for range ticker.C {
-		c.mu.Lock()
-		c.bucketIdx = (c.bucketIdx + 1) % c.bucketSize
-		c.buckets[c.bucketIdx] = secondBucket{Timestamp: time.Now()}
-		c.mu.Unlock()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			c.mu.Lock()
+			c.bucketIdx = (c.bucketIdx + 1) % c.bucketSize
+			c.buckets[c.bucketIdx] = secondBucket{Timestamp: time.Now()}
+			c.mu.Unlock()
+		case <-c.stopCh:
+			return
+		}
 	}
 }
 
@@ -393,6 +399,13 @@ type ClientProfileSnapshot struct {
 	UserAgents      map[string]int
 	BurstWindows    int
 	AdaptiveProfile string
+}
+
+// SetAdaptiveProfile updates the adaptive profile string under the profile's mutex.
+func (cp *ClientProfile) SetAdaptiveProfile(profile string) {
+	cp.mu.Lock()
+	cp.AdaptiveProfile = profile
+	cp.mu.Unlock()
 }
 
 // Snapshot returns a thread-safe copy of the client profile.
