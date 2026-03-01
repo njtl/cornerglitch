@@ -2,9 +2,42 @@ package metrics
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 )
+
+func TestCollector_NoGoroutineLeak(t *testing.T) {
+	// Allow any background goroutines to settle
+	runtime.GC()
+	time.Sleep(50 * time.Millisecond)
+	before := runtime.NumGoroutine()
+
+	// Create and stop multiple collectors
+	for i := 0; i < 10; i++ {
+		c := NewCollector()
+		c.Record(RequestRecord{
+			Timestamp:  time.Now(),
+			ClientID:   "leak-test",
+			Path:       "/leak",
+			StatusCode: 200,
+		})
+		c.Stop()
+	}
+
+	// Allow goroutines to exit
+	runtime.GC()
+	time.Sleep(100 * time.Millisecond)
+	after := runtime.NumGoroutine()
+
+	// We created 10 collectors (each spawning 2 goroutines = 20 total).
+	// After Stop(), all should be cleaned up. Allow a small margin for
+	// runtime-internal goroutines that may come and go.
+	leaked := after - before
+	if leaked > 2 {
+		t.Errorf("goroutine leak detected: %d goroutines before, %d after (%d leaked)", before, after, leaked)
+	}
+}
 
 func TestRecord_StoresEntry(t *testing.T) {
 	c := NewCollector()
