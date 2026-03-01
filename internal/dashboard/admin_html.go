@@ -542,6 +542,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   .history-viewing-banner { background:#1a2a3a;border:1px solid #0af;border-radius:6px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;color:#88ccff;font-size:0.85em }
   .history-viewing-banner button { background:#333;color:#aaa;border:1px solid #555;border-radius:4px;padding:4px 14px;cursor:pointer;font-family:inherit;font-size:0.82em }
   .history-viewing-banner button:hover { background:#444;color:#fff }
+  .crash-overlay { display:none;position:fixed;top:0;left:0;width:100%%;height:100%%;background:rgba(0,0,0,0.7);z-index:9000;align-items:center;justify-content:center }
+  .crash-overlay.open { display:flex }
+  .crash-modal { background:#1a1a1a;border:1px solid #ff4444;border-radius:10px;padding:24px 28px;max-width:700px;width:90%%;max-height:80vh;overflow-y:auto;box-shadow:0 0 40px rgba(255,68,68,0.3) }
+  .crash-modal h3 { color:#ff4444;margin:0 0 16px;font-size:1em;display:flex;align-items:center;justify-content:space-between }
+  .crash-modal .close-btn { background:none;border:none;color:#888;font-size:1.4em;cursor:pointer;padding:0 4px }
+  .crash-modal .close-btn:hover { color:#fff }
+  .crash-modal .crash-field { margin:10px 0 }
+  .crash-modal .crash-field .label { color:#888;font-size:0.8em;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px }
+  .crash-modal .crash-field .value { color:#ddd;font-size:0.9em }
+  .crash-modal pre { background:#0a0a0a;border:1px solid #333;border-radius:6px;padding:12px;color:#ff8844;font-size:0.8em;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:6px 0 0 }
+  .crash-link { color:#ff4444;cursor:pointer;text-decoration:underline;text-decoration-style:dotted }
+  .crash-link:hover { color:#ff6666;text-decoration-style:solid }
 
   /* Collapsible server sections */
   .srv-section { margin-bottom: 2px; }
@@ -1700,6 +1712,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div class="card"><div class="label">Go Version</div><div class="value" style="font-size:1em;color:#888">1.24+</div></div>
     </div>
   </div>
+</div>
+
+<div class="crash-overlay" id="crash-overlay" onclick="if(event.target===this)closeCrashModal()">
+  <div class="crash-modal" id="crash-modal-content"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -3170,7 +3186,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       tabsEl.style.display = 'none';
       if (completed.length === 1) {
         var only = completed[0];
-        if (only.comparison) renderComparison(only.comparison, only.scanner);
+        if (only.comparison) renderComparison(only.comparison, only.scanner, only);
         else renderScanResult(only);
       }
       return;
@@ -3204,13 +3220,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     // Show selected tab content
     if (!window._activeResultTab || window._activeResultTab === 'latest') {
       var latest = completed[completed.length - 1];
-      if (latest.comparison) renderComparison(latest.comparison, latest.scanner);
+      if (latest.comparison) renderComparison(latest.comparison, latest.scanner, latest);
       else renderScanResult(latest);
     } else {
       var tabRuns = scannerRuns[window._activeResultTab];
       if (tabRuns && tabRuns.length > 0) {
         var latestRun = tabRuns[tabRuns.length - 1].run;
-        if (latestRun.comparison) renderComparison(latestRun.comparison, latestRun.scanner);
+        if (latestRun.comparison) renderComparison(latestRun.comparison, latestRun.scanner, latestRun);
         else renderScanResult(latestRun);
       }
     }
@@ -3234,18 +3250,26 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var names = Object.keys(scannerBest);
     if (names.length < 2) { toast('Need 2+ scanner results to compare'); return; }
 
+    window._crashInfos = [];
     var html = '<h3 style="color:#00ccaa;font-size:0.9em;margin-bottom:12px">Multi-Scanner Comparison</h3>';
     html += '<table class="findings-tbl"><thead><tr><th>Scanner</th><th>Grade</th><th>Detection</th><th>False Pos.</th><th>Accuracy</th><th>Crashed</th></tr></thead><tbody>';
     names.forEach(function(name) {
       var c = scannerBest[name].comparison;
+      var run = scannerBest[name];
       var gradeClass = c.grade ? 'grade-' + c.grade.toLowerCase() : '';
+      var crashCell = 'No';
+      if (c.scanner_crashed) {
+        var ci = window._crashInfos.length;
+        window._crashInfos.push({scanner:name, status:'CRASHED', exit_code:c.crash_exit_code||run.exit_code||0, crash_signal:c.crash_signal||run.crash_signal||'', scanner_errors:c.scanner_errors||[], crash_stderr:c.crash_stderr||run.stderr_excerpt||'', error_output:run.error_output||''});
+        crashCell = '<span class="crash-link" onclick="showCrashModal(window._crashInfos['+ci+'])">YES (details)</span>';
+      }
       html += '<tr>' +
         '<td style="font-weight:bold">' + escapeHtml(name) + '</td>' +
         '<td class="' + gradeClass + '" style="font-weight:bold;font-size:1.1em">' + escapeHtml(c.grade || '?') + '</td>' +
         '<td>' + ((c.detection_rate || 0) * 100).toFixed(1) + '%%</td>' +
         '<td>' + ((c.false_positive_rate || 0) * 100).toFixed(1) + '%%</td>' +
         '<td>' + (c.accuracy || 0).toFixed(1) + '%%</td>' +
-        '<td style="color:' + (c.scanner_crashed ? '#ff4444' : '#00ff88') + '">' + (c.scanner_crashed ? 'YES' : 'No') + '</td>' +
+        '<td style="color:' + (c.scanner_crashed ? '#ff4444' : '#00ff88') + '">' + crashCell + '</td>' +
         '</tr>';
     });
     html += '</tbody></table>';
@@ -3292,6 +3316,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var statusText = run.status || '-';
     if (run.crashed) statusText = 'CRASHED';
     if (run.not_installed) statusText = 'NOT INSTALLED';
+    window._currentRunCrash = {scanner:run.scanner||'', status:statusText, exit_code:run.exit_code||0, crash_signal:run.crash_signal||'', scanner_errors:[], crash_stderr:run.stderr_excerpt||'', error_output:run.error_output||''};
 
     var html = '<div class="grid">' +
       card('Scanner', escapeHtml(run.scanner || ''), 'v-info') +
@@ -3303,10 +3328,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
     // Crash alert
     if (run.crashed) {
-      html += '<div style="background:#330000;border:1px solid #ff4444;border-radius:6px;padding:12px;margin:12px 0">' +
-        '<span style="color:#ff4444;font-weight:bold;font-size:0.9em">SCANNER CRASHED</span>';
+      html += '<div style="background:#330000;border:1px solid #ff4444;border-radius:6px;padding:12px;margin:12px 0;cursor:pointer" onclick="showCrashModal(window._currentRunCrash)">' +
+        '<span style="color:#ff4444;font-weight:bold;font-size:0.9em">\u26A0 SCANNER CRASHED</span>';
       if (run.crash_signal) html += ' <span style="color:#ff8844">Signal: ' + escapeHtml(run.crash_signal) + '</span>';
-      html += '<div style="color:#ff6666;font-size:0.82em;margin-top:6px">The scanner terminated abnormally. Exit code: ' + (run.exit_code || 0) + '</div>';
+      html += '<div style="color:#ff6666;font-size:0.82em;margin-top:6px">The scanner terminated abnormally. Exit code: ' + (run.exit_code || 0) + ' \u2014 <span style="text-decoration:underline">click for full details</span></div>';
       html += '</div>';
     }
 
@@ -3341,7 +3366,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     document.getElementById('scanner-comparison').innerHTML = html;
   }
 
-  function renderComparison(report, scannerName) {
+  function renderComparison(report, scannerName, run) {
     var grade = (report.grade || '?').toUpperCase();
     var gradeClass = 'grade-' + grade.toLowerCase();
     var detPct = ((report.detection_rate || 0) * 100).toFixed(1);
@@ -3375,8 +3400,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         '<span style="color:#ffcc00;font-size:0.85em">' + accPct + '%%</span></div>' +
       '</div></div>';
 
+    var crashedLabel = 'no';
+    if (report.scanner_crashed) {
+      window._compCrashInfo = {scanner:scannerName||report.scanner||'', status:'CRASHED', exit_code:report.crash_exit_code||(run&&run.exit_code)||0, crash_signal:report.crash_signal||(run&&run.crash_signal)||'', scanner_errors:report.scanner_errors||[], crash_stderr:report.crash_stderr||(run&&run.stderr_excerpt)||'', error_output:(run&&run.error_output)||''};
+      crashedLabel = '<span class="crash-link" onclick="showCrashModal(window._compCrashInfo)">YES (details)</span>';
+    }
     html += '<div style="margin-top:14px;font-size:0.85em;color:#888">' +
-      'Crashed: <span style="color:' + (report.scanner_crashed ? '#ff4444' : '#00ff88') + '">' + (report.scanner_crashed ? 'YES' : 'no') + '</span> | ' +
+      'Crashed: <span style="color:' + (report.scanner_crashed ? '#ff4444' : '#00ff88') + '">' + crashedLabel + '</span> | ' +
       'Timed out: <span style="color:' + (report.scanner_timed_out ? '#ff4444' : '#00ff88') + '">' + (report.scanner_timed_out ? 'YES' : 'no') + '</span> | ' +
       'Errors: <span style="color:' + ((report.scanner_errors || []).length > 0 ? '#ff4444' : '#00ff88') + '">' + (report.scanner_errors || []).length + '</span>' +
       '</div>';
@@ -3498,12 +3528,20 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         actions += ' <button class="cfg-btn" style="padding:2px 8px;font-size:0.72em" onclick="compareScanRun(' + realIdx + ')">Compare</button>';
       }
 
+      var statusCell = escapeHtml(statusText) + escapeHtml(exitInfo);
+      if (r.crashed || r.status === 'crashed') {
+        var hci = window._crashInfos ? window._crashInfos.length : 0;
+        if (!window._crashInfos) window._crashInfos = [];
+        window._crashInfos.push({scanner:r.scanner||'', status:'CRASHED', exit_code:r.exit_code||0, crash_signal:r.crash_signal||'', scanner_errors:(comp.scanner_errors||[]), crash_stderr:r.stderr_excerpt||'', error_output:r.error_output||''});
+        statusCell = '<span class="crash-link" onclick="event.stopPropagation();showCrashModal(window._crashInfos['+hci+'])">' + escapeHtml(statusText) + escapeHtml(exitInfo) + '</span>';
+      }
+
       rows.push('<tr>' +
         '<td style="color:#888">' + (r.completed_at ? new Date(r.completed_at).toLocaleString() : r.started_at ? new Date(r.started_at).toLocaleString() : '-') + '</td>' +
         '<td>' + escapeHtml(r.scanner || '') + '</td>' +
         '<td' + (gradeClass ? ' class="' + gradeClass + '"' : '') + ' style="font-weight:bold;font-size:1.2em">' + escapeHtml(grade) + '</td>' +
         '<td>' + detStr + '</td>' +
-        '<td style="color:' + statusColor + '">' + escapeHtml(statusText) + escapeHtml(exitInfo) + '</td>' +
+        '<td style="color:' + statusColor + '">' + statusCell + '</td>' +
         '<td>' + actions + '</td>' +
         '</tr>');
     });
@@ -3514,11 +3552,50 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     window._completedRuns = completed || [];
   }
 
+  window.showCrashModal = function(info) {
+    var html = '<h3><span>\u26A0 Scanner Crash Details</span><button class="close-btn" onclick="closeCrashModal()">\u00D7</button></h3>';
+    html += '<div class="crash-field"><div class="label">Scanner</div><div class="value">' + escapeHtml(info.scanner || '-') + '</div></div>';
+    html += '<div class="crash-field"><div class="label">Status</div><div class="value" style="color:#ff4444;font-weight:bold">' + escapeHtml(info.status || 'CRASHED') + '</div></div>';
+    if (info.exit_code !== undefined && info.exit_code !== 0) {
+      html += '<div class="crash-field"><div class="label">Exit Code</div><div class="value" style="color:#ff8844">' + info.exit_code + '</div></div>';
+    }
+    if (info.crash_signal) {
+      html += '<div class="crash-field"><div class="label">Signal</div><div class="value" style="color:#ff6644">' + escapeHtml(info.crash_signal) + '</div></div>';
+    }
+    var errors = info.scanner_errors || info.errors || [];
+    if (errors.length > 0) {
+      html += '<div class="crash-field"><div class="label">Errors (' + errors.length + ')</div>';
+      html += '<pre>' + errors.map(function(e){ return escapeHtml(e); }).join('\\n') + '</pre></div>';
+    }
+    var stderr = info.crash_stderr || info.stderr_excerpt || '';
+    if (stderr) {
+      html += '<div class="crash-field"><div class="label">Stderr Output</div>';
+      html += '<pre>' + escapeHtml(stderr) + '</pre></div>';
+    }
+    if (info.error_output && info.error_output !== stderr) {
+      html += '<div class="crash-field"><div class="label">Error Output</div>';
+      html += '<pre>' + escapeHtml(info.error_output) + '</pre></div>';
+    }
+    if (!stderr && !info.error_output && errors.length === 0) {
+      html += '<div class="crash-field"><div class="value" style="color:#888">No additional crash details available.</div></div>';
+    }
+    document.getElementById('crash-modal-content').innerHTML = html;
+    document.getElementById('crash-overlay').classList.add('open');
+  };
+
+  window.closeCrashModal = function() {
+    document.getElementById('crash-overlay').classList.remove('open');
+  };
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeCrashModal();
+  });
+
   window.viewScanRun = function(idx) {
     var runs = window._completedRuns || [];
     if (idx >= 0 && idx < runs.length) {
       var run = runs[idx];
-      if (run.comparison) renderComparison(run.comparison, run.scanner);
+      if (run.comparison) renderComparison(run.comparison, run.scanner, run);
       else renderScanResult(run);
     }
   };
@@ -3528,7 +3605,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     if (idx >= 0 && idx < runs.length) {
       var run = runs[idx];
       if (run.comparison) {
-        renderComparison(run.comparison, run.scanner);
+        renderComparison(run.comparison, run.scanner, run);
         toast('Showing comparison for ' + (run.scanner || 'scan'));
       }
     }
