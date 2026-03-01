@@ -1760,6 +1760,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   // ------ Helpers ------
   async function api(path, opts) {
     const res = await fetch(API + path, opts);
+    if (res.status === 401) { window.location.href = '/admin/login'; throw new Error('session expired'); }
     if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + res.statusText);
     return res.json();
   }
