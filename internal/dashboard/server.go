@@ -52,6 +52,11 @@ func NewServer(collector *metrics.Collector, fp *fingerprint.Engine, adapt *adap
 	return s
 }
 
+// Handler returns the HTTP handler for testing purposes.
+func (s *Server) Handler() http.Handler {
+	return s.httpSrv.Handler
+}
+
 func (s *Server) ListenAndServe() error {
 	return s.httpSrv.ListenAndServe()
 }
