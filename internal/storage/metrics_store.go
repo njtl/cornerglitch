@@ -137,26 +137,27 @@ type ClientProfileRecord struct {
 }
 
 // SaveClientProfile inserts a new version of a client profile.
+// Uses an atomic INSERT...SELECT to avoid race conditions between concurrent writers.
+// Retries on unique constraint violation.
 func (s *Store) SaveClientProfile(ctx context.Context, rec *ClientProfileRecord) error {
-	var maxVersion int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(version), 0) FROM client_profiles WHERE client_id = $1`,
-		rec.ClientID,
-	).Scan(&maxVersion)
-	if err != nil {
-		return fmt.Errorf("get max version for client %s: %w", rec.ClientID, err)
-	}
-
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO client_profiles
-			(client_id, version, total_requests, bot_score, adaptive_mode, profile_data)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-		rec.ClientID, maxVersion+1, rec.TotalRequests, rec.BotScore, rec.AdaptiveMode, rec.ProfileData,
-	)
-	if err != nil {
+	const maxRetries = 20
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		_, err := s.db.ExecContext(ctx,
+			`INSERT INTO client_profiles
+				(client_id, version, total_requests, bot_score, adaptive_mode, profile_data)
+			 SELECT $1, COALESCE(MAX(version), 0) + 1, $2, $3, $4, $5::jsonb
+			 FROM client_profiles WHERE client_id = $6`,
+			rec.ClientID, rec.TotalRequests, rec.BotScore, rec.AdaptiveMode, rec.ProfileData, rec.ClientID,
+		)
+		if err == nil {
+			return nil
+		}
+		if isUniqueViolation(err) {
+			continue
+		}
 		return fmt.Errorf("insert client profile %s: %w", rec.ClientID, err)
 	}
-	return nil
+	return fmt.Errorf("insert client profile %s: exceeded %d retries due to concurrent writes", rec.ClientID, maxRetries)
 }
 
 // LoadClientProfile loads the latest profile for a client.

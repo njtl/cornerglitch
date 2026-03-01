@@ -8,14 +8,17 @@ package regression
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/glitchWebServer/internal/dashboard"
 	"github.com/glitchWebServer/internal/scaneval"
 	"github.com/glitchWebServer/internal/scanner"
+	"github.com/glitchWebServer/internal/storage"
 )
 
 // ---------------------------------------------------------------------------
@@ -399,4 +402,96 @@ func TestRegression_SettingsPersistence(t *testing.T) {
 	if snap["labyrinth"] {
 		t.Error("labyrinth should be false after loading state file")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Bug: Race condition in storage SaveConfig version assignment (Task #1)
+//
+// Root cause: SaveConfig used a two-step SELECT MAX(version) → INSERT pattern.
+// Between the SELECT and INSERT, concurrent writers could read the same MAX
+// value and attempt to INSERT the same version number, violating the unique
+// constraint or (worse) silently overwriting data.
+//
+// Fix: Replaced with a single atomic INSERT...SELECT statement:
+//   INSERT INTO config_versions (entity, version, data)
+//   SELECT $1, COALESCE(MAX(version),0)+1, $2 FROM config_versions WHERE entity = $1
+// Added retry logic on unique constraint violations for safety.
+// Same fix applied to SaveClientProfile in metrics_store.go.
+//
+// Verified: 10 concurrent SaveConfig goroutines all get unique version numbers.
+// ---------------------------------------------------------------------------
+
+func TestRegression_Task1_ConcurrentSaveConfig(t *testing.T) {
+	dsn := os.Getenv("GLITCH_DB_URL")
+	if dsn == "" {
+		dsn = "postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	store, err := storage.NewWithDSN(ctx, dsn)
+	if err != nil {
+		t.Skipf("PostgreSQL not available, skipping: %v", err)
+	}
+	defer store.Close()
+
+	// Use a unique entity name to avoid interference with other tests
+	entity := fmt.Sprintf("regression_race_test_%d", time.Now().UnixNano())
+	const goroutines = 10
+
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			data := map[string]interface{}{"writer": i, "ts": time.Now().UnixNano()}
+			if err := store.SaveConfig(ctx, entity, data); err != nil {
+				errs <- fmt.Errorf("goroutine %d: %w", i, err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("concurrent SaveConfig failed: %v", err)
+	}
+
+	// Verify all goroutines produced unique version numbers
+	version, err := store.ConfigVersion(ctx, entity)
+	if err != nil {
+		t.Fatalf("ConfigVersion error: %v", err)
+	}
+	if version != goroutines {
+		t.Errorf("expected %d unique versions, got %d (race condition!)", goroutines, version)
+	}
+
+	// Verify version history has no gaps or duplicates
+	history, err := store.ListConfigHistory(ctx, entity, goroutines+1)
+	if err != nil {
+		t.Fatalf("ListConfigHistory error: %v", err)
+	}
+	if len(history) != goroutines {
+		t.Errorf("expected %d history entries, got %d", goroutines, len(history))
+	}
+
+	seen := make(map[int]bool)
+	for _, entry := range history {
+		if seen[entry.Version] {
+			t.Errorf("duplicate version %d found in history", entry.Version)
+		}
+		seen[entry.Version] = true
+	}
+	for v := 1; v <= goroutines; v++ {
+		if !seen[v] {
+			t.Errorf("version %d missing from history (gap detected)", v)
+		}
+	}
+
+	// Clean up test data
+	_, _ = store.DB().ExecContext(ctx, `DELETE FROM config_versions WHERE entity = $1`, entity)
 }
