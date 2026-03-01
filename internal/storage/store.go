@@ -7,11 +7,22 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
 )
+
+// dbExecer abstracts *sql.DB and *sql.Tx for shared query methods.
+type dbExecer interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}
+
+// isUniqueViolation checks if a PostgreSQL error is a unique constraint violation (SQLSTATE 23505).
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "duplicate key value violates unique constraint")
+}
 
 // DefaultDSN is the default PostgreSQL connection string.
 const DefaultDSN = "postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable"
@@ -86,30 +97,39 @@ func (s *Store) Ping(ctx context.Context) error {
 // ---------------------------------------------------------------------------
 
 // SaveConfig inserts a new version of a config entity.
-// The version number is auto-calculated as max(version)+1 for the entity.
+// The version number is atomically calculated as max(version)+1 using a single
+// INSERT...SELECT statement to avoid race conditions between concurrent writers.
+// Retries on unique constraint violation (concurrent inserts assigning the same version).
 func (s *Store) SaveConfig(ctx context.Context, entity string, data interface{}) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshal config data: %w", err)
 	}
 
-	var maxVersion int
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(version), 0) FROM config_versions WHERE entity = $1`,
-		entity,
-	).Scan(&maxVersion)
-	if err != nil {
-		return fmt.Errorf("get max version for %s: %w", entity, err)
-	}
+	return s.insertVersionedConfig(ctx, s.db, entity, jsonData)
+}
 
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO config_versions (entity, version, data) VALUES ($1, $2, $3::jsonb)`,
-		entity, maxVersion+1, jsonData,
-	)
-	if err != nil {
+// insertVersionedConfig performs an atomic INSERT...SELECT to assign the next version number.
+// It accepts either *sql.DB or *sql.Tx via the dbExecer interface.
+// Retries up to 5 times on unique constraint violations from concurrent writers.
+func (s *Store) insertVersionedConfig(ctx context.Context, db dbExecer, entity string, jsonData []byte) error {
+	const maxRetries = 20
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO config_versions (entity, version, data)
+			 SELECT $1, COALESCE(MAX(version), 0) + 1, $2::jsonb
+			 FROM config_versions WHERE entity = $3`,
+			entity, jsonData, entity,
+		)
+		if err == nil {
+			return nil
+		}
+		if isUniqueViolation(err) {
+			continue // retry with next version
+		}
 		return fmt.Errorf("insert config version for %s: %w", entity, err)
 	}
-	return nil
+	return fmt.Errorf("insert config version for %s: exceeded %d retries due to concurrent writes", entity, maxRetries)
 }
 
 // LoadConfig loads the latest version of a config entity into dst.
@@ -213,10 +233,10 @@ func (s *Store) SaveFullConfig(ctx context.Context, export *FullConfigExport) er
 	defer tx.Rollback()
 
 	entities := map[string]interface{}{
-		"feature_flags":    export.Features,
-		"admin_config":     export.Config,
-		"vuln_config":      export.VulnConfig,
-		"error_weights":    export.ErrorWeights,
+		"feature_flags":     export.Features,
+		"admin_config":      export.Config,
+		"vuln_config":       export.VulnConfig,
+		"error_weights":     export.ErrorWeights,
 		"page_type_weights": export.PageTypeWeights,
 	}
 	if export.Blocking != nil {
@@ -232,21 +252,8 @@ func (s *Store) SaveFullConfig(ctx context.Context, export *FullConfigExport) er
 			return fmt.Errorf("marshal %s: %w", entity, err)
 		}
 
-		var maxVersion int
-		err = tx.QueryRowContext(ctx,
-			`SELECT COALESCE(MAX(version), 0) FROM config_versions WHERE entity = $1`,
-			entity,
-		).Scan(&maxVersion)
-		if err != nil {
-			return fmt.Errorf("get max version for %s: %w", entity, err)
-		}
-
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO config_versions (entity, version, data) VALUES ($1, $2, $3::jsonb)`,
-			entity, maxVersion+1, jsonData,
-		)
-		if err != nil {
-			return fmt.Errorf("insert %s: %w", entity, err)
+		if err := s.insertVersionedConfig(ctx, tx, entity, jsonData); err != nil {
+			return err
 		}
 	}
 
