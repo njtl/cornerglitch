@@ -146,14 +146,14 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check session cookie first.
+		// Check session cookie.
 		if validateSession(r) {
 			addSecurityHeaders(w)
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Check basic auth.
+		// Check basic auth (for CLI/programmatic access, no WWW-Authenticate header).
 		_, pass, ok := r.BasicAuth()
 		if ok && checkPassword(pass) {
 			createSession(w)
@@ -162,15 +162,14 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Not authenticated.
+		// Not authenticated — redirect to login (never show basic auth prompt).
 		if strings.HasPrefix(path, "/admin/api/") {
-			// API requests get 401 with WWW-Authenticate.
-			w.Header().Set("WWW-Authenticate", `Basic realm="Glitch Admin"`)
-			http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"authentication required","redirect":"/admin/login"}`))
 			return
 		}
 
-		// Browser requests get redirected to login page.
 		http.Redirect(w, r, "/admin/login", http.StatusFound)
 	})
 }
