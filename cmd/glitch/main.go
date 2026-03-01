@@ -104,6 +104,7 @@ func main() {
 	dashboard.LoadBuiltinScanHistory()
 
 	collector := metrics.NewCollector()
+	dashboard.RestoreMetrics(collector)
 	fp := fingerprint.NewEngine()
 	adapt := adaptive.NewEngine(collector, fp)
 	errGen := errors.NewGenerator()
@@ -150,6 +151,7 @@ func main() {
 	}
 
 	dashSrv := dashboard.NewServer(collector, fp, adapt, *dashPort)
+	stopSnapshotter := dashboard.StartMetricsSnapshotter(collector)
 
 	go func() {
 		log.Printf("\033[36m[glitch]\033[0m Dashboard listening on :%d", *dashPort)
@@ -170,6 +172,9 @@ func main() {
 	<-quit
 
 	log.Println("\033[33m[glitch]\033[0m Shutting down...")
+	stopSnapshotter()
+	// Final metrics save before shutdown.
+	dashboard.SaveMetricsNow(collector)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)

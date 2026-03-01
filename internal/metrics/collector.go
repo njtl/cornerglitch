@@ -84,6 +84,42 @@ type secondBucket struct {
 	totalMs   float64
 }
 
+// CounterSnapshot holds cumulative counter values for persistence.
+type CounterSnapshot struct {
+	TotalRequests  int64 `json:"total_requests"`
+	TotalErrors    int64 `json:"total_errors"`
+	Total2xx       int64 `json:"total_2xx"`
+	Total4xx       int64 `json:"total_4xx"`
+	Total5xx       int64 `json:"total_5xx"`
+	TotalDelayed   int64 `json:"total_delayed"`
+	TotalLabyrinth int64 `json:"total_labyrinth"`
+}
+
+// GetCounterSnapshot returns current cumulative counter values.
+func (c *Collector) GetCounterSnapshot() CounterSnapshot {
+	return CounterSnapshot{
+		TotalRequests:  c.TotalRequests.Load(),
+		TotalErrors:    c.TotalErrors.Load(),
+		Total2xx:       c.Total2xx.Load(),
+		Total4xx:       c.Total4xx.Load(),
+		Total5xx:       c.Total5xx.Load(),
+		TotalDelayed:   c.TotalDelayed.Load(),
+		TotalLabyrinth: c.TotalLabyrinth.Load(),
+	}
+}
+
+// RestoreCounters sets cumulative counters from a previously saved snapshot.
+// This is used on startup to restore metrics from the database.
+func (c *Collector) RestoreCounters(snap CounterSnapshot) {
+	c.TotalRequests.Store(snap.TotalRequests)
+	c.TotalErrors.Store(snap.TotalErrors)
+	c.Total2xx.Store(snap.Total2xx)
+	c.Total4xx.Store(snap.Total4xx)
+	c.Total5xx.Store(snap.Total5xx)
+	c.TotalDelayed.Store(snap.TotalDelayed)
+	c.TotalLabyrinth.Store(snap.TotalLabyrinth)
+}
+
 func NewCollector() *Collector {
 	c := &Collector{
 		clients:    make(map[string]*ClientProfile),
