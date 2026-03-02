@@ -4991,9 +4991,19 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) {}
   }
 
+  // ------ Header uptime (always visible, independent of active tab) ------
+  async function refreshHeaderUptime() {
+    try {
+      var m = await api('/api/metrics');
+      var el = document.getElementById('header-uptime');
+      if (el && m.uptime_seconds) el.textContent = 'uptime: ' + fmtUptime(m.uptime_seconds);
+    } catch(e) {}
+  }
+
   // ------ Main loop ------
   async function refresh() {
     refreshNightmareBar();
+    refreshHeaderUptime();
     const active = document.querySelector('.panel.active');
     if (!active) return;
     const id = active.id;
