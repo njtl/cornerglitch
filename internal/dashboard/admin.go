@@ -110,6 +110,7 @@ func TriggerAutoSave() {
 				ErrorWeights:    export.ErrorWeights,
 				PageTypeWeights: export.PageTypeWeights,
 				Blocking:        export.Blocking,
+				APIChaosConfig:  export.APIChaosConfig,
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -140,6 +141,7 @@ func LoadStateFile() bool {
 				ErrorWeights:    dbExport.ErrorWeights,
 				PageTypeWeights: dbExport.PageTypeWeights,
 				Blocking:        dbExport.Blocking,
+				APIChaosConfig:  dbExport.APIChaosConfig,
 			}
 			ImportConfig(export)
 			audit.LogSystem("config.load", "config.load", map[string]interface{}{"source": "postgresql"})
@@ -199,6 +201,7 @@ type flagValues struct {
 	privacy        bool
 	health         bool
 	spider         bool
+	apiChaos       bool
 }
 
 // FeatureFlags holds boolean toggles for each server subsystem.
@@ -235,6 +238,7 @@ func NewFeatureFlags() *FeatureFlags {
 		privacy:        true,
 		health:         true,
 		spider:         true,
+		apiChaos:       true,
 	})
 	return f
 }
@@ -327,6 +331,10 @@ func (f *FeatureFlags) IsSpiderEnabled() bool {
 	return f.v.Load().(*flagValues).spider
 }
 
+func (f *FeatureFlags) IsAPIChaosEnabled() bool {
+	return f.v.Load().(*flagValues).apiChaos
+}
+
 // Set toggles a named feature. Returns false if the name is unknown.
 // Uses copy-on-write: copies the current flagValues, modifies, then stores atomically.
 func (f *FeatureFlags) Set(name string, enabled bool) bool {
@@ -379,6 +387,8 @@ func (f *FeatureFlags) Set(name string, enabled bool) bool {
 		nv.health = enabled
 	case "spider":
 		nv.spider = enabled
+	case "api_chaos":
+		nv.apiChaos = enabled
 	default:
 		return false
 	}
@@ -413,6 +423,7 @@ func (f *FeatureFlags) Snapshot() map[string]bool {
 		"privacy":         v.privacy,
 		"health":          v.health,
 		"spider":          v.spider,
+		"api_chaos":       v.apiChaos,
 	}
 }
 
@@ -452,6 +463,9 @@ type AdminConfig struct {
 	AdaptiveAggressiveRPS  float64
 	AdaptiveLabyrinthPaths int
 	RecorderFormat         string // "jsonl" or "pcap"
+
+	// API Chaos controls
+	APIChaosProb float64 // 0-100, probability percentage for API chaos responses
 }
 
 // NewAdminConfig returns an AdminConfig with sensible defaults.
@@ -481,6 +495,7 @@ func NewAdminConfig() *AdminConfig {
 		AdaptiveAggressiveRPS:  10,
 		AdaptiveLabyrinthPaths: 5,
 		RecorderFormat:         "jsonl",
+		APIChaosProb:           30,
 	}
 }
 
@@ -511,6 +526,7 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"adaptive_aggressive_rps":  c.AdaptiveAggressiveRPS,
 		"adaptive_labyrinth_paths": c.AdaptiveLabyrinthPaths,
 		"recorder_format":          c.RecorderFormat,
+		"api_chaos_probability":    c.APIChaosProb,
 	}
 }
 
@@ -661,6 +677,14 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 			v = 4
 		}
 		c.ProtocolGlitchLevel = v
+	case "api_chaos_probability":
+		if value < 0 {
+			value = 0
+		}
+		if value > 100 {
+			value = 100
+		}
+		c.APIChaosProb = value
 	default:
 		return false
 	}
@@ -838,20 +862,86 @@ func (vc *VulnConfig) Snapshot() map[string]interface{} {
 }
 
 // ---------------------------------------------------------------------------
+// API Chaos Config — controls which API chaos categories are active
+// ---------------------------------------------------------------------------
+
+// APIChaosCategories lists all supported API chaos category names.
+var APIChaosCategories = []string{
+	"malformed_json", "wrong_format", "wrong_status", "wrong_headers",
+	"redirect_chaos", "error_formats", "slow_partial", "data_edge_cases",
+	"encoding_chaos", "auth_chaos",
+}
+
+// APIChaosConfig controls per-category API chaos toggles.
+type APIChaosConfig struct {
+	mu         sync.RWMutex
+	categories map[string]bool // category -> enabled
+}
+
+// NewAPIChaosConfig returns an APIChaosConfig with all categories enabled.
+func NewAPIChaosConfig() *APIChaosConfig {
+	cats := make(map[string]bool, len(APIChaosCategories))
+	for _, c := range APIChaosCategories {
+		cats[c] = true
+	}
+	return &APIChaosConfig{categories: cats}
+}
+
+// IsEnabled returns whether a category is enabled.
+func (ac *APIChaosConfig) IsEnabled(cat string) bool {
+	ac.mu.RLock()
+	defer ac.mu.RUnlock()
+	if enabled, ok := ac.categories[cat]; ok {
+		return enabled
+	}
+	return true
+}
+
+// SetCategory toggles a category.
+func (ac *APIChaosConfig) SetCategory(cat string, enabled bool) {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	ac.categories[cat] = enabled
+	BumpConfigVersion()
+}
+
+// SetAll enables or disables all categories.
+func (ac *APIChaosConfig) SetAll(enabled bool) {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	for _, cat := range APIChaosCategories {
+		ac.categories[cat] = enabled
+	}
+	BumpConfigVersion()
+}
+
+// Snapshot returns a copy of the current category states.
+func (ac *APIChaosConfig) Snapshot() map[string]bool {
+	ac.mu.RLock()
+	defer ac.mu.RUnlock()
+	result := make(map[string]bool, len(ac.categories))
+	for k, v := range ac.categories {
+		result[k] = v
+	}
+	return result
+}
+
+// ---------------------------------------------------------------------------
 // Config Export/Import structs
 // ---------------------------------------------------------------------------
 
 // ConfigExport represents a full configuration snapshot for export/import.
 type ConfigExport struct {
-	Version         string                 `json:"version"`
-	ExportedAt      string                 `json:"exported_at"`
-	Description     string                 `json:"description,omitempty"`
-	Features        map[string]bool        `json:"features"`
-	Config          map[string]interface{} `json:"config"`
-	VulnConfig      map[string]interface{} `json:"vuln_config"`
-	ErrorWeights    map[string]float64     `json:"error_weights,omitempty"`
-	PageTypeWeights map[string]float64     `json:"page_type_weights,omitempty"`
-	Blocking        map[string]interface{} `json:"blocking,omitempty"`
+	Version          string                 `json:"version"`
+	ExportedAt       string                 `json:"exported_at"`
+	Description      string                 `json:"description,omitempty"`
+	Features         map[string]bool        `json:"features"`
+	Config           map[string]interface{} `json:"config"`
+	VulnConfig       map[string]interface{} `json:"vuln_config"`
+	ErrorWeights     map[string]float64     `json:"error_weights,omitempty"`
+	PageTypeWeights  map[string]float64     `json:"page_type_weights,omitempty"`
+	Blocking         map[string]interface{} `json:"blocking,omitempty"`
+	APIChaosConfig   map[string]bool        `json:"api_chaos_config,omitempty"`
 }
 
 // ExportConfig builds a ConfigExport from the current global state.
@@ -864,6 +954,7 @@ func ExportConfig() *ConfigExport {
 		VulnConfig:      globalVulnConfig.Snapshot(),
 		ErrorWeights:    globalConfig.GetErrorWeights(),
 		PageTypeWeights: globalConfig.GetPageTypeWeights(),
+		APIChaosConfig:  globalAPIChaosConfig.Snapshot(),
 	}
 }
 
@@ -941,6 +1032,13 @@ func ImportConfig(export *ConfigExport) {
 		globalConfig.ResetPageTypeWeights()
 		for pageType, weight := range export.PageTypeWeights {
 			globalConfig.SetPageTypeWeight(pageType, weight)
+		}
+	}
+
+	// Import API chaos config
+	if export.APIChaosConfig != nil {
+		for cat, enabled := range export.APIChaosConfig {
+			globalAPIChaosConfig.SetCategory(cat, enabled)
 		}
 	}
 }
@@ -1125,10 +1223,11 @@ func (pc *ProxyConfig) SetMirror(mc *MirrorConfig) {
 // ---------------------------------------------------------------------------
 
 var (
-	globalFlags        = NewFeatureFlags()
-	globalConfig       = NewAdminConfig()
-	globalVulnConfig   = NewVulnConfig()
-	globalProxyConfig  = NewProxyConfig()
+	globalFlags          = NewFeatureFlags()
+	globalConfig         = NewAdminConfig()
+	globalVulnConfig     = NewVulnConfig()
+	globalAPIChaosConfig = NewAPIChaosConfig()
+	globalProxyConfig    = NewProxyConfig()
 	globalSpiderConfig = spider.NewConfig()
 	globalProxyManager = NewProxyManager()
 	globalRecorder     *recorder.Recorder
@@ -1149,6 +1248,9 @@ func GetAdminConfig() *AdminConfig { return globalConfig }
 
 // GetVulnConfig returns the global VulnConfig instance.
 func GetVulnConfig() *VulnConfig { return globalVulnConfig }
+
+// GetAPIChaosConfig returns the global APIChaosConfig instance.
+func GetAPIChaosConfig() *APIChaosConfig { return globalAPIChaosConfig }
 
 // GetProxyConfig returns the global ProxyConfig instance.
 func GetProxyConfig() *ProxyConfig { return globalProxyConfig }
@@ -1428,6 +1530,7 @@ func (f *FeatureFlags) SetAll(enabled bool) {
 	nv.privacy = enabled
 	nv.health = enabled
 	nv.spider = enabled
+	nv.apiChaos = enabled
 	f.v.Store(&nv)
 }
 

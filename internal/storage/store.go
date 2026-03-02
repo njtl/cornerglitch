@@ -339,4 +339,5 @@ type FullConfigExport struct {
 	ErrorWeights    map[string]float64     `json:"error_weights,omitempty"`
 	PageTypeWeights map[string]float64     `json:"page_type_weights,omitempty"`
 	Blocking        map[string]interface{} `json:"blocking,omitempty"`
+	APIChaosConfig  map[string]bool        `json:"api_chaos_config,omitempty"`
 }

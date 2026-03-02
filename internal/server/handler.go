@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bufio"
+	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -11,6 +14,7 @@ import (
 	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/analytics"
 	"github.com/glitchWebServer/internal/api"
+	"github.com/glitchWebServer/internal/apichaos"
 	"github.com/glitchWebServer/internal/botdetect"
 	"github.com/glitchWebServer/internal/captcha"
 	"github.com/glitchWebServer/internal/cdn"
@@ -48,6 +52,39 @@ const (
 	reset  = "\033[0m"
 )
 
+// metricsResponseWriter wraps http.ResponseWriter to track bytes written.
+// It also implements http.Flusher and http.Hijacker by delegating to the
+// underlying writer when those interfaces are supported.
+type metricsResponseWriter struct {
+	http.ResponseWriter
+	bytesWritten int64
+	statusCode   int
+}
+
+func (m *metricsResponseWriter) Write(b []byte) (int, error) {
+	n, err := m.ResponseWriter.Write(b)
+	m.bytesWritten += int64(n)
+	return n, err
+}
+
+func (m *metricsResponseWriter) WriteHeader(code int) {
+	m.statusCode = code
+	m.ResponseWriter.WriteHeader(code)
+}
+
+func (m *metricsResponseWriter) Flush() {
+	if f, ok := m.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (m *metricsResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := m.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
+}
+
 // Handler is the main request handler that orchestrates all subsystems.
 type Handler struct {
 	collector *metrics.Collector
@@ -77,8 +114,10 @@ type Handler struct {
 	jsEng     *jstrap.Engine
 	botDet    *botdetect.Detector
 	spiderH            *spider.Handler
+	apiChaosEng        *apichaos.Engine
 	flags              *dashboard.FeatureFlags
 	config             *dashboard.AdminConfig
+	apiChaosConfig     *dashboard.APIChaosConfig
 	lastConfigVersion  atomic.Int64
 }
 
@@ -110,37 +149,40 @@ func NewHandler(
 	jsEng *jstrap.Engine,
 	botDet *botdetect.Detector,
 	spiderH *spider.Handler,
+	apiChaosEng *apichaos.Engine,
 ) *Handler {
 	return &Handler{
-		collector: collector,
-		fp:        fp,
-		adapt:     adapt,
-		errGen:    errGen,
-		pageGen:   pageGen,
-		lab:       lab,
-		content:   contentEng,
-		apiRouter: apiRouter,
-		honey:     honey,
-		fw:        fw,
-		captcha:   captchaEng,
-		vulnH:     vulnH,
-		analytix:  analytix,
-		cdnEng:    cdnEng,
-		oauthH:    oauthH,
-		privacyH:  privacyH,
-		wsH:       wsH,
-		rec:       rec,
-		searchH:   searchH,
-		emailH:    emailH,
-		healthH:   healthH,
-		i18nH:     i18nH,
-		headerEng: headerEng,
-		cookieT:   cookieT,
-		jsEng:     jsEng,
-		botDet:    botDet,
-		spiderH:   spiderH,
-		flags:     dashboard.GetFeatureFlags(),
-		config:    dashboard.GetAdminConfig(),
+		collector:      collector,
+		fp:             fp,
+		adapt:          adapt,
+		errGen:         errGen,
+		pageGen:        pageGen,
+		lab:            lab,
+		content:        contentEng,
+		apiRouter:      apiRouter,
+		honey:          honey,
+		fw:             fw,
+		captcha:        captchaEng,
+		vulnH:          vulnH,
+		analytix:       analytix,
+		cdnEng:         cdnEng,
+		oauthH:         oauthH,
+		privacyH:       privacyH,
+		wsH:            wsH,
+		rec:            rec,
+		searchH:        searchH,
+		emailH:         emailH,
+		healthH:        healthH,
+		i18nH:          i18nH,
+		headerEng:      headerEng,
+		cookieT:        cookieT,
+		jsEng:          jsEng,
+		botDet:         botDet,
+		spiderH:        spiderH,
+		apiChaosEng:    apiChaosEng,
+		flags:          dashboard.GetFeatureFlags(),
+		config:         dashboard.GetAdminConfig(),
+		apiChaosConfig: dashboard.GetAPIChaosConfig(),
 	}
 }
 
@@ -148,6 +190,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	h.collector.ActiveConns.Add(1)
 	defer h.collector.ActiveConns.Add(-1)
+
+	// Wrap the response writer to track bytes written
+	mrw := &metricsResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+	// Estimate request bytes from Content-Length header (0 if unknown)
+	var reqBytes int64
+	if r.ContentLength > 0 {
+		reqBytes = r.ContentLength
+	}
 
 	// Step 0: Apply configured delay (delay_min_ms / delay_max_ms)
 	h.applyConfiguredDelay()
@@ -167,24 +218,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Apply framework emulation headers/cookies for this client+path
 	if h.fw != nil && h.flags.IsFrameworkEmulEnabled() {
 		fwProfile := h.fw.ForRequest(clientID, r.URL.Path)
-		h.fw.Apply(w, fwProfile, clientID)
+		h.fw.Apply(mrw, fwProfile, clientID)
 	}
 
 	// Step 2.5: Apply CDN headers for this client
 	if h.cdnEng != nil && h.flags.IsCDNEnabled() {
-		h.cdnEng.ApplyHeaders(w, r.URL.Path, clientID)
+		h.cdnEng.ApplyHeaders(mrw, r.URL.Path, clientID)
 	}
 
 	// Step 2.7: Cookie traps — set tracking cookies
 	if h.cookieT != nil && h.flags.IsCookieTrapsEnabled() {
-		h.cookieT.SetTraps(w, r, clientID)
+		h.cookieT.SetTraps(mrw, r, clientID)
 	}
 
 	// Step 2.8: Header corruption — apply before body is written
 	if h.headerEng != nil && h.flags.IsHeaderCorruptEnabled() {
 		if h.headerEng.ShouldCorrupt(string(clientClass)) {
 			level := h.headerEng.GetLevel()
-			h.headerEng.Apply(w, r, clientID, level)
+			h.headerEng.Apply(mrw, r, clientID, level)
 		}
 	}
 
@@ -194,14 +245,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Step 3.5: Check if client is blocked
 	if behavior.Mode == adaptive.ModeBlocked {
 		statusCode := 403
-		w.Header().Set("Content-Type", "text/plain")
-		w.Header().Set("Retry-After", "30")
-		http.Error(w, "Access Denied", statusCode)
+		mrw.Header().Set("Content-Type", "text/plain")
+		mrw.Header().Set("Retry-After", "30")
+		http.Error(mrw, "Access Denied", statusCode)
 		latency := time.Since(start)
 		h.collector.Record(metrics.RequestRecord{
 			Timestamp: start, ClientID: clientID, Method: r.Method,
 			Path: r.URL.Path, StatusCode: statusCode, Latency: latency,
 			ResponseType: "blocked", UserAgent: r.UserAgent(), RemoteAddr: r.RemoteAddr,
+			RequestBytes: reqBytes, ResponseBytes: mrw.bytesWritten,
 		})
 		log.Printf("%s[blocked]%s %s %s %d %s (client=%s class=%s)",
 			red, reset, r.Method, r.URL.Path, statusCode, latency, clientID[:16], clientClass)
@@ -209,7 +261,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 4: Decide what to do with this request
-	statusCode, responseType := h.dispatch(w, r, behavior, clientID, string(clientClass))
+	statusCode, responseType := h.dispatch(mrw, r, behavior, clientID, string(clientClass))
 
 	// Step 5: Record metrics
 	latency := time.Since(start)
@@ -219,16 +271,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.collector.Record(metrics.RequestRecord{
-		Timestamp:    start,
-		ClientID:     clientID,
-		Method:       r.Method,
-		Path:         r.URL.Path,
-		StatusCode:   statusCode,
-		Latency:      latency,
-		ResponseType: responseType,
-		UserAgent:    r.UserAgent(),
-		RemoteAddr:   r.RemoteAddr,
-		Headers:      reqHeaders,
+		Timestamp:     start,
+		ClientID:      clientID,
+		Method:        r.Method,
+		Path:          r.URL.Path,
+		StatusCode:    statusCode,
+		Latency:       latency,
+		ResponseType:  responseType,
+		UserAgent:     r.UserAgent(),
+		RemoteAddr:    r.RemoteAddr,
+		Headers:       reqHeaders,
+		RequestBytes:  reqBytes,
+		ResponseBytes: mrw.bytesWritten,
 	})
 
 	// Step 5.5: Record to traffic capture (if recording)
@@ -264,6 +318,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		color = red
 	case responseType == "spider":
 		color = cyan
+	case responseType == "api_chaos":
+		color = purple
 	}
 
 	log.Printf("%s[%s]%s %s %s %d %s (client=%s class=%s mode=%s)",
@@ -304,6 +360,11 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 		if strings.HasPrefix(r.URL.Path, "/api/") && h.honey != nil && h.flags.IsHoneypotEnabled() && h.honey.ShouldHandle(r.URL.Path) {
 			status := h.honey.ServeHTTP(w, r)
 			return status, "honeypot"
+		}
+		// API chaos: inject chaotic responses into API endpoints
+		if h.apiChaosEng != nil && h.flags.IsAPIChaosEnabled() && h.apiChaosEng.ShouldApply() {
+			h.apiChaosEng.Apply(w, r)
+			return 0, "api_chaos"
 		}
 		status := h.apiRouter.ServeHTTP(w, r)
 		return status, "api"
@@ -687,6 +748,19 @@ func (h *Handler) syncConfigToSubsystems() {
 	if h.botDet != nil {
 		if thresh, ok := cfg["bot_score_threshold"].(float64); ok {
 			h.botDet.SetScoreThreshold(thresh)
+		}
+	}
+
+	// Sync API chaos engine probability and per-category toggles
+	if h.apiChaosEng != nil {
+		if prob, ok := cfg["api_chaos_probability"].(float64); ok {
+			h.apiChaosEng.SetProbability(prob / 100.0) // config is 0-100, engine wants 0-1
+		}
+		if h.apiChaosConfig != nil {
+			snap := h.apiChaosConfig.Snapshot()
+			for cat, enabled := range snap {
+				h.apiChaosEng.SetCategoryEnabled(apichaos.ChaosCategory(cat), enabled)
+			}
 		}
 	}
 }

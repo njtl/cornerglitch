@@ -1013,6 +1013,32 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- ====== API Chaos ====== -->
+  <div class="srv-section" id="srv-apichaos">
+    <div class="srv-section-header" onclick="toggleServerSection('apichaos')">
+      <span class="srv-title">API Chaos</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <button class="cfg-btn" id="apichaos-toggle" onclick="toggleAPIChaos()" style="min-width:80px"></button>
+        <span id="apichaos-status" style="color:#888;font-size:0.8em"></span>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="color:#888;font-size:0.78em;display:block;margin-bottom:4px">Chaos Probability</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="range" id="apichaos-prob-slider" min="0" max="100" step="1" value="30" style="flex:1;accent-color:#ff6600" oninput="document.getElementById('apichaos-prob-val').textContent=this.value+'%%'" onchange="setAPIChaosProb(this.value)">
+          <span id="apichaos-prob-val" style="color:#ff6600;font-size:0.85em;min-width:35px">30%%</span>
+        </div>
+      </div>
+      <div style="margin-bottom:8px;display:flex;gap:6px">
+        <button class="cfg-btn" onclick="setAllAPIChaos(true)" style="font-size:0.72em;padding:3px 10px">All On</button>
+        <button class="cfg-btn" onclick="setAllAPIChaos(false)" style="font-size:0.72em;padding:3px 10px">All Off</button>
+      </div>
+      <div class="group-toggles" id="apichaos-cats"></div>
+    </div>
+  </div>
+
   <!-- ====== Vulnerabilities ====== -->
   <div class="srv-section" id="srv-vulns">
     <div class="srv-section-header" onclick="toggleServerSection('vulns')">
@@ -1839,6 +1865,38 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     return '<div class="card"><div class="label">' + label + '</div><div class="value ' + cls + '">' + value + '</div></div>';
   }
 
+  function fmtCompact(n) {
+    if (typeof n !== 'number' || isNaN(n)) return '0';
+    var abs = Math.abs(n);
+    if (abs >= 1e12) return (n/1e12).toFixed(1).replace(/\.0$/, '') + 'T';
+    if (abs >= 1e9) return (n/1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+    if (abs >= 1e6) return (n/1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (abs >= 1e3) return (n/1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+    return String(n);
+  }
+
+  function fmtBytes(b) {
+    if (typeof b !== 'number' || isNaN(b) || b === 0) return '0 B';
+    var abs = Math.abs(b);
+    if (abs >= 1099511627776) return (b/1099511627776).toFixed(1) + ' TB';
+    if (abs >= 1073741824) return (b/1073741824).toFixed(1) + ' GB';
+    if (abs >= 1048576) return (b/1048576).toFixed(1) + ' MB';
+    if (abs >= 1024) return (b/1024).toFixed(1) + ' KB';
+    return b + ' B';
+  }
+
+  function compactCard(label, n, cls) {
+    var compact = fmtCompact(n);
+    var full = (typeof n === 'number') ? n.toLocaleString() : String(n);
+    return '<div class="card" title="' + full + '"><div class="label">' + label + '</div><div class="value ' + cls + '">' + compact + '</div></div>';
+  }
+
+  function bytesCard(label, b, cls) {
+    var compact = fmtBytes(b);
+    var full = (typeof b === 'number') ? b.toLocaleString() + ' bytes' : '0 bytes';
+    return '<div class="card" title="' + full + '"><div class="label">' + label + '</div><div class="value ' + cls + '">' + compact + '</div></div>';
+  }
+
   function fmtUptime(sec) {
     if (!sec) return '0s';
     const h = Math.floor(sec / 3600);
@@ -1874,15 +1932,17 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var avgLatMs = m.avg_latency_ms || 0;
       var p95Lat = m.p95_latency_ms || avgLatMs * 2;
       document.getElementById('dash-metrics').innerHTML =
-        card('Total Requests', totalReqs.toLocaleString(), 'v-ok') +
+        compactCard('Total Requests', totalReqs, 'v-ok') +
         card('Req/s', avgRps, 'v-info') +
         card('Active Connections', m.active_connections||0, 'v-info') +
-        card('2xx', (m.total_2xx||0).toLocaleString(), 'v-ok') +
-        card('4xx', (m.total_4xx||0).toLocaleString(), 'v-warn') +
-        card('5xx', (m.total_5xx||0).toLocaleString(), 'v-err') +
+        compactCard('2xx', m.total_2xx||0, 'v-ok') +
+        compactCard('4xx', m.total_4xx||0, 'v-warn') +
+        compactCard('5xx', m.total_5xx||0, 'v-err') +
         card('Error Rate', ((m.error_rate_pct||0).toFixed(1)) + '%%', (m.error_rate_pct||0) > 10 ? 'v-err' : 'v-ok') +
-        card('Labyrinth Hits', (m.total_labyrinth||0).toLocaleString(), 'v-info') +
-        card('Unique Clients', m.unique_clients||0, 'v-info') +
+        compactCard('Labyrinth Hits', m.total_labyrinth||0, 'v-info') +
+        compactCard('Unique Clients', m.unique_clients||0, 'v-info') +
+        bytesCard('Traffic (Session)', m.session_response_bytes||0, 'v-info') +
+        bytesCard('Traffic (Total)', m.total_response_bytes||0, 'v-info') +
         card('Uptime', fmtUptime(m.uptime_seconds), 'v-ok');
 
       // Uptime in header
@@ -1893,7 +1953,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var srvStatus = document.getElementById('dash-server-status');
       var srvDetail = document.getElementById('dash-server-detail');
       if (srvStatus) srvStatus.textContent = 'RUNNING';
-      if (srvDetail) srvDetail.textContent = (m.total_requests||0).toLocaleString() + ' reqs | ' + ((m.error_rate_pct||0).toFixed(1)) + '%% err | ' + (m.unique_clients||0) + ' clients';
+      if (srvDetail) srvDetail.textContent = fmtCompact(m.total_requests||0) + ' reqs | ' + ((m.error_rate_pct||0).toFixed(1)) + '%% err | ' + fmtCompact(m.unique_clients||0) + ' clients';
 
       // Scanner mode card
       try {
@@ -1962,9 +2022,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var curRps = series.length > 1 ? series[series.length-1].requests : 0;
       var recentErrRate = recentReqs > 0 ? (recentErrs/recentReqs*100).toFixed(1) : '0.0';
       document.getElementById('dash-calc-stats').innerHTML =
-        card('Current RPS', curRps.toLocaleString(), 'v-ok') +
-        card('60s Requests', recentReqs.toLocaleString(), 'v-info') +
-        card('60s Errors', recentErrs.toLocaleString(), recentErrs > 0 ? 'v-err' : 'v-ok') +
+        compactCard('Current RPS', curRps, 'v-ok') +
+        compactCard('60s Requests', recentReqs, 'v-info') +
+        compactCard('60s Errors', recentErrs, recentErrs > 0 ? 'v-err' : 'v-ok') +
         card('60s Error Rate', recentErrRate + '%%', parseFloat(recentErrRate) > 10 ? 'v-err' : 'v-ok') +
         card('Avg Latency', recentAvg.toFixed(1) + 'ms', recentAvg > 500 ? 'v-err' : 'v-ok');
 
@@ -1994,10 +2054,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       // Three-column mode cards
       var srvCards = document.getElementById('dash-srv-cards');
       if (srvCards) srvCards.innerHTML =
-        card('Requests', (m.total_requests||0).toLocaleString(), 'v-ok') +
+        compactCard('Requests', m.total_requests||0, 'v-ok') +
         card('Error Rate', ((m.error_rate_pct||0).toFixed(1)) + '%%', (m.error_rate_pct||0) > 10 ? 'v-err' : 'v-ok') +
-        card('2xx/4xx/5xx', (m.total_2xx||0) + '/' + (m.total_4xx||0) + '/' + (m.total_5xx||0), 'v-info') +
-        card('Labyrinth', (m.total_labyrinth||0).toLocaleString(), 'v-info');
+        card('2xx/4xx/5xx', fmtCompact(m.total_2xx||0) + '/' + fmtCompact(m.total_4xx||0) + '/' + fmtCompact(m.total_5xx||0), 'v-info') +
+        compactCard('Labyrinth', m.total_labyrinth||0, 'v-info');
 
       // Scanner column cards
       try {
@@ -2023,7 +2083,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           var rtData2 = await api('/admin/api/proxy/runtime');
           if (proxyCards) {
             if (rtData2.running) {
-              proxyCards.innerHTML = card('Mode', (rtData2.mode||'transparent').toUpperCase(), 'v-ok') + card('Requests', (rtData2.requests||0).toLocaleString(), 'v-info');
+              proxyCards.innerHTML = card('Mode', (rtData2.mode||'transparent').toUpperCase(), 'v-ok') + compactCard('Requests', rtData2.requests||0, 'v-info');
               if (proxyDetailExt) proxyDetailExt.textContent = 'Port: ' + (rtData2.port||8080) + ' | Target: ' + (rtData2.target||'-');
             } else {
               proxyCards.innerHTML = card('Status', 'STOPPED', 'v-warn') + card('Requests', '0', 'v-info');
@@ -2033,7 +2093,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         } catch(rte2) {
           var proxyData2 = await api('/admin/api/proxy/status');
           var pStats2 = proxyData2.pipeline_stats || {};
-          if (proxyCards) proxyCards.innerHTML = card('Mode', (proxyData2.mode||'transparent').toUpperCase(), 'v-ok') + card('Forwarded', (pStats2.requests_processed||0).toLocaleString(), 'v-info');
+          if (proxyCards) proxyCards.innerHTML = card('Mode', (proxyData2.mode||'transparent').toUpperCase(), 'v-ok') + compactCard('Forwarded', pStats2.requests_processed||0, 'v-info');
           if (proxyDetailExt) proxyDetailExt.textContent = (pStats2.requests_blocked||0) + ' blocked';
         }
       } catch(pe2) {}
@@ -2316,8 +2376,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       const errs = ov.total_errors || 0;
       const errPct = total > 0 ? (errs/total*100).toFixed(1) : '0.0';
       document.getElementById('overview-cards').innerHTML =
-        card('Total Requests', total.toLocaleString(), 'v-ok') +
-        card('Total Errors', errs.toLocaleString(), 'v-err') +
+        compactCard('Total Requests', total, 'v-ok') +
+        compactCard('Total Errors', errs, 'v-err') +
         card('Error Rate', errPct + '%%', parseFloat(errPct) > 10 ? 'v-err' : 'v-ok') +
         card('Uptime', fmtUptime(ov.uptime_seconds), 'v-info');
 
@@ -3009,6 +3069,66 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       body: JSON.stringify({id: id, enabled: enabled})
     }).then(() => toast(id + (enabled ? ' enabled' : ' disabled')));
   };
+
+  // ------ API Chaos ------
+  window.toggleAPIChaos = async function() {
+    var btn = document.getElementById('apichaos-toggle');
+    var current = btn && btn.textContent.trim() === 'ENABLED';
+    await api('/admin/api/apichaos', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:!current})});
+    toast('API Chaos ' + (!current ? 'enabled' : 'disabled'));
+    refreshAPIChaos();
+  };
+  window.setAPIChaosProb = async function(v) {
+    await api('/admin/api/apichaos/probability', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({value:parseFloat(v)})});
+    toast('API chaos probability: ' + v + '%%');
+  };
+  window.setAllAPIChaos = async function(enabled) {
+    await api('/admin/api/apichaos/all', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:enabled})});
+    toast('All API chaos categories ' + (enabled ? 'enabled' : 'disabled'));
+    refreshAPIChaos();
+  };
+  window.toggleAPIChaosCategory = async function(cat, enabled) {
+    await api('/admin/api/apichaos/category', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:cat, enabled:enabled})});
+    toast(cat + (enabled ? ' enabled' : ' disabled'));
+    refreshAPIChaos();
+  };
+  async function refreshAPIChaos() {
+    try {
+      var d = await api('/admin/api/apichaos');
+      var btn = document.getElementById('apichaos-toggle');
+      if (btn) {
+        btn.textContent = d.enabled ? 'ENABLED' : 'DISABLED';
+        btn.style.background = d.enabled ? '#00ff8833' : '#ff444433';
+        btn.style.borderColor = d.enabled ? '#00ff88' : '#ff4444';
+        btn.style.color = d.enabled ? '#00ff88' : '#ff4444';
+      }
+      var st = document.getElementById('apichaos-status');
+      if (st) st.textContent = 'Probability: ' + (d.probability||0).toFixed(0) + '%%';
+      var sl = document.getElementById('apichaos-prob-slider');
+      if (sl) sl.value = d.probability || 0;
+      var pv = document.getElementById('apichaos-prob-val');
+      if (pv) pv.textContent = (d.probability||0).toFixed(0) + '%%';
+      var catsEl = document.getElementById('apichaos-cats');
+      if (catsEl && d.categories) {
+        var catNames = {
+          malformed_json: 'Malformed JSON', wrong_format: 'Wrong Format',
+          wrong_status: 'Wrong Status', wrong_headers: 'Wrong Headers',
+          redirect_chaos: 'Redirect Chaos', error_formats: 'Error Formats',
+          slow_partial: 'Slow / Partial', data_edge_cases: 'Data Edge Cases',
+          encoding_chaos: 'Encoding Chaos', auth_chaos: 'Auth Chaos'
+        };
+        var html = '';
+        var cats = Object.keys(d.categories).sort();
+        for (var i = 0; i < cats.length; i++) {
+          var cat = cats[i];
+          var on = d.categories[cat];
+          var label = catNames[cat] || cat;
+          html += '<button class="group-btn ' + (on ? 'on' : 'off') + '" onclick="toggleAPIChaosCategory(\'' + cat + '\',' + !on + ')" style="font-size:0.72em">' + label + '</button>';
+        }
+        catsEl.innerHTML = html;
+      }
+    } catch(e) {}
+  }
 
   window.filterVulns = function() {
     var q = document.getElementById('vuln-filter').value.toLowerCase().trim();
@@ -4300,10 +4420,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         '<div class="card"><div class="label">Current Mode</div><div class="value" style="color:' + modeColor + '">' +
           '<span style="display:inline-block;background:' + modeColor + '22;border:1px solid ' + modeColor + ';padding:4px 14px;border-radius:20px;font-size:0.75em;letter-spacing:1px">' +
           (mode || 'transparent').toUpperCase() + '</span></div></div>' +
-        card('Requests Processed', (stats.requests_processed || 0).toLocaleString(), 'v-ok') +
-        card('Responses Processed', (stats.responses_processed || 0).toLocaleString(), 'v-ok') +
-        card('Requests Blocked', (stats.requests_blocked || 0).toLocaleString(), (stats.requests_blocked || 0) > 0 ? 'v-err' : 'v-ok') +
-        card('Responses Modified', (stats.responses_modified || 0).toLocaleString(), 'v-warn');
+        compactCard('Requests Processed', stats.requests_processed || 0, 'v-ok') +
+        compactCard('Responses Processed', stats.responses_processed || 0, 'v-ok') +
+        compactCard('Requests Blocked', stats.requests_blocked || 0, (stats.requests_blocked || 0) > 0 ? 'v-err' : 'v-ok') +
+        compactCard('Responses Modified', stats.responses_modified || 0, 'v-warn');
 
       // Update radio buttons
       var radios = document.querySelectorAll('input[name="proxy-mode"]');
@@ -4322,8 +4442,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         var wafStats = data.waf_stats || {};
         wafEl.innerHTML =
           '<div class="grid" style="margin-bottom:12px">' +
-            card('Detections', (wafStats.detections || 0).toLocaleString(), 'v-warn') +
-            card('Rate Limited', (wafStats.rate_limited || 0).toLocaleString(), 'v-err') +
+            compactCard('Detections', wafStats.detections || 0, 'v-warn') +
+            compactCard('Rate Limited', wafStats.rate_limited || 0, 'v-err') +
             card('Block Action', wafStats.block_action || 'reject', 'v-info') +
           '</div>';
         if (wafSettingsEl) {
@@ -4347,11 +4467,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
       // Connection info
       var connEl = document.getElementById('proxy-active-conns');
-      if (connEl) connEl.textContent = (stats.active_connections || 0).toLocaleString();
+      if (connEl) connEl.textContent = fmtCompact(stats.active_connections || 0);
       var fwdEl = document.getElementById('proxy-fwd-reqs');
-      if (fwdEl) fwdEl.textContent = (stats.requests_processed || 0).toLocaleString();
+      if (fwdEl) fwdEl.textContent = fmtCompact(stats.requests_processed || 0);
       var blkEl = document.getElementById('proxy-blocked-reqs');
-      if (blkEl) blkEl.textContent = (stats.requests_blocked || 0).toLocaleString();
+      if (blkEl) blkEl.textContent = fmtCompact(stats.requests_blocked || 0);
 
       // Pipeline table
       var interceptors = data.interceptors || [];
@@ -4383,7 +4503,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           badge.style.background = '#00aa6633'; badge.style.color = '#00ff88'; badge.style.border = '1px solid #00ff88';
           startBtn.style.display = 'none'; stopBtn.style.display = ''; restartBtn.style.display = '';
           statsDiv.style.display = '';
-          document.getElementById('proxy-rt-reqs').textContent = (rt.requests || 0).toLocaleString();
+          document.getElementById('proxy-rt-reqs').textContent = fmtCompact(rt.requests || 0);
           document.getElementById('proxy-rt-uptime-card').textContent = fmtUptime(Math.floor(rt.uptime_seconds || 0));
           document.getElementById('proxy-rt-mode').textContent = (rt.mode || 'transparent').toUpperCase();
           document.getElementById('proxy-rt-uptime').textContent = fmtUptime(Math.floor(rt.uptime_seconds || 0));
@@ -4592,11 +4712,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     var cardsEl = document.getElementById('replay-metadata-cards');
     if (cardsEl) {
       cardsEl.innerHTML =
-        card('Total Packets', (meta.total_packets || 0).toLocaleString(), 'v-info') +
-        card('Total Requests', (meta.total_requests || 0).toLocaleString(), 'v-ok') +
-        card('Total Responses', (meta.total_responses || 0).toLocaleString(), 'v-ok') +
-        card('Unique Hosts', (Array.isArray(hosts) ? hosts.length : hosts || 0).toLocaleString(), 'v-warn') +
-        card('Unique Paths', (meta.unique_paths || 0).toLocaleString(), 'v-info') +
+        compactCard('Total Packets', meta.total_packets || 0, 'v-info') +
+        compactCard('Total Requests', meta.total_requests || 0, 'v-ok') +
+        compactCard('Total Responses', meta.total_responses || 0, 'v-ok') +
+        compactCard('Unique Hosts', Array.isArray(hosts) ? hosts.length : hosts || 0, 'v-warn') +
+        compactCard('Unique Paths', meta.unique_paths || 0, 'v-info') +
         card('Time Span', spanStr, 'v-info');
     }
 
@@ -4945,12 +5065,6 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) { toast('Failed to stop recording: ' + e.message); }
   };
 
-  function fmtBytes(b) {
-    if (b < 1024) return b + ' B';
-    if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
-    return (b/1048576).toFixed(1) + ' MB';
-  }
-
   async function refreshRecorderUI() {
     try {
       var st = await api('/admin/api/recorder/status');
@@ -4970,7 +5084,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         if (statusEl) { statusEl.style.color = '#00ff88'; statusEl.textContent = 'Recording (' + (st.format || 'jsonl') + ')'; }
         if (statsDiv) statsDiv.style.display = '';
         var countEl = document.getElementById('rec-count');
-        if (countEl) countEl.textContent = (st.records || 0).toLocaleString();
+        if (countEl) countEl.textContent = fmtCompact(st.records || 0);
         var sizeEl = document.getElementById('rec-size');
         if (sizeEl) sizeEl.textContent = fmtBytes(st.size_bytes || 0);
         var elapEl = document.getElementById('rec-elapsed');
@@ -5021,6 +5135,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       if (id === 'srv-features' || id === 'srv-errors' || id === 'srv-content' || id === 'srv-labyrinth' || id === 'srv-adaptive' || id === 'srv-traps' || id === 'srv-spider') await refreshControls();
       else if (id === 'srv-vulns') await refreshVulns();
       else if (id === 'srv-sessions') await refreshSessions();
+      else if (id === 'srv-apichaos') await refreshAPIChaos();
       // srv-log and srv-traffic moved to dashboard
       else if (id === 'srv-recording') await refreshRecorderUI();
     }
