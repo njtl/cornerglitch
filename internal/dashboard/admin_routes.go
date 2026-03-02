@@ -355,6 +355,26 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
 	})
+
+	// Media chaos routes
+	mux.HandleFunc("/admin/api/mediachaos/category", func(w http.ResponseWriter, r *http.Request) {
+		adminMediaChaosCategory(w, r)
+	})
+	mux.HandleFunc("/admin/api/mediachaos/probability", func(w http.ResponseWriter, r *http.Request) {
+		adminMediaChaosProbability(w, r)
+	})
+	mux.HandleFunc("/admin/api/mediachaos/all", func(w http.ResponseWriter, r *http.Request) {
+		adminMediaChaosAll(w, r)
+	})
+	mux.HandleFunc("/admin/api/mediachaos", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			adminMediaChaosGet(w, r)
+		} else if r.Method == http.MethodPost {
+			adminMediaChaosToggle(w, r)
+		} else {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -2750,6 +2770,130 @@ func adminAPIChaosAll(w http.ResponseWriter, r *http.Request) {
 	ac.SetAll(body.Enabled)
 	TriggerAutoSave()
 	audit.Log("admin", "config.change", "api_chaos.categories.all", nil, body.Enabled, nil)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
+// ---------------------------------------------------------------------------
+// Media Chaos API handlers
+// ---------------------------------------------------------------------------
+
+func adminMediaChaosGet(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	ff := GetFeatureFlags()
+	cfg := GetAdminConfig()
+	mc := GetMediaChaosConfig()
+	cfgMap := cfg.Get()
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":              ff.IsMediaChaosEnabled(),
+		"probability":          cfgMap["media_chaos_probability"],
+		"corruption_intensity": cfgMap["media_chaos_corruption_intensity"],
+		"slow_min_ms":          cfgMap["media_chaos_slow_min_ms"],
+		"slow_max_ms":          cfgMap["media_chaos_slow_max_ms"],
+		"infinite_max_bytes":   cfgMap["media_chaos_infinite_max_bytes"],
+		"categories":           mc.Snapshot(),
+	})
+}
+
+func adminMediaChaosToggle(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	ff := GetFeatureFlags()
+	old := ff.IsMediaChaosEnabled()
+	ff.Set("media_chaos", body.Enabled)
+	TriggerAutoSave()
+	audit.Log("admin", "feature.toggle", "feature_flags.media_chaos", old, body.Enabled, nil)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "enabled": body.Enabled})
+}
+
+func adminMediaChaosProbability(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Value float64 `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	cfg := GetAdminConfig()
+	old := cfg.Get()["media_chaos_probability"]
+	cfg.Set("media_chaos_probability", body.Value)
+	TriggerAutoSave()
+	audit.Log("admin", "config.change", "admin_config.media_chaos_probability", old, body.Value, nil)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "value": body.Value})
+}
+
+func adminMediaChaosCategory(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	mc := GetMediaChaosConfig()
+	old := mc.IsEnabled(body.Name)
+	mc.SetCategory(body.Name, body.Enabled)
+	TriggerAutoSave()
+	audit.Log("admin", "config.change", "media_chaos.categories."+body.Name, old, body.Enabled, nil)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
+func adminMediaChaosAll(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	mc := GetMediaChaosConfig()
+	mc.SetAll(body.Enabled)
+	TriggerAutoSave()
+	audit.Log("admin", "config.change", "media_chaos.categories.all", nil, body.Enabled, nil)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 }
