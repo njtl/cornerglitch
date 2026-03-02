@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/audit"
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/replay"
 	"github.com/glitchWebServer/internal/scaneval"
@@ -191,10 +192,12 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
 			return
 		}
+		oldMode := globalProxyConfig.GetMode()
 		if !globalProxyConfig.SetMode(req.Mode) {
 			http.Error(w, `{"error":"invalid proxy mode"}`, http.StatusBadRequest)
 			return
 		}
+		audit.Log("admin", "proxy.mode_change", "proxy.mode", oldMode, req.Mode, nil)
 		resp := map[string]interface{}{
 			"ok":   true,
 			"mode": req.Mode,
@@ -215,6 +218,7 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		}
 		mc := SnapshotMirrorFromServer()
 		globalProxyConfig.SetMirror(mc)
+		audit.LogAction("admin", "proxy.mirror_refresh", "proxy.mirror", nil)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":     true,
 			"mirror": mc,
@@ -326,6 +330,86 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/admin/api/password", func(w http.ResponseWriter, r *http.Request) {
 		adminAPIPasswordChange(w, r)
 	})
+
+	// Audit log
+	mux.HandleFunc("/admin/api/audit", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIAudit(w, r)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// API handler: GET /admin/api/audit
+// ---------------------------------------------------------------------------
+
+func adminAPIAudit(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+
+	limit := 50
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+			if limit > 200 {
+				limit = 200
+			}
+		}
+	}
+
+	offset := 0
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	opts := audit.QueryOpts{
+		Limit:    limit,
+		Offset:   offset,
+		Actor:    q.Get("actor"),
+		Action:   q.Get("action"),
+		Resource: q.Get("resource"),
+		Status:   q.Get("status"),
+	}
+
+	if v := q.Get("from"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			opts.From = &t
+		}
+	}
+	if v := q.Get("to"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			opts.To = &t
+		}
+	}
+
+	result := audit.Query(opts)
+
+	resp := struct {
+		Entries []audit.Entry    `json:"entries"`
+		Total   int              `json:"total"`
+		Limit   int              `json:"limit"`
+		Offset  int              `json:"offset"`
+		Filters audit.FilterInfo `json:"filters"`
+	}{
+		Entries: result.Entries,
+		Total:   result.Total,
+		Limit:   limit,
+		Offset:  offset,
+		Filters: result.Filters,
+	}
+
+	if resp.Entries == nil {
+		resp.Entries = []audit.Entry{}
+	}
+
+	json.NewEncoder(w).Encode(resp)
 }
 
 // ---------------------------------------------------------------------------
@@ -434,11 +518,13 @@ func adminAPIFeaturesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	old := globalFlags.Snapshot()[req.Feature]
 	if !globalFlags.Set(req.Feature, req.Enabled) {
 		http.Error(w, `{"error":"unknown feature"}`, http.StatusBadRequest)
 		return
 	}
 
+	audit.Log("admin", "feature.toggle", "feature_flags."+req.Feature, old, req.Enabled, nil)
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
@@ -481,10 +567,15 @@ func adminAPIConfigPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture old config for audit logging
+	oldCfg := globalConfig.Get()
+	oldVal := oldCfg[strReq.Key]
+
 	// Check if value is a string
 	var strVal string
 	if json.Unmarshal(strReq.Value, &strVal) == nil {
 		if globalConfig.SetString(strReq.Key, strVal) {
+			audit.Log("admin", "config.change", "admin_config."+strReq.Key, oldVal, strVal, nil)
 			TriggerAutoSave()
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"ok":    true,
@@ -499,6 +590,7 @@ func adminAPIConfigPost(w http.ResponseWriter, r *http.Request) {
 	var numVal float64
 	if json.Unmarshal(strReq.Value, &numVal) == nil {
 		if globalConfig.Set(strReq.Key, numVal) {
+			audit.Log("admin", "config.change", "admin_config."+strReq.Key, oldVal, numVal, nil)
 			TriggerAutoSave()
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"ok":    true,
@@ -712,14 +804,19 @@ func adminAPIBlockingPost(w http.ResponseWriter, r *http.Request, s *Server) {
 		return
 	}
 
+	oldChance, oldDuration, oldEnabled := s.adapt.GetBlockConfig()
+
 	if req.Enabled != nil {
 		s.adapt.SetBlockEnabled(*req.Enabled)
+		audit.Log("admin", "blocking.config_change", "blocking.enabled", oldEnabled, *req.Enabled, nil)
 	}
 	if req.Chance != nil {
 		s.adapt.SetBlockChance(*req.Chance)
+		audit.Log("admin", "blocking.config_change", "blocking.chance", oldChance, *req.Chance, nil)
 	}
 	if req.DurationSec != nil {
 		s.adapt.SetBlockDuration(time.Duration(*req.DurationSec) * time.Second)
+		audit.Log("admin", "blocking.config_change", "blocking.duration_sec", int(oldDuration.Seconds()), *req.DurationSec, nil)
 	}
 
 	TriggerAutoSave()
@@ -783,8 +880,16 @@ func adminAPIOverridePost(w http.ResponseWriter, r *http.Request, s *Server) {
 		return
 	}
 
+	// Capture old override for audit
+	oldOverrides := s.adapt.GetOverrides()
+	oldMode := ""
+	if om, ok := oldOverrides[req.ClientID]; ok {
+		oldMode = string(om)
+	}
+
 	if req.Clear {
 		s.adapt.ClearOverride(req.ClientID)
+		audit.LogAction("admin", "client.override_clear", "client."+req.ClientID, map[string]interface{}{"old_mode": oldMode})
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":        true,
 			"client_id": req.ClientID,
@@ -804,6 +909,7 @@ func adminAPIOverridePost(w http.ResponseWriter, r *http.Request, s *Server) {
 	}
 
 	s.adapt.SetOverride(req.ClientID, adaptive.BehaviorMode(req.Mode))
+	audit.Log("admin", "client.override", "client."+req.ClientID, oldMode, req.Mode, nil)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":        true,
 		"client_id": req.ClientID,
@@ -907,6 +1013,7 @@ func adminAPIScannerRun(w http.ResponseWriter, r *http.Request, s *Server) {
 		return
 	}
 
+	audit.LogAction("admin", "scanner.run", "scanner.external."+req.Scanner, map[string]interface{}{"target": req.Target, "run_id": runID})
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "started",
 		"scanner": req.Scanner,
@@ -957,6 +1064,7 @@ func adminAPIScannerCompare(w http.ResponseWriter, r *http.Request, s *Server) {
 	// Record in comparison history
 	comparisonHistory.Add(report)
 
+	audit.LogAction("admin", "scanner.compare", "scanner.compare", map[string]interface{}{"scanner": req.Scanner})
 	json.NewEncoder(w).Encode(report)
 }
 
@@ -1049,6 +1157,7 @@ func adminAPIScannerStop(w http.ResponseWriter, r *http.Request, s *Server) {
 	runner := getScanRunner()
 	stopped := runner.StopScanner(req.Scanner)
 
+	audit.LogAction("admin", "scanner.stop", "scanner.external", map[string]interface{}{"scanner": req.Scanner, "stopped": stopped})
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"scanner": req.Scanner,
 		"stopped": stopped,
@@ -1084,7 +1193,15 @@ func adminAPIVulnsPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture old state for audit
+	oldSnap := globalVulnConfig.Snapshot()
+	var oldEnabled interface{}
+	if cats, ok := oldSnap["categories"].(map[string]bool); ok {
+		oldEnabled = cats[req.ID]
+	}
+
 	globalVulnConfig.SetCategory(req.ID, req.Enabled)
+	audit.Log("admin", "vuln.category_toggle", "vuln_config.categories."+req.ID, oldEnabled, req.Enabled, nil)
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
@@ -1130,7 +1247,15 @@ func adminAPIVulnsGroupPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture old state for audit
+	oldGroupSnap := globalVulnConfig.Snapshot()
+	var oldGroupEnabled interface{}
+	if groups, ok := oldGroupSnap["groups"].(map[string]bool); ok {
+		oldGroupEnabled = groups[req.Group]
+	}
+
 	globalVulnConfig.SetGroup(req.Group, req.Enabled)
+	audit.Log("admin", "vuln.group_toggle", "vuln_config.groups."+req.Group, oldGroupEnabled, req.Enabled, nil)
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
@@ -1172,7 +1297,9 @@ func adminAPIErrorWeightsPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Reset {
+		oldWeights := globalConfig.GetErrorWeights()
 		globalConfig.ResetErrorWeights()
+		audit.Log("admin", "config.error_weight", "error_weights.reset", oldWeights, globalConfig.GetErrorWeights(), nil)
 		TriggerAutoSave()
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":      true,
@@ -1182,7 +1309,9 @@ func adminAPIErrorWeightsPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	oldWeight := globalConfig.GetErrorWeights()[req.ErrorType]
 	globalConfig.SetErrorWeight(req.ErrorType, req.Weight)
+	audit.Log("admin", "config.error_weight", "error_weights."+req.ErrorType, oldWeight, req.Weight, nil)
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":         true,
@@ -1224,7 +1353,9 @@ func adminAPIPageTypeWeightsPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Reset {
+		oldPTWeights := globalConfig.GetPageTypeWeights()
 		globalConfig.ResetPageTypeWeights()
+		audit.Log("admin", "config.page_type_weight", "page_type_weights.reset", oldPTWeights, globalConfig.GetPageTypeWeights(), nil)
 		TriggerAutoSave()
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":      true,
@@ -1234,7 +1365,9 @@ func adminAPIPageTypeWeightsPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	oldPTWeight := globalConfig.GetPageTypeWeights()[req.PageType]
 	globalConfig.SetPageTypeWeight(req.PageType, req.Weight)
+	audit.Log("admin", "config.page_type_weight", "page_type_weights."+req.PageType, oldPTWeight, req.Weight, nil)
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":        true,
@@ -1285,11 +1418,15 @@ func adminAPISpiderPost(w http.ResponseWriter, r *http.Request) {
 		typedValue = req.Value
 	}
 
+	oldSpiderSnap := globalSpiderConfig.Snapshot()
+	oldSpiderVal := oldSpiderSnap[req.Key]
+
 	if !globalSpiderConfig.Set(req.Key, typedValue) {
 		http.Error(w, `{"error":"unknown key or invalid value type"}`, http.StatusBadRequest)
 		return
 	}
 
+	audit.Log("admin", "spider.config_change", "spider_config."+req.Key, oldSpiderVal, req.Value, nil)
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":    true,
@@ -1312,6 +1449,7 @@ func adminAPIConfigExport(w http.ResponseWriter, r *http.Request, s *Server) {
 		return
 	}
 
+	audit.LogAction("admin", "config.export", "config.export", nil)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=glitch-config.json")
 	w.Write(data)
@@ -1339,6 +1477,7 @@ func adminAPIConfigImport(w http.ResponseWriter, r *http.Request, s *Server) {
 	}
 
 	ImportConfig(&export)
+	audit.LogAction("admin", "config.import", "config.import", nil)
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
@@ -1603,6 +1742,7 @@ func adminAPIReplayLoad(w http.ResponseWriter, r *http.Request) {
 	replayCancel = nil
 	replayPlayerMu.Unlock()
 
+	audit.LogAction("admin", "replay.load", "replay."+filename, map[string]interface{}{"packets": len(packets)})
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"file":    filename,
@@ -1685,6 +1825,7 @@ func adminAPIReplayStart(w http.ResponseWriter, r *http.Request) {
 		player.Play(ctx, req.Target)
 	}()
 
+	audit.LogAction("admin", "replay.start", "replay", map[string]interface{}{"timing": req.Timing, "target": req.Target, "speed": req.Speed})
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"target":  req.Target,
@@ -1708,6 +1849,7 @@ func adminAPIReplayStop(w http.ResponseWriter, r *http.Request) {
 	}
 	replayPlayerMu.Unlock()
 
+	audit.LogAction("admin", "replay.stop", "replay", nil)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"message": "replay stopped",
@@ -1812,6 +1954,7 @@ func adminAPIReplayUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	audit.LogAction("admin", "replay.upload", "replay.upload", map[string]interface{}{"filename": filename, "size": formatSize(written)})
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":   true,
 		"file": filename,
@@ -2042,6 +2185,7 @@ func adminAPIReplayCleanup(w http.ResponseWriter, r *http.Request) {
 		totalSize -= f.Size
 	}
 
+	audit.LogAction("admin", "replay.cleanup", "replay.cleanup", map[string]interface{}{"deleted": deletedCount, "freed_mb": float64(freedBytes) / (1 << 20)})
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":       true,
 		"deleted":  deletedCount,
@@ -2100,6 +2244,7 @@ func adminAPIProxyRuntime(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		audit.LogAction("admin", "proxy.start", "proxy.runtime", map[string]interface{}{"port": req.Port, "target": req.Target})
 	case "stop":
 		if err := globalProxyManager.Stop(); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -2108,6 +2253,7 @@ func adminAPIProxyRuntime(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		audit.LogAction("admin", "proxy.stop", "proxy.runtime", nil)
 	case "restart":
 		if err := globalProxyManager.Restart(); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -2116,6 +2262,7 @@ func adminAPIProxyRuntime(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		audit.LogAction("admin", "proxy.restart", "proxy.runtime", nil)
 	default:
 		http.Error(w, `{"error":"invalid action, use: start, stop, restart"}`, http.StatusBadRequest)
 		return
@@ -2187,6 +2334,7 @@ func adminAPIRecorderStart(w http.ResponseWriter, r *http.Request) {
 		rec.Start()
 	}
 
+	audit.LogAction("admin", "recorder.start", "recorder", map[string]interface{}{"format": req.Format})
 	status := rec.GetStatus()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":     true,
@@ -2211,6 +2359,7 @@ func adminAPIRecorderStop(w http.ResponseWriter, r *http.Request) {
 
 	rec.Stop()
 
+	audit.LogAction("admin", "recorder.stop", "recorder", nil)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"message": "recording stopped",
@@ -2287,6 +2436,7 @@ func adminAPINightmarePost(w http.ResponseWriter, r *http.Request, s *Server) {
 			globalNightmare.ScannerActive = true
 			globalNightmare.ProxyActive = true
 			applyProxyNightmare(s)
+			audit.Log("admin", "nightmare.all_enable", "nightmare.all", false, true, nil)
 		} else {
 			// Deactivate all modes
 			if globalNightmare.ServerActive {
@@ -2296,23 +2446,42 @@ func adminAPINightmarePost(w http.ResponseWriter, r *http.Request, s *Server) {
 			globalNightmare.ScannerActive = false
 			globalNightmare.ProxyActive = false
 			restoreProxyNightmare(s)
+			audit.Log("admin", "nightmare.all_disable", "nightmare.all", true, false, nil)
 		}
 	case "server":
+		oldServerActive := globalNightmare.ServerActive
 		if req.Enabled && !globalNightmare.ServerActive {
 			applyServerNightmare()
 		} else if !req.Enabled && globalNightmare.ServerActive {
 			restoreServerNightmare()
 		}
 		globalNightmare.ServerActive = req.Enabled
+		if req.Enabled {
+			audit.Log("admin", "nightmare.server_enable", "nightmare.server", oldServerActive, true, nil)
+		} else {
+			audit.Log("admin", "nightmare.server_disable", "nightmare.server", oldServerActive, false, nil)
+		}
 	case "scanner":
+		oldScannerActive := globalNightmare.ScannerActive
 		globalNightmare.ScannerActive = req.Enabled
+		if req.Enabled {
+			audit.Log("admin", "nightmare.scanner_enable", "nightmare.scanner", oldScannerActive, true, nil)
+		} else {
+			audit.Log("admin", "nightmare.scanner_disable", "nightmare.scanner", oldScannerActive, false, nil)
+		}
 	case "proxy":
+		oldProxyActive := globalNightmare.ProxyActive
 		if req.Enabled {
 			applyProxyNightmare(s)
 		} else {
 			restoreProxyNightmare(s)
 		}
 		globalNightmare.ProxyActive = req.Enabled
+		if req.Enabled {
+			audit.Log("admin", "nightmare.proxy_enable", "nightmare.proxy", oldProxyActive, true, nil)
+		} else {
+			audit.Log("admin", "nightmare.proxy_disable", "nightmare.proxy", oldProxyActive, false, nil)
+		}
 	default:
 		http.Error(w, `{"error":"invalid mode, use: all, server, scanner, proxy"}`, http.StatusBadRequest)
 		return

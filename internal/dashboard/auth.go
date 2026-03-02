@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/glitchWebServer/internal/audit"
 )
 
 // ---------------------------------------------------------------------------
@@ -222,8 +224,16 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		password = r.FormValue("password")
 	}
 
+	clientIP := r.RemoteAddr
 	if checkPassword(password) {
 		createSession(w)
+		audit.LogEntry(audit.Entry{
+			Actor:    "admin",
+			Action:   "auth.login",
+			Resource: "auth.session",
+			ClientIP: clientIP,
+			Status:   "success",
+		})
 		if strings.Contains(contentType, "application/json") {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"ok":true,"redirect":"/admin"}`))
@@ -234,6 +244,13 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Failed login.
+	audit.LogEntry(audit.Entry{
+		Actor:    "unknown",
+		Action:   "auth.login_failed",
+		Resource: "auth.session",
+		ClientIP: clientIP,
+		Status:   "error",
+	})
 	if strings.Contains(contentType, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -246,6 +263,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleLogout(w http.ResponseWriter, r *http.Request) {
+	audit.LogAction("admin", "auth.logout", "auth.session", nil)
 	clearSession(w, r)
 	http.Redirect(w, r, "/admin/login", http.StatusFound)
 }
@@ -253,11 +271,19 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 // ChangePassword validates the current password and sets a new one.
 func ChangePassword(current, newPassword string) error {
 	if !checkPassword(current) {
+		audit.LogEntry(audit.Entry{
+			Actor:    "admin",
+			Action:   "auth.password_change",
+			Resource: "auth.password",
+			Status:   "error",
+			Details:  map[string]interface{}{"reason": "incorrect current password"},
+		})
 		return fmt.Errorf("current password is incorrect")
 	}
 	SetAdminPassword(newPassword)
 	// Invalidate all existing sessions
 	sessions = sync.Map{}
+	audit.LogAction("admin", "auth.password_change", "auth.password", nil)
 	return nil
 }
 
