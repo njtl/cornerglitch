@@ -877,6 +877,14 @@ func ImportConfig(export *ConfigExport) {
 			switch v := val.(type) {
 			case float64:
 				globalConfig.Set(key, v)
+			case int:
+				globalConfig.Set(key, float64(v))
+			case bool:
+				if v {
+					globalConfig.Set(key, 1)
+				} else {
+					globalConfig.Set(key, 0)
+				}
 			case string:
 				globalConfig.SetString(key, v)
 			}
@@ -886,20 +894,30 @@ func ImportConfig(export *ConfigExport) {
 	// Import vuln config
 	if export.VulnConfig != nil {
 		if groups, ok := export.VulnConfig["groups"]; ok {
-			if gmap, ok := groups.(map[string]interface{}); ok {
+			switch gmap := groups.(type) {
+			case map[string]interface{}:
 				for group, enabled := range gmap {
 					if b, ok := enabled.(bool); ok {
 						globalVulnConfig.SetGroup(group, b)
 					}
 				}
+			case map[string]bool:
+				for group, enabled := range gmap {
+					globalVulnConfig.SetGroup(group, enabled)
+				}
 			}
 		}
 		if cats, ok := export.VulnConfig["categories"]; ok {
-			if cmap, ok := cats.(map[string]interface{}); ok {
+			switch cmap := cats.(type) {
+			case map[string]interface{}:
 				for id, enabled := range cmap {
 					if b, ok := enabled.(bool); ok {
 						globalVulnConfig.SetCategory(id, b)
 					}
+				}
+			case map[string]bool:
+				for id, enabled := range cmap {
+					globalVulnConfig.SetCategory(id, enabled)
 				}
 			}
 		}
