@@ -31,6 +31,8 @@ import (
 	"github.com/glitchWebServer/internal/i18n"
 	"github.com/glitchWebServer/internal/jstrap"
 	"github.com/glitchWebServer/internal/labyrinth"
+	"github.com/glitchWebServer/internal/media"
+	"github.com/glitchWebServer/internal/mediachaos"
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/oauth"
 	"github.com/glitchWebServer/internal/pages"
@@ -114,11 +116,14 @@ type Handler struct {
 	jsEng     *jstrap.Engine
 	botDet    *botdetect.Detector
 	spiderH            *spider.Handler
-	apiChaosEng        *apichaos.Engine
-	flags              *dashboard.FeatureFlags
-	config             *dashboard.AdminConfig
-	apiChaosConfig     *dashboard.APIChaosConfig
-	lastConfigVersion  atomic.Int64
+	apiChaosEng          *apichaos.Engine
+	mediaGen             *media.Generator
+	mediaChaosEng        *mediachaos.Engine
+	flags                *dashboard.FeatureFlags
+	config               *dashboard.AdminConfig
+	apiChaosConfig       *dashboard.APIChaosConfig
+	mediaChaosConfig     *dashboard.MediaChaosConfig
+	lastConfigVersion    atomic.Int64
 }
 
 func NewHandler(
@@ -150,6 +155,8 @@ func NewHandler(
 	botDet *botdetect.Detector,
 	spiderH *spider.Handler,
 	apiChaosEng *apichaos.Engine,
+	mediaGen *media.Generator,
+	mediaChaosEng *mediachaos.Engine,
 ) *Handler {
 	return &Handler{
 		collector:      collector,
@@ -179,10 +186,13 @@ func NewHandler(
 		jsEng:          jsEng,
 		botDet:         botDet,
 		spiderH:        spiderH,
-		apiChaosEng:    apiChaosEng,
-		flags:          dashboard.GetFeatureFlags(),
-		config:         dashboard.GetAdminConfig(),
-		apiChaosConfig: dashboard.GetAPIChaosConfig(),
+		apiChaosEng:      apiChaosEng,
+		mediaGen:         mediaGen,
+		mediaChaosEng:    mediaChaosEng,
+		flags:            dashboard.GetFeatureFlags(),
+		config:           dashboard.GetAdminConfig(),
+		apiChaosConfig:   dashboard.GetAPIChaosConfig(),
+		mediaChaosConfig: dashboard.GetMediaChaosConfig(),
 	}
 }
 
@@ -422,6 +432,11 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.cdnEng != nil && h.flags.IsCDNEnabled() && h.cdnEng.ShouldHandle(r.URL.Path) {
 		status := h.cdnEng.ServeHTTP(w, r)
 		return status, "cdn"
+	}
+
+	// Media content serving (with optional chaos)
+	if h.mediaGen != nil && h.flags.IsMediaChaosEnabled() && strings.HasPrefix(r.URL.Path, "/media/") {
+		return h.serveMedia(w, r)
 	}
 
 	// OWASP vulnerability emulation
@@ -763,6 +778,31 @@ func (h *Handler) syncConfigToSubsystems() {
 			}
 		}
 	}
+
+	// Sync media chaos engine probability, intensity, and per-category toggles
+	if h.mediaChaosEng != nil {
+		if prob, ok := cfg["media_chaos_probability"].(float64); ok {
+			h.mediaChaosEng.SetProbability(prob / 100.0)
+		}
+		if intensity, ok := cfg["media_chaos_corruption_intensity"].(float64); ok {
+			h.mediaChaosEng.SetCorruptionIntensity(intensity / 100.0)
+		}
+		if v, ok := cfg["media_chaos_slow_min_ms"].(int); ok {
+			h.mediaChaosEng.SetSlowMinMs(v)
+		}
+		if v, ok := cfg["media_chaos_slow_max_ms"].(int); ok {
+			h.mediaChaosEng.SetSlowMaxMs(v)
+		}
+		if v, ok := cfg["media_chaos_infinite_max_bytes"].(int64); ok {
+			h.mediaChaosEng.SetInfiniteMaxBytes(v)
+		}
+		if h.mediaChaosConfig != nil {
+			snap := h.mediaChaosConfig.Snapshot()
+			for cat, enabled := range snap {
+				h.mediaChaosEng.SetCategoryEnabled(mediachaos.ChaosCategory(cat), enabled)
+			}
+		}
+	}
 }
 
 // isVulnDisabled checks if a vuln path is disabled via VulnConfig group/category toggles.
@@ -792,4 +832,36 @@ func (h *Handler) isVulnDisabled(path string, vc *dashboard.VulnConfig) bool {
 		}
 	}
 	return false
+}
+
+// serveMedia generates media content and optionally applies chaos.
+func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request) (int, string) {
+	path := r.URL.Path
+
+	// Determine format from path extension
+	format := media.FormatFromPath(path)
+	if format == "" {
+		http.Error(w, "Unknown media format", http.StatusNotFound)
+		return 404, "media"
+	}
+
+	// Generate deterministic media content
+	data, contentType := h.mediaGen.Generate(format, path)
+	if data == nil {
+		http.Error(w, "Failed to generate media", http.StatusInternalServerError)
+		return 500, "media"
+	}
+
+	// Apply media chaos if engine is available and probability triggers
+	if h.mediaChaosEng != nil && h.mediaChaosEng.ShouldApply() {
+		h.mediaChaosEng.Apply(w, r, data, contentType)
+		return 200, "media_chaos"
+	}
+
+	// Serve clean media
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+	return 200, "media"
 }

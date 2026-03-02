@@ -242,6 +242,12 @@ func (s *Store) SaveFullConfig(ctx context.Context, export *FullConfigExport) er
 	if export.Blocking != nil {
 		entities["blocking"] = export.Blocking
 	}
+	if export.APIChaosConfig != nil {
+		entities["api_chaos_config"] = export.APIChaosConfig
+	}
+	if export.MediaChaosConfig != nil {
+		entities["media_chaos_config"] = export.MediaChaosConfig
+	}
 
 	for entity, data := range entities {
 		if data == nil {
@@ -316,6 +322,18 @@ func (s *Store) LoadFullConfig(ctx context.Context) (*FullConfigExport, error) {
 				return nil, fmt.Errorf("unmarshal blocking: %w", err)
 			}
 			export.Blocking = v
+		case "api_chaos_config":
+			var v map[string]bool
+			if err := json.Unmarshal(jsonData, &v); err != nil {
+				return nil, fmt.Errorf("unmarshal api_chaos_config: %w", err)
+			}
+			export.APIChaosConfig = v
+		case "media_chaos_config":
+			var v map[string]bool
+			if err := json.Unmarshal(jsonData, &v); err != nil {
+				return nil, fmt.Errorf("unmarshal media_chaos_config: %w", err)
+			}
+			export.MediaChaosConfig = v
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -339,5 +357,6 @@ type FullConfigExport struct {
 	ErrorWeights    map[string]float64     `json:"error_weights,omitempty"`
 	PageTypeWeights map[string]float64     `json:"page_type_weights,omitempty"`
 	Blocking        map[string]interface{} `json:"blocking,omitempty"`
-	APIChaosConfig  map[string]bool        `json:"api_chaos_config,omitempty"`
+	APIChaosConfig    map[string]bool        `json:"api_chaos_config,omitempty"`
+	MediaChaosConfig  map[string]bool        `json:"media_chaos_config,omitempty"`
 }

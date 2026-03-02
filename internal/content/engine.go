@@ -240,6 +240,9 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
 		extras += e.elems.NotificationBanner(rng)
 	}
 
+	// Generate embedded media elements for scanner discovery
+	mediaEmbeds := generateMediaEmbeds(rng, path)
+
 	// Generate internal links for the page
 	internalLinks := e.generateInternalLinks(rng, path, 10)
 	var linkSection strings.Builder
@@ -321,6 +324,7 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
         <h1>%s</h1>
         %s
         %s
+        %s
       </main>
       <aside>
         %s
@@ -349,6 +353,7 @@ func (e *Engine) generatePage(rng *rand.Rand, r *http.Request, style PageStyle) 
 		escHTML(title),
 		mainContent,
 		linkSection.String(),
+		mediaEmbeds,
 		sidebar,
 		footer,
 		extras,
@@ -1049,5 +1054,50 @@ func generateHiddenAPILinks(rng *rand.Rand) string {
 	for _, link := range shuffled[:count] {
 		sb.WriteString(fmt.Sprintf("  <a href=\"%s\" style=\"position:absolute;left:-9999px\">%s</a>\n", link.href, link.label))
 	}
+	return sb.String()
+}
+
+// generateMediaEmbeds creates embedded media elements (<img>, <audio>, <video>)
+// pointing to /media/ paths for scanner discovery and media chaos testing.
+func generateMediaEmbeds(rng *rand.Rand, path string) string {
+	seed := pathSeed(path)
+	name := fmt.Sprintf("asset-%x", seed&0xFFFFFFFF)
+
+	var sb strings.Builder
+	sb.WriteString(`<section class="media-content" style="margin-top:20px">`)
+
+	// Always include an image
+	imgExts := []string{"png", "jpg", "gif", "webp", "svg"}
+	ext := imgExts[rng.Intn(len(imgExts))]
+	sb.WriteString(fmt.Sprintf(`<img src="/media/image/%s.%s" alt="Content image" loading="lazy" style="max-width:100%%;border-radius:8px;margin-bottom:12px">`, name, ext))
+
+	// 50% chance for a second image in a different format
+	if rng.Intn(2) == 0 {
+		ext2 := imgExts[rng.Intn(len(imgExts))]
+		sb.WriteString(fmt.Sprintf(`<img src="/media/image/%s-thumb.%s" alt="Thumbnail" loading="lazy" style="max-width:200px;border-radius:4px;margin:8px">`, name, ext2))
+	}
+
+	// 40% chance to include audio
+	if rng.Intn(5) < 2 {
+		audioExts := []string{"wav", "mp3", "ogg"}
+		aext := audioExts[rng.Intn(len(audioExts))]
+		sb.WriteString(fmt.Sprintf(`<audio controls preload="metadata" style="width:100%%;margin:12px 0"><source src="/media/audio/%s.%s" type="audio/%s">Your browser does not support audio.</audio>`, name, aext, aext))
+	}
+
+	// 30% chance to include video
+	if rng.Intn(10) < 3 {
+		videoExts := []string{"mp4", "webm"}
+		vext := videoExts[rng.Intn(len(videoExts))]
+		ctype := "video/" + vext
+		sb.WriteString(fmt.Sprintf(`<video controls preload="metadata" style="max-width:100%%;border-radius:8px;margin:12px 0"><source src="/media/video/%s.%s" type="%s">Your browser does not support video.</video>`, name, vext, ctype))
+	}
+
+	// Hidden prefetch hints for scanner discovery
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.png">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.bmp">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/audio/%s.wav">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/video/%s.mp4">`, name))
+
+	sb.WriteString(`</section>`)
 	return sb.String()
 }

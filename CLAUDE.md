@@ -108,6 +108,8 @@ internal/
   recorder/                      Traffic recording (JSONL/PCAP formats)
   replay/                        PCAP/JSONL replay (loader, player, timing modes)
   spider/                        Spider data generation for crawl discovery
+  media/                         Procedural media generation (images, audio, video, streaming)
+  mediachaos/                    Media chaos engine (corruption, delivery chaos, cache poisoning)
   storage/                       PostgreSQL persistence with insert-only versioning and migrations
 
   # Scanner subsystems
