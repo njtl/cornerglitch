@@ -5120,6 +5120,16 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         populateSelect('audit-filter-status', data.filters.statuses || [], status);
       }
 
+      // Remember which row is expanded so we can restore it after re-render
+      var expandedId = null;
+      var oldDetails = document.querySelectorAll('.audit-detail');
+      for (var d = 0; d < oldDetails.length; d++) {
+        if (oldDetails[d].style.display === 'table-row') {
+          expandedId = oldDetails[d].getAttribute('data-audit-id');
+          break;
+        }
+      }
+
       // Render table
       var body = document.getElementById('audit-log-body');
       var html = '';
@@ -5129,14 +5139,16 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         var res = esc(truncate(e.resource || '', 30));
         var resFull = esc(e.resource || '');
         var delta = auditDelta(e.old_value, e.new_value);
-        html += '<tr class="audit-row" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'table-row\':\'none\'">';
+        var eid = String(e.id || i);
+        var isExpanded = (eid === expandedId);
+        html += '<tr class="audit-row" onclick="var dt=document.querySelector(\'[data-audit-id=\\x27' + eid + '\\x27]\');if(dt)dt.style.display=dt.style.display===\'table-row\'?\'none\':\'table-row\'">';
         html += '<td title="' + esc(e.timestamp || '') + '">' + fmtAuditTime(e.timestamp) + '</td>';
         html += '<td>' + esc(e.actor || '') + '</td>';
         html += '<td class="' + sc + '">' + esc(e.action || '') + '</td>';
         html += '<td title="' + resFull + '">' + res + '</td>';
         html += '<td>' + delta + '</td>';
         html += '</tr>';
-        html += '<tr class="audit-detail" style="display:none"><td colspan="5">';
+        html += '<tr class="audit-detail" data-audit-id="' + eid + '" style="display:' + (isExpanded ? 'table-row' : 'none') + '"><td colspan="5">';
         html += '<strong style="color:#00ccaa">Old Value:</strong>\n' + esc(fmtJSON(e.old_value)) + '\n\n';
         html += '<strong style="color:#00ccaa">New Value:</strong>\n' + esc(fmtJSON(e.new_value)) + '\n\n';
         if (e.details) html += '<strong style="color:#00ccaa">Details:</strong>\n' + esc(fmtJSON(e.details)) + '\n\n';
