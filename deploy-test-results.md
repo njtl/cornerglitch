@@ -1,8 +1,8 @@
 # Deployment Test Results
 
-**Date:** 2026-03-01 23:11:47 UTC
-**Branch:** master
-**Commit:** 46ac4a2
+**Date:** 2026-03-02 00:55:05 UTC
+**Branch:** feature/docker-deployment-tests
+**Commit:** 189991a
 
 ## Test Matrix
 
@@ -60,11 +60,47 @@ server injects random errors on these paths by design.
 
 ### docker
 
-**SKIPPED** — Docker daemon not accessible
+| # | Test | Status |
+|---|------|--------|
+| 1 | Health endpoint | **Pass** |
+| 2 | Health/live endpoint | **Pass** |
+| 3 | Main page returns HTML | **Pass** (with retry) |
+| 4 | Admin requires auth | **Pass** (302) |
+| 5 | Admin API config | **Pass** |
+| 6 | Metrics endpoint | **Pass** |
+| 7 | Feature flags | **Pass** |
+| 8 | Vuln endpoints | **Pass** |
+| 9 | API endpoints | **Pass** |
+| 10 | Feature toggle round-trip | **Pass** |
+| 11 | Config update round-trip | **Pass** |
+| 12 | Honeypot endpoints | **Pass** (200) |
+| 13 | robots.txt | **Pass** |
+| 14 | Labyrinth pages | **Pass** (with retry) |
+| 15 | Config export | **Pass** |
+
+**Result: 15/15 passed**
 
 ### compose
 
-**SKIPPED** — Docker daemon not accessible
+| # | Test | Status |
+|---|------|--------|
+| 1 | Health endpoint | **Pass** |
+| 2 | Health/live endpoint | **Pass** |
+| 3 | Main page returns HTML | **Pass** (with retry) |
+| 4 | Admin requires auth | **Pass** (302) |
+| 5 | Admin API config | **Pass** |
+| 6 | Metrics endpoint | **Pass** |
+| 7 | Feature flags | **Pass** |
+| 8 | Vuln endpoints | **Pass** |
+| 9 | API endpoints | **Pass** |
+| 10 | Feature toggle round-trip | **Pass** |
+| 11 | Config update round-trip | **Pass** |
+| 12 | Honeypot endpoints | **Pass** (200) |
+| 13 | robots.txt | **Pass** |
+| 14 | Labyrinth pages | **Pass** (with retry) |
+| 15 | Config export | **Pass** |
+
+**Result: 15/15 passed**
 
 ## Summary
 
