@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/glitchWebServer/internal/audit"
 	"github.com/glitchWebServer/internal/scanner"
 	"github.com/glitchWebServer/internal/scanner/attacks"
 	"github.com/glitchWebServer/internal/storage"
@@ -258,6 +259,11 @@ func adminAPIBuiltinRun(w http.ResponseWriter, r *http.Request) {
 		cancel() // release context resources
 	}()
 
+	audit.LogAction("admin", "scanner.builtin_run", "scanner.builtin", map[string]interface{}{
+		"profile": cfg.Profile,
+		"target":  cfg.Target,
+		"modules": req.Modules,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "profile": cfg.Profile, "target": cfg.Target})
 }
@@ -310,6 +316,7 @@ func adminAPIBuiltinStop(w http.ResponseWriter, r *http.Request) {
 	}
 	builtinMu.Unlock()
 
+	audit.LogAction("admin", "scanner.builtin_stop", "scanner.builtin", nil)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 }
