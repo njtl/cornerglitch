@@ -264,6 +264,63 @@ func marshalNullableJSON(v interface{}) (interface{}, error) {
 	return data, nil
 }
 
+// LoadRecentAuditEntries returns up to `limit` most recent entries in
+// chronological order (oldest first) for pre-populating the audit ring buffer.
+// Satisfies the audit.AuditStore interface.
+func (s *Store) LoadRecentAuditEntries(limit int) ([]audit.Entry, error) {
+	ctx := context.Background()
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, timestamp, actor, action, resource,
+		       old_value, new_value, details, COALESCE(client_ip, ''), status
+		FROM audit_log
+		ORDER BY id DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("load recent audit entries: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []audit.Entry
+	for rows.Next() {
+		var e audit.Entry
+		var oldVal, newVal, details sql.NullString
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.Actor, &e.Action, &e.Resource,
+			&oldVal, &newVal, &details, &e.ClientIP, &e.Status); err != nil {
+			return nil, err
+		}
+		if oldVal.Valid {
+			var v interface{}
+			if err := json.Unmarshal([]byte(oldVal.String), &v); err == nil {
+				e.OldValue = v
+			}
+		}
+		if newVal.Valid {
+			var v interface{}
+			if err := json.Unmarshal([]byte(newVal.String), &v); err == nil {
+				e.NewValue = v
+			}
+		}
+		if details.Valid {
+			var v map[string]interface{}
+			if err := json.Unmarshal([]byte(details.String), &v); err == nil {
+				e.Details = v
+			}
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Reverse to chronological order (oldest first) for ring buffer append.
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+
+	return entries, nil
+}
+
 // CountAuditEntries returns the total number of audit log entries.
 func (s *Store) CountAuditEntries(ctx context.Context) (int64, error) {
 	var count int64

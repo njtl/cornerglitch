@@ -5120,13 +5120,12 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         populateSelect('audit-filter-status', data.filters.statuses || [], status);
       }
 
-      // Remember which row is expanded so we can restore it after re-render
-      var expandedId = null;
+      // Remember which rows are expanded so we can restore them after re-render
+      var expandedIds = {};
       var oldDetails = document.querySelectorAll('.audit-detail');
       for (var d = 0; d < oldDetails.length; d++) {
         if (oldDetails[d].style.display === 'table-row') {
-          expandedId = oldDetails[d].getAttribute('data-audit-id');
-          break;
+          expandedIds[oldDetails[d].getAttribute('data-audit-id')] = true;
         }
       }
 
@@ -5140,7 +5139,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         var resFull = esc(e.resource || '');
         var delta = auditDelta(e.old_value, e.new_value);
         var eid = String(e.id || i);
-        var isExpanded = (eid === expandedId);
+        var isExpanded = !!expandedIds[eid];
         html += '<tr class="audit-row" onclick="var dt=document.querySelector(\'[data-audit-id=\\x27' + eid + '\\x27]\');if(dt)dt.style.display=dt.style.display===\'table-row\'?\'none\':\'table-row\'">';
         html += '<td title="' + esc(e.timestamp || '') + '">' + fmtAuditTime(e.timestamp) + '</td>';
         html += '<td>' + esc(e.actor || '') + '</td>';
