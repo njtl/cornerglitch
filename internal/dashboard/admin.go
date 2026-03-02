@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/glitchWebServer/internal/audit"
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/scaneval"
@@ -98,6 +99,8 @@ func TriggerAutoSave() {
 			return
 		}
 
+		audit.LogSystem("config.save", "config.autosave", map[string]interface{}{"file": stateFilePath})
+
 		// Also persist to DB if available.
 		if globalStore != nil {
 			dbExport := &storage.FullConfigExport{
@@ -139,6 +142,7 @@ func LoadStateFile() bool {
 				Blocking:        dbExport.Blocking,
 			}
 			ImportConfig(export)
+			audit.LogSystem("config.load", "config.load", map[string]interface{}{"source": "postgresql"})
 			log.Printf("\033[36m[glitch]\033[0m Restored settings from PostgreSQL")
 			return true
 		}
@@ -161,6 +165,7 @@ func LoadStateFile() bool {
 		return false
 	}
 	ImportConfig(&export)
+	audit.LogSystem("config.load", "config.load", map[string]interface{}{"source": "file", "path": path})
 	log.Printf("\033[36m[glitch]\033[0m Restored settings from %s", path)
 	return true
 }

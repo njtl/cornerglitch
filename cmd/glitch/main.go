@@ -16,6 +16,7 @@ import (
 
 	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/analytics"
+	"github.com/glitchWebServer/internal/audit"
 	"github.com/glitchWebServer/internal/api"
 	"github.com/glitchWebServer/internal/botdetect"
 	"github.com/glitchWebServer/internal/captcha"
@@ -123,6 +124,13 @@ func main() {
 		log.Printf("\033[33m[glitch]\033[0m No GLITCH_DB_URL set — running without database persistence")
 	}
 
+	// Initialize audit logger (after storage, before config load).
+	var auditStore audit.AuditStore
+	if store := dashboard.GetStore(); store != nil {
+		auditStore = store
+	}
+	audit.Init(auditStore)
+
 	// Set up auto-save state file.
 	dashboard.SetStateFile(".glitch-state.json")
 
@@ -209,11 +217,14 @@ func main() {
 		}
 	}()
 
+	audit.LogSystem("system.start", "system.lifecycle", map[string]interface{}{"port": *port, "dash_port": *dashPort})
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Println("\033[33m[glitch]\033[0m Shutting down...")
+	audit.LogSystem("system.stop", "system.lifecycle", nil)
 	stopSnapshotter()
 	// Final metrics save before shutdown.
 	dashboard.SaveMetricsNow(collector)
@@ -223,6 +234,9 @@ func main() {
 	dashSrv.Shutdown(ctx)
 	botDet.Stop()
 	contentEng.Stop()
+	if l := audit.GetLogger(); l != nil {
+		l.Close()
+	}
 	if store := dashboard.GetStore(); store != nil {
 		store.Close()
 	}
