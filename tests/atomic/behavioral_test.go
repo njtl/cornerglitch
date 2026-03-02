@@ -90,7 +90,7 @@ func setupBehaviorHandler(t *testing.T) http.Handler {
 		cookieT := cookies.NewTracker()
 		jsEng := jstrap.NewEngine()
 		botDet := botdetect.NewDetector()
-		spiderH := spider.NewHandler(nil)
+		spiderH := spider.NewHandler(dashboard.GetSpiderConfig())
 
 		behaviorHandler = server.NewHandler(
 			behaviorCollector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,

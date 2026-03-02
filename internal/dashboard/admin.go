@@ -378,6 +378,7 @@ func (f *FeatureFlags) Set(name string, enabled bool) bool {
 		return false
 	}
 	f.v.Store(&nv)
+	BumpConfigVersion()
 	return true
 }
 
@@ -658,6 +659,7 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 	default:
 		return false
 	}
+	BumpConfigVersion()
 	return true
 }
 
@@ -679,6 +681,7 @@ func (c *AdminConfig) SetString(key, value string) bool {
 	default:
 		return false
 	}
+	BumpConfigVersion()
 	return true
 }
 
@@ -704,6 +707,7 @@ func (c *AdminConfig) SetErrorWeight(errType string, weight float64) {
 		weight = 1
 	}
 	c.ErrorWeights[errType] = weight
+	BumpConfigVersion()
 }
 
 // ResetErrorWeights clears all custom error weights (reverts to defaults).
@@ -735,6 +739,7 @@ func (c *AdminConfig) SetPageTypeWeight(pageType string, weight float64) {
 		weight = 1
 	}
 	c.PageTypeWeights[pageType] = weight
+	BumpConfigVersion()
 }
 
 // ResetPageTypeWeights clears all custom page type weights.
@@ -789,6 +794,7 @@ func (vc *VulnConfig) SetGroup(group string, enabled bool) {
 	vc.mu.Lock()
 	defer vc.mu.Unlock()
 	vc.groups[group] = enabled
+	BumpConfigVersion()
 }
 
 // IsCategoryEnabled returns whether a specific category ID is enabled.
