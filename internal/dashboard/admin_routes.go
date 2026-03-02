@@ -335,6 +335,26 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/admin/api/audit", func(w http.ResponseWriter, r *http.Request) {
 		adminAPIAudit(w, r)
 	})
+
+	// API Chaos
+	mux.HandleFunc("/admin/api/apichaos/category", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIChaosCategory(w, r)
+	})
+	mux.HandleFunc("/admin/api/apichaos/probability", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIChaosProbability(w, r)
+	})
+	mux.HandleFunc("/admin/api/apichaos/all", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIChaosAll(w, r)
+	})
+	mux.HandleFunc("/admin/api/apichaos", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			adminAPIChaosGet(w, r)
+		} else if r.Method == http.MethodPost {
+			adminAPIChaosToggle(w, r)
+		} else {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -2613,4 +2633,123 @@ func adminAPIPasswordChange(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"message": "Password changed successfully",
 	})
+}
+
+// ---------------------------------------------------------------------------
+// API Chaos handlers
+// ---------------------------------------------------------------------------
+
+func adminAPIChaosGet(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	ff := GetFeatureFlags()
+	cfg := GetAdminConfig()
+	ac := GetAPIChaosConfig()
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":     ff.IsAPIChaosEnabled(),
+		"probability": cfg.Get()["api_chaos_probability"],
+		"categories":  ac.Snapshot(),
+	})
+}
+
+func adminAPIChaosToggle(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	ff := GetFeatureFlags()
+	old := ff.IsAPIChaosEnabled()
+	ff.Set("api_chaos", body.Enabled)
+	TriggerAutoSave()
+	audit.Log("admin", "feature.toggle", "feature_flags.api_chaos", old, body.Enabled, nil)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "enabled": body.Enabled})
+}
+
+func adminAPIChaosProbability(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Value float64 `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	cfg := GetAdminConfig()
+	old := cfg.Get()["api_chaos_probability"]
+	cfg.Set("api_chaos_probability", body.Value)
+	TriggerAutoSave()
+	audit.Log("admin", "config.change", "admin_config.api_chaos_probability", old, body.Value, nil)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "value": body.Value})
+}
+
+func adminAPIChaosCategory(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	ac := GetAPIChaosConfig()
+	old := ac.IsEnabled(body.Name)
+	ac.SetCategory(body.Name, body.Enabled)
+	TriggerAutoSave()
+	audit.Log("admin", "config.change", "api_chaos.categories."+body.Name, old, body.Enabled, nil)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
+func adminAPIChaosAll(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	ac := GetAPIChaosConfig()
+	ac.SetAll(body.Enabled)
+	TriggerAutoSave()
+	audit.Log("admin", "config.change", "api_chaos.categories.all", nil, body.Enabled, nil)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 }

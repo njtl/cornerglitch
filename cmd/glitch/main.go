@@ -16,8 +16,9 @@ import (
 
 	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/analytics"
-	"github.com/glitchWebServer/internal/audit"
 	"github.com/glitchWebServer/internal/api"
+	"github.com/glitchWebServer/internal/apichaos"
+	"github.com/glitchWebServer/internal/audit"
 	"github.com/glitchWebServer/internal/botdetect"
 	"github.com/glitchWebServer/internal/captcha"
 	"github.com/glitchWebServer/internal/cdn"
@@ -186,8 +187,9 @@ func main() {
 	dashboard.InitScanRunner(*port, *dashPort)
 	dashboard.LoadExternalScanHistory()
 	spiderH := spider.NewHandler(spiderCfg)
+	apiChaosEng := apichaos.New()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)
