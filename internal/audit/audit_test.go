@@ -22,6 +22,10 @@ func (m *mockStore) SaveAuditBatch(entries []Entry) error {
 	return nil
 }
 
+func (m *mockStore) LoadRecentAuditEntries(limit int) ([]Entry, error) {
+	return nil, nil // mock returns empty — no pre-populated entries
+}
+
 func (m *mockStore) allEntries() []Entry {
 	m.mu.Lock()
 	defer m.mu.Unlock()

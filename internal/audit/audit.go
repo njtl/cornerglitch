@@ -11,6 +11,9 @@ import (
 // Implemented by internal/storage.Store (methods added in task #2).
 type AuditStore interface {
 	SaveAuditBatch(entries []Entry) error
+	// LoadRecentAuditEntries returns up to `limit` most recent entries
+	// in chronological order (oldest first) for pre-populating the ring buffer.
+	LoadRecentAuditEntries(limit int) ([]Entry, error)
 }
 
 // Entry represents a single audit log event.
@@ -79,6 +82,8 @@ var (
 
 // Init initializes the global audit logger with an optional DB store.
 // If store is nil, entries are kept in-memory only.
+// When a store is provided, recent entries are loaded from DB to pre-populate
+// the in-memory ring buffer so audit history survives server restarts.
 func Init(store AuditStore) {
 	globalMu.Lock()
 	defer globalMu.Unlock()
@@ -92,6 +97,21 @@ func Init(store AuditStore) {
 		dbChan:  make(chan *Entry, chanSize),
 		store:   store,
 		done:    make(chan struct{}),
+	}
+
+	// Pre-populate ring buffer from DB if available.
+	if store != nil {
+		if loaded, err := store.LoadRecentAuditEntries(maxEntries); err == nil && len(loaded) > 0 {
+			l.entries = loaded
+			// Set ID counter past the highest loaded ID so new entries don't collide.
+			var maxID int64
+			for i := range loaded {
+				if loaded[i].ID > maxID {
+					maxID = loaded[i].ID
+				}
+			}
+			l.idCounter.Store(maxID)
+		}
 	}
 
 	l.wg.Add(1)
