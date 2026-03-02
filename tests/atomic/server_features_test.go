@@ -19,7 +19,7 @@ var allFeatureFlags = []string{
 	"analytics", "cdn", "oauth", "header_corrupt", "cookie_traps",
 	"js_traps", "bot_detection", "random_blocking", "framework_emul",
 	"search", "email", "i18n", "recorder", "websocket", "privacy",
-	"health", "spider",
+	"health", "spider", "api_chaos",
 }
 
 // TestServer_FeatureFlags_AllDefaultEnabled verifies all flags start enabled.

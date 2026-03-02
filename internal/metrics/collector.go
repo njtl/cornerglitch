@@ -18,6 +18,8 @@ type RequestRecord struct {
 	UserAgent    string
 	RemoteAddr   string
 	Headers      map[string]string
+	RequestBytes  int64
+	ResponseBytes int64
 }
 
 // ClientProfile tracks aggregate behavior for a single fingerprinted client.
@@ -55,6 +57,12 @@ type Collector struct {
 	TotalLabyrinth atomic.Int64
 	ActiveConns    atomic.Int64
 
+	// Traffic byte counters (total = accumulated across restarts, session = since startup)
+	TotalRequestBytes    atomic.Int64
+	TotalResponseBytes   atomic.Int64
+	SessionRequestBytes  atomic.Int64
+	SessionResponseBytes atomic.Int64
+
 	// Per-client profiles
 	clients map[string]*ClientProfile
 
@@ -86,30 +94,39 @@ type secondBucket struct {
 
 // CounterSnapshot holds cumulative counter values for persistence.
 type CounterSnapshot struct {
-	TotalRequests  int64 `json:"total_requests"`
-	TotalErrors    int64 `json:"total_errors"`
-	Total2xx       int64 `json:"total_2xx"`
-	Total4xx       int64 `json:"total_4xx"`
-	Total5xx       int64 `json:"total_5xx"`
-	TotalDelayed   int64 `json:"total_delayed"`
-	TotalLabyrinth int64 `json:"total_labyrinth"`
+	TotalRequests       int64 `json:"total_requests"`
+	TotalErrors         int64 `json:"total_errors"`
+	Total2xx            int64 `json:"total_2xx"`
+	Total4xx            int64 `json:"total_4xx"`
+	Total5xx            int64 `json:"total_5xx"`
+	TotalDelayed        int64 `json:"total_delayed"`
+	TotalLabyrinth      int64 `json:"total_labyrinth"`
+	TotalRequestBytes   int64 `json:"total_request_bytes"`
+	TotalResponseBytes  int64 `json:"total_response_bytes"`
+	SessionRequestBytes  int64 `json:"session_request_bytes"`
+	SessionResponseBytes int64 `json:"session_response_bytes"`
 }
 
 // GetCounterSnapshot returns current cumulative counter values.
 func (c *Collector) GetCounterSnapshot() CounterSnapshot {
 	return CounterSnapshot{
-		TotalRequests:  c.TotalRequests.Load(),
-		TotalErrors:    c.TotalErrors.Load(),
-		Total2xx:       c.Total2xx.Load(),
-		Total4xx:       c.Total4xx.Load(),
-		Total5xx:       c.Total5xx.Load(),
-		TotalDelayed:   c.TotalDelayed.Load(),
-		TotalLabyrinth: c.TotalLabyrinth.Load(),
+		TotalRequests:        c.TotalRequests.Load(),
+		TotalErrors:          c.TotalErrors.Load(),
+		Total2xx:             c.Total2xx.Load(),
+		Total4xx:             c.Total4xx.Load(),
+		Total5xx:             c.Total5xx.Load(),
+		TotalDelayed:         c.TotalDelayed.Load(),
+		TotalLabyrinth:       c.TotalLabyrinth.Load(),
+		TotalRequestBytes:    c.TotalRequestBytes.Load(),
+		TotalResponseBytes:   c.TotalResponseBytes.Load(),
+		SessionRequestBytes:  c.SessionRequestBytes.Load(),
+		SessionResponseBytes: c.SessionResponseBytes.Load(),
 	}
 }
 
 // RestoreCounters sets cumulative counters from a previously saved snapshot.
 // This is used on startup to restore metrics from the database.
+// Session byte counters are intentionally not restored — they reset to 0 each startup.
 func (c *Collector) RestoreCounters(snap CounterSnapshot) {
 	c.TotalRequests.Store(snap.TotalRequests)
 	c.TotalErrors.Store(snap.TotalErrors)
@@ -118,6 +135,8 @@ func (c *Collector) RestoreCounters(snap CounterSnapshot) {
 	c.Total5xx.Store(snap.Total5xx)
 	c.TotalDelayed.Store(snap.TotalDelayed)
 	c.TotalLabyrinth.Store(snap.TotalLabyrinth)
+	c.TotalRequestBytes.Store(snap.TotalRequestBytes)
+	c.TotalResponseBytes.Store(snap.TotalResponseBytes)
 }
 
 func NewCollector() *Collector {
@@ -174,6 +193,16 @@ func (c *Collector) Record(r RequestRecord) {
 	}
 	if r.ResponseType == "labyrinth" {
 		c.TotalLabyrinth.Add(1)
+	}
+
+	// Byte counters — both total (persisted across restarts) and session (since startup)
+	if r.RequestBytes > 0 {
+		c.TotalRequestBytes.Add(r.RequestBytes)
+		c.SessionRequestBytes.Add(r.RequestBytes)
+	}
+	if r.ResponseBytes > 0 {
+		c.TotalResponseBytes.Add(r.ResponseBytes)
+		c.SessionResponseBytes.Add(r.ResponseBytes)
 	}
 
 	// Non-blocking send to background worker

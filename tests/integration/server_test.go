@@ -73,7 +73,7 @@ func newTestHandler() *server.Handler {
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet, spiderH,
+		headerEng, cookieT, jsEng, botDet, spiderH, nil,
 	)
 }
 
