@@ -1993,12 +1993,12 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         var scanData = await api('/admin/api/scanner/builtin/status');
         var scanStatus = document.getElementById('dash-scanner-status');
         var scanDetail = document.getElementById('dash-scanner-detail');
-        if (scanData.running) {
+        if (scanData.state === 'running') {
           if (scanStatus) scanStatus.textContent = 'SCANNING';
-          if (scanDetail) scanDetail.textContent = (scanData.progress||0) + '%% complete';
+          if (scanDetail) scanDetail.textContent = (scanData.progress_pct||0).toFixed(0) + '%% complete — ' + (scanData.profile||'default');
         } else {
-          if (scanStatus) scanStatus.textContent = 'IDLE';
-          if (scanDetail) scanDetail.textContent = scanData.last_profile ? 'Last: ' + scanData.last_profile : 'No active scans';
+          if (scanStatus) scanStatus.textContent = scanData.state ? scanData.state.toUpperCase() : 'IDLE';
+          if (scanDetail) scanDetail.textContent = scanData.last_profile ? 'Last: ' + scanData.last_profile : 'No scans run';
         }
       } catch(se) {}
 
@@ -2098,12 +2098,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         var scanCards = document.getElementById('dash-scan-cards');
         var scanDetailExt = document.getElementById('dash-scan-detail');
         if (scanCards) {
-          if (scanData2.running) {
-            scanCards.innerHTML = card('Status', 'SCANNING', 'v-warn') + card('Progress', (scanData2.progress||0) + '%%', 'v-info');
+          if (scanData2.state === 'running') {
+            scanCards.innerHTML = card('Status', 'SCANNING', 'v-warn') + card('Progress', (scanData2.progress_pct||0).toFixed(0) + '%%', 'v-info');
             if (scanDetailExt) scanDetailExt.textContent = 'Profile: ' + (scanData2.profile||'default') + ' | Target: ' + (scanData2.target||'-');
           } else {
-            scanCards.innerHTML = card('Status', 'IDLE', 'v-ok') + card('Last', scanData2.last_profile||'none', 'v-info');
-            if (scanDetailExt) scanDetailExt.textContent = scanData2.last_profile ? 'Completed: ' + (scanData2.last_profile||'') : 'No scans run';
+            var stLabel = scanData2.state ? scanData2.state.toUpperCase() : 'IDLE';
+            var stClass = scanData2.state === 'completed' ? 'v-ok' : (scanData2.state === 'error' ? 'v-crit' : 'v-ok');
+            scanCards.innerHTML = card('Status', stLabel, stClass) + card('Last', scanData2.last_profile||'none', 'v-info');
+            if (scanDetailExt) scanDetailExt.textContent = scanData2.last_profile ? 'Last: ' + scanData2.last_profile + ' (' + scanData2.last_findings + ' findings)' : 'No scans run';
           }
         }
       } catch(se2) {}
@@ -4071,7 +4073,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       // Fetch status
       try {
         var status = await api('/admin/api/scanner/builtin/status');
+        var scanStatusText = document.getElementById('scan-status-text');
+        var scanStatusDetail = document.getElementById('scan-status-detail');
         if (status.state === 'running') {
+          if (scanStatusText) scanStatusText.textContent = 'SCANNING';
+          if (scanStatusDetail) scanStatusDetail.textContent = (status.profile||'default') + ' — ' + (status.progress_pct||0).toFixed(0) + '%% complete';
           document.getElementById('builtin-run-btn').style.display = 'none';
           document.getElementById('builtin-stop-btn').style.display = '';
           document.getElementById('builtin-progress-wrap').style.display = '';
@@ -4081,6 +4087,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
             builtinPollTimer = setInterval(pollBuiltinStatus, 1500);
           }
         } else if (status.state === 'completed') {
+          if (scanStatusText) scanStatusText.textContent = 'COMPLETED';
+          if (scanStatusDetail) scanStatusDetail.textContent = status.last_profile ? 'Last: ' + status.last_profile + ' (' + (status.last_findings||0) + ' findings)' : 'Scan finished';
           document.getElementById('builtin-run-btn').style.display = '';
           document.getElementById('builtin-stop-btn').style.display = 'none';
           document.getElementById('builtin-progress-wrap').style.display = 'none';
@@ -4090,7 +4098,15 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
               renderBuiltinResults(results);
             } catch(e) { /* no results yet */ }
           }
+        } else if (status.state === 'error') {
+          if (scanStatusText) scanStatusText.textContent = 'ERROR';
+          if (scanStatusDetail) scanStatusDetail.textContent = status.error || 'Scan failed';
+          document.getElementById('builtin-run-btn').style.display = '';
+          document.getElementById('builtin-stop-btn').style.display = 'none';
+          document.getElementById('builtin-progress-wrap').style.display = 'none';
         } else {
+          if (scanStatusText) scanStatusText.textContent = 'IDLE';
+          if (scanStatusDetail) scanStatusDetail.textContent = status.last_profile ? 'Last: ' + status.last_profile + ' (' + (status.last_findings||0) + ' findings)' : 'No active scans';
           document.getElementById('builtin-run-btn').style.display = '';
           document.getElementById('builtin-stop-btn').style.display = 'none';
           document.getElementById('builtin-progress-wrap').style.display = 'none';
@@ -4136,7 +4152,12 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   async function pollBuiltinStatus() {
     try {
       var status = await api('/admin/api/scanner/builtin/status');
+      // Update Scanner tab status bar
+      var scanStatusText = document.getElementById('scan-status-text');
+      var scanStatusDetail = document.getElementById('scan-status-detail');
       if (status.state === 'running') {
+        if (scanStatusText) scanStatusText.textContent = 'SCANNING';
+        if (scanStatusDetail) scanStatusDetail.textContent = (status.profile||'default') + ' — ' + (status.progress_pct||0).toFixed(0) + '%% complete';
         var phase = status.phase || 'scanning';
         var pct = status.progress_pct || 0;
         var completed = status.completed || 0;
@@ -4183,6 +4204,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         document.getElementById('builtin-run-btn').style.display = '';
         document.getElementById('builtin-stop-btn').style.display = 'none';
         if (status.state === 'completed') {
+          if (scanStatusText) scanStatusText.textContent = 'COMPLETED';
+          if (scanStatusDetail) scanStatusDetail.textContent = status.last_profile ? 'Last: ' + status.last_profile + ' (' + (status.last_findings||0) + ' findings)' : 'Scan finished';
           document.getElementById('builtin-progress-bar').style.width = '100%%';
           document.getElementById('builtin-progress-text').textContent = 'Complete';
           document.getElementById('builtin-status-text').textContent = 'Scan completed';
@@ -4210,7 +4233,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
               tbody.innerHTML = rows;
             }
           } catch(e) { /* history refresh failed */ }
+        } else if (status.state === 'error') {
+          if (scanStatusText) scanStatusText.textContent = 'ERROR';
+          if (scanStatusDetail) scanStatusDetail.textContent = status.error || 'Scan failed';
+          document.getElementById('builtin-progress-wrap').style.display = 'none';
         } else {
+          if (scanStatusText) scanStatusText.textContent = 'IDLE';
+          if (scanStatusDetail) scanStatusDetail.textContent = status.last_profile ? 'Last: ' + status.last_profile + ' (' + (status.last_findings||0) + ' findings)' : 'No active scans';
           document.getElementById('builtin-progress-wrap').style.display = 'none';
         }
       }
