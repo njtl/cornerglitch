@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/dashboard"
 	"github.com/glitchWebServer/internal/analytics"
 	"github.com/glitchWebServer/internal/api"
 	"github.com/glitchWebServer/internal/botdetect"
@@ -31,6 +32,8 @@ import (
 	"github.com/glitchWebServer/internal/oauth"
 	"github.com/glitchWebServer/internal/pages"
 	"github.com/glitchWebServer/internal/privacy"
+	"github.com/glitchWebServer/internal/media"
+	"github.com/glitchWebServer/internal/mediachaos"
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/server"
@@ -73,7 +76,46 @@ func newTestHandler() *server.Handler {
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet, spiderH, nil,
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(),
+	)
+}
+
+// newTestHandlerNoChaos creates a handler with media generation but no chaos engine.
+// Used for tests that need deterministic media serving without chaos interference.
+func newTestHandlerNoChaos() *server.Handler {
+	collector := metrics.NewCollector()
+	fp := fingerprint.NewEngine()
+	adapt := adaptive.NewEngine(collector, fp)
+	errGen := errors.NewGenerator()
+	pageGen := pages.NewGenerator()
+	lab := labyrinth.NewLabyrinth()
+	contentEng := content.NewEngine()
+	apiRouter := api.NewRouter()
+	honey := honeypot.NewHoneypot()
+	fw := framework.NewEmulator()
+	captchaEng := captcha.NewEngine()
+	vulnH := vuln.NewHandler()
+	analytix := analytics.NewEngine()
+	cdnEng := cdn.NewEngine()
+	oauthH := oauth.NewHandler()
+	privacyH := privacy.NewHandler()
+	wsH := websocket.NewHandler()
+	rec := recorder.NewRecorder("/tmp/glitch-test-captures")
+	searchH := search.NewHandler()
+	emailH := email.NewHandler()
+	healthH := health.NewHandler(time.Now())
+	i18nH := i18n.NewHandler()
+	headerEng := headers.NewEngine()
+	cookieT := cookies.NewTracker()
+	jsEng := jstrap.NewEngine()
+	botDet := botdetect.NewDetector()
+	spiderH := spider.NewHandler(nil)
+
+	return server.NewHandler(
+		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
+		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
+		wsH, rec, searchH, emailH, healthH, i18nH,
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), nil,
 	)
 }
 
@@ -793,5 +835,69 @@ func TestAllSubsystemsRouted(t *testing.T) {
 				t.Errorf("subsystem %s at %s returned invalid status: %d", tc.name, tc.path, rr.Code)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Media Chaos Handler Integration
+// ---------------------------------------------------------------------------
+
+// TestMediaChaos_HandlerServesMedia verifies /media/ paths serve valid media content.
+// Uses nil mediachaos engine to test clean media serving without chaos interference.
+func TestMediaChaos_HandlerServesMedia(t *testing.T) {
+	h := newTestHandlerNoChaos()
+	dashboard.GetFeatureFlags().Set("media_chaos", true)
+
+	paths := []struct {
+		path     string
+		ctPrefix string // expected content-type prefix
+	}{
+		{"/media/image/test.png", "image/png"},
+		{"/media/image/test.jpg", "image/jpeg"},
+		{"/media/image/test.gif", "image/gif"},
+		{"/media/image/test.svg", "image/svg+xml"},
+		{"/media/image/test.bmp", "image/bmp"},
+		{"/media/image/test.webp", "image/webp"},
+		{"/media/image/test.ico", "image/x-icon"},
+		{"/media/image/test.tiff", "image/tiff"},
+		{"/media/audio/test.wav", "audio/wav"},
+		{"/media/audio/test.mp3", "audio/mpeg"},
+		{"/media/audio/test.ogg", "audio/ogg"},
+		{"/media/audio/test.flac", "audio/flac"},
+		{"/media/video/test.mp4", "video/mp4"},
+		{"/media/video/test.webm", "video/webm"},
+		{"/media/video/test.avi", "video/x-msvideo"},
+		{"/media/stream/test/playlist.m3u8", "application/vnd.apple.mpegurl"},
+		{"/media/stream/test/manifest.mpd", "application/dash+xml"},
+	}
+
+	for _, tc := range paths {
+		t.Run(tc.path, func(t *testing.T) {
+			rr := doRequest(h, "GET", tc.path, "", nil)
+			if rr.Code != 200 {
+				t.Errorf("expected 200, got %d", rr.Code)
+			}
+			if rr.Body.Len() == 0 {
+				t.Error("got empty body")
+			}
+			gotCT := rr.Header().Get("Content-Type")
+			if !strings.HasPrefix(gotCT, tc.ctPrefix) {
+				t.Errorf("expected Content-Type starting with %q, got %q", tc.ctPrefix, gotCT)
+			}
+		})
+	}
+}
+
+// TestMediaChaos_HandlerDisabledDoesNotServeMedia verifies the feature flag gates media.
+func TestMediaChaos_HandlerDisabledDoesNotServeMedia(t *testing.T) {
+	h := newTestHandler()
+	dashboard.GetFeatureFlags().Set("media_chaos", false)
+	defer dashboard.GetFeatureFlags().Set("media_chaos", true)
+
+	rr := doRequest(h, "GET", "/media/image/test.png", "", nil)
+	// When disabled, /media/ paths fall through to normal handler (not media)
+	gotCT := rr.Header().Get("Content-Type")
+	if strings.HasPrefix(gotCT, "image/png") {
+		t.Error("media content served when media_chaos is disabled")
 	}
 }

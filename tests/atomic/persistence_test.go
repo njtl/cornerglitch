@@ -685,7 +685,7 @@ func TestPersist_Export_FeaturesComplete(t *testing.T) {
 		"analytics", "cdn", "oauth", "header_corrupt", "cookie_traps",
 		"js_traps", "bot_detection", "random_blocking", "framework_emul",
 		"search", "email", "i18n", "recorder", "websocket", "privacy",
-		"health", "spider", "api_chaos",
+		"health", "spider", "api_chaos", "media_chaos",
 	}
 
 	for _, flag := range expectedFlags {

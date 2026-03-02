@@ -1039,6 +1039,39 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- ====== Media Chaos ====== -->
+  <div class="srv-section" id="srv-mediachaos">
+    <div class="srv-section-header" onclick="toggleServerSection('mediachaos')">
+      <span class="srv-title">Media Chaos</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <button class="cfg-btn" id="mediachaos-toggle" onclick="toggleMediaChaos()" style="min-width:80px"></button>
+        <span id="mediachaos-status" style="color:#888;font-size:0.8em"></span>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="color:#888;font-size:0.78em;display:block;margin-bottom:4px">Chaos Probability</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="range" id="mediachaos-prob-slider" min="0" max="100" step="1" value="30" style="flex:1;accent-color:#e040fb" oninput="document.getElementById('mediachaos-prob-val').textContent=this.value+'%%'" onchange="setMediaChaosProb(this.value)">
+          <span id="mediachaos-prob-val" style="color:#e040fb;font-size:0.85em;min-width:35px">30%%</span>
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="color:#888;font-size:0.78em;display:block;margin-bottom:4px">Corruption Intensity</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="range" id="mediachaos-intensity-slider" min="0" max="100" step="1" value="50" style="flex:1;accent-color:#e040fb" oninput="document.getElementById('mediachaos-intensity-val').textContent=this.value+'%%'" onchange="setMediaChaosIntensity(this.value)">
+          <span id="mediachaos-intensity-val" style="color:#e040fb;font-size:0.85em;min-width:35px">50%%</span>
+        </div>
+      </div>
+      <div style="margin-bottom:8px;display:flex;gap:6px">
+        <button class="cfg-btn" onclick="setAllMediaChaos(true)" style="font-size:0.72em;padding:3px 10px">All On</button>
+        <button class="cfg-btn" onclick="setAllMediaChaos(false)" style="font-size:0.72em;padding:3px 10px">All Off</button>
+      </div>
+      <div class="group-toggles" id="mediachaos-cats"></div>
+    </div>
+  </div>
+
   <!-- ====== Vulnerabilities ====== -->
   <div class="srv-section" id="srv-vulns">
     <div class="srv-section-header" onclick="toggleServerSection('vulns')">
@@ -3130,6 +3163,74 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) {}
   }
 
+  // ------ Media Chaos ------
+  window.toggleMediaChaos = async function() {
+    var btn = document.getElementById('mediachaos-toggle');
+    var current = btn && btn.textContent.trim() === 'ENABLED';
+    await api('/admin/api/mediachaos', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:!current})});
+    toast('Media Chaos ' + (!current ? 'enabled' : 'disabled'));
+    refreshMediaChaos();
+  };
+  window.setMediaChaosProb = async function(v) {
+    await api('/admin/api/mediachaos/probability', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({value:parseFloat(v)})});
+    toast('Media chaos probability: ' + v + '%%');
+  };
+  window.setMediaChaosIntensity = async function(v) {
+    await api('/admin/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key:'media_chaos_corruption_intensity', value:parseFloat(v)})});
+    toast('Corruption intensity: ' + v + '%%');
+  };
+  window.setAllMediaChaos = async function(enabled) {
+    await api('/admin/api/mediachaos/all', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:enabled})});
+    toast('All media chaos categories ' + (enabled ? 'enabled' : 'disabled'));
+    refreshMediaChaos();
+  };
+  window.toggleMediaChaosCategory = async function(cat, enabled) {
+    await api('/admin/api/mediachaos/category', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:cat, enabled:enabled})});
+    toast(cat + (enabled ? ' enabled' : ' disabled'));
+    refreshMediaChaos();
+  };
+  async function refreshMediaChaos() {
+    try {
+      var d = await api('/admin/api/mediachaos');
+      var btn = document.getElementById('mediachaos-toggle');
+      if (btn) {
+        btn.textContent = d.enabled ? 'ENABLED' : 'DISABLED';
+        btn.style.background = d.enabled ? '#00ff8833' : '#ff444433';
+        btn.style.borderColor = d.enabled ? '#00ff88' : '#ff4444';
+        btn.style.color = d.enabled ? '#00ff88' : '#ff4444';
+      }
+      var st = document.getElementById('mediachaos-status');
+      if (st) st.textContent = 'Probability: ' + (d.probability||0).toFixed(0) + '%%';
+      var sl = document.getElementById('mediachaos-prob-slider');
+      if (sl) sl.value = d.probability || 0;
+      var pv = document.getElementById('mediachaos-prob-val');
+      if (pv) pv.textContent = (d.probability||0).toFixed(0) + '%%';
+      var isl = document.getElementById('mediachaos-intensity-slider');
+      if (isl) isl.value = d.corruption_intensity || 0;
+      var iv = document.getElementById('mediachaos-intensity-val');
+      if (iv) iv.textContent = (d.corruption_intensity||0).toFixed(0) + '%%';
+      var catsEl = document.getElementById('mediachaos-cats');
+      if (catsEl && d.categories) {
+        var catNames = {
+          format_corruption: 'Format Corruption', content_length_chaos: 'Content-Length',
+          content_type_chaos: 'Content-Type', range_request_chaos: 'Range Requests',
+          chunked_chaos: 'Chunked Encoding', slow_delivery: 'Slow Delivery',
+          infinite_content: 'Infinite Content', stream_switching: 'Stream Switching',
+          cache_poisoning: 'Cache Poisoning', streaming_chaos: 'HLS/DASH'
+        };
+        var html = '';
+        var cats = Object.keys(d.categories).sort();
+        for (var i = 0; i < cats.length; i++) {
+          var cat = cats[i];
+          var on = d.categories[cat];
+          var label = catNames[cat] || cat;
+          html += '<button class="group-btn ' + (on ? 'on' : 'off') + '" onclick="toggleMediaChaosCategory(\'' + cat + '\',' + !on + ')" style="font-size:0.72em">' + label + '</button>';
+        }
+        catsEl.innerHTML = html;
+      }
+    } catch(e) {}
+  }
+
   window.filterVulns = function() {
     var q = document.getElementById('vuln-filter').value.toLowerCase().trim();
     if (!q) {
@@ -5136,6 +5237,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       else if (id === 'srv-vulns') await refreshVulns();
       else if (id === 'srv-sessions') await refreshSessions();
       else if (id === 'srv-apichaos') await refreshAPIChaos();
+      else if (id === 'srv-mediachaos') await refreshMediaChaos();
       // srv-log and srv-traffic moved to dashboard
       else if (id === 'srv-recording') await refreshRecorderUI();
     }

@@ -288,7 +288,7 @@ make k8s-deploy     # deploy to Kubernetes
 
 ## Architecture Overview
 
-The server, scanner, and proxy are separate binaries built from `cmd/`. All internal logic lives under `internal/` organized by subsystem. The server has dozens of subsystems including error generation, page rendering, vulnerability emulation, fingerprinting, adaptive behavior, bot detection, honeypot, API emulation, OAuth, CDN, search, email, WebSocket, traffic recording, and a full admin dashboard with live metrics. The proxy adds an interception pipeline with chaos, WAF, corruption, and replay modules. The scanner adds attack, evasion, resilience, and crawl modules with multi-scanner evaluation. See `docs/PLAN.md` for the full architecture plan and `docs/` for component-level PRDs.
+The server, scanner, and proxy are separate binaries built from `cmd/`. All internal logic lives under `internal/` organized by subsystem. The server has dozens of subsystems including error generation, page rendering, vulnerability emulation, fingerprinting, adaptive behavior, bot detection, honeypot, API emulation, OAuth, CDN, search, email, WebSocket, traffic recording, API chaos engine, media chaos engine (procedural generation and corruption of images, audio, video, and streaming formats), and a full admin dashboard with live metrics. The proxy adds an interception pipeline with chaos, WAF, corruption, and replay modules. The scanner adds attack, evasion, resilience, and crawl modules with multi-scanner evaluation. See `docs/PLAN.md` for the full architecture plan and `docs/` for component-level PRDs.
 
 ---
 

@@ -104,13 +104,14 @@ func TriggerAutoSave() {
 		// Also persist to DB if available.
 		if globalStore != nil {
 			dbExport := &storage.FullConfigExport{
-				Features:        export.Features,
-				Config:          export.Config,
-				VulnConfig:      export.VulnConfig,
-				ErrorWeights:    export.ErrorWeights,
-				PageTypeWeights: export.PageTypeWeights,
-				Blocking:        export.Blocking,
-				APIChaosConfig:  export.APIChaosConfig,
+				Features:          export.Features,
+				Config:            export.Config,
+				VulnConfig:        export.VulnConfig,
+				ErrorWeights:      export.ErrorWeights,
+				PageTypeWeights:   export.PageTypeWeights,
+				Blocking:          export.Blocking,
+				APIChaosConfig:    export.APIChaosConfig,
+				MediaChaosConfig:  export.MediaChaosConfig,
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -133,15 +134,16 @@ func LoadStateFile() bool {
 			log.Printf("\033[33m[glitch]\033[0m DB load warning: %v", err)
 		} else if dbExport != nil {
 			export := &ConfigExport{
-				Version:         "1.0",
-				ExportedAt:      time.Now().UTC().Format(time.RFC3339),
-				Features:        dbExport.Features,
-				Config:          dbExport.Config,
-				VulnConfig:      dbExport.VulnConfig,
-				ErrorWeights:    dbExport.ErrorWeights,
-				PageTypeWeights: dbExport.PageTypeWeights,
-				Blocking:        dbExport.Blocking,
-				APIChaosConfig:  dbExport.APIChaosConfig,
+				Version:          "1.0",
+				ExportedAt:       time.Now().UTC().Format(time.RFC3339),
+				Features:         dbExport.Features,
+				Config:           dbExport.Config,
+				VulnConfig:       dbExport.VulnConfig,
+				ErrorWeights:     dbExport.ErrorWeights,
+				PageTypeWeights:  dbExport.PageTypeWeights,
+				Blocking:         dbExport.Blocking,
+				APIChaosConfig:   dbExport.APIChaosConfig,
+				MediaChaosConfig: dbExport.MediaChaosConfig,
 			}
 			ImportConfig(export)
 			audit.LogSystem("config.load", "config.load", map[string]interface{}{"source": "postgresql"})
@@ -202,6 +204,7 @@ type flagValues struct {
 	health         bool
 	spider         bool
 	apiChaos       bool
+	mediaChaos     bool
 }
 
 // FeatureFlags holds boolean toggles for each server subsystem.
@@ -239,6 +242,7 @@ func NewFeatureFlags() *FeatureFlags {
 		health:         true,
 		spider:         true,
 		apiChaos:       true,
+		mediaChaos:     true,
 	})
 	return f
 }
@@ -335,6 +339,10 @@ func (f *FeatureFlags) IsAPIChaosEnabled() bool {
 	return f.v.Load().(*flagValues).apiChaos
 }
 
+func (f *FeatureFlags) IsMediaChaosEnabled() bool {
+	return f.v.Load().(*flagValues).mediaChaos
+}
+
 // Set toggles a named feature. Returns false if the name is unknown.
 // Uses copy-on-write: copies the current flagValues, modifies, then stores atomically.
 func (f *FeatureFlags) Set(name string, enabled bool) bool {
@@ -389,6 +397,8 @@ func (f *FeatureFlags) Set(name string, enabled bool) bool {
 		nv.spider = enabled
 	case "api_chaos":
 		nv.apiChaos = enabled
+	case "media_chaos":
+		nv.mediaChaos = enabled
 	default:
 		return false
 	}
@@ -424,6 +434,7 @@ func (f *FeatureFlags) Snapshot() map[string]bool {
 		"health":          v.health,
 		"spider":          v.spider,
 		"api_chaos":       v.apiChaos,
+		"media_chaos":     v.mediaChaos,
 	}
 }
 
@@ -466,6 +477,13 @@ type AdminConfig struct {
 
 	// API Chaos controls
 	APIChaosProb float64 // 0-100, probability percentage for API chaos responses
+
+	// Media Chaos controls
+	MediaChaosProb              float64 // 0-100, probability percentage
+	MediaChaosCorruptIntensity  float64 // 0-100, corruption aggressiveness
+	MediaChaosSlowMinMs         int     // min delay for slow delivery (ms)
+	MediaChaosSlowMaxMs         int     // max delay for slow delivery (ms)
+	MediaChaosInfiniteMaxBytes  int64   // safety cap for infinite streams
 }
 
 // NewAdminConfig returns an AdminConfig with sensible defaults.
@@ -495,7 +513,12 @@ func NewAdminConfig() *AdminConfig {
 		AdaptiveAggressiveRPS:  10,
 		AdaptiveLabyrinthPaths: 5,
 		RecorderFormat:         "jsonl",
-		APIChaosProb:           30,
+		APIChaosProb:                30,
+		MediaChaosProb:              30,
+		MediaChaosCorruptIntensity:  50,
+		MediaChaosSlowMinMs:         10,
+		MediaChaosSlowMaxMs:         1000,
+		MediaChaosInfiniteMaxBytes:  104857600, // 100MB
 	}
 }
 
@@ -526,7 +549,12 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"adaptive_aggressive_rps":  c.AdaptiveAggressiveRPS,
 		"adaptive_labyrinth_paths": c.AdaptiveLabyrinthPaths,
 		"recorder_format":          c.RecorderFormat,
-		"api_chaos_probability":    c.APIChaosProb,
+		"api_chaos_probability":             c.APIChaosProb,
+		"media_chaos_probability":           c.MediaChaosProb,
+		"media_chaos_corruption_intensity":  c.MediaChaosCorruptIntensity,
+		"media_chaos_slow_min_ms":           c.MediaChaosSlowMinMs,
+		"media_chaos_slow_max_ms":           c.MediaChaosSlowMaxMs,
+		"media_chaos_infinite_max_bytes":    c.MediaChaosInfiniteMaxBytes,
 	}
 }
 
@@ -685,6 +713,49 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 			value = 100
 		}
 		c.APIChaosProb = value
+	case "media_chaos_probability":
+		if value < 0 {
+			value = 0
+		}
+		if value > 100 {
+			value = 100
+		}
+		c.MediaChaosProb = value
+	case "media_chaos_corruption_intensity":
+		if value < 0 {
+			value = 0
+		}
+		if value > 100 {
+			value = 100
+		}
+		c.MediaChaosCorruptIntensity = value
+	case "media_chaos_slow_min_ms":
+		v := int(value)
+		if v < 1 {
+			v = 1
+		}
+		if v > 60000 {
+			v = 60000
+		}
+		c.MediaChaosSlowMinMs = v
+	case "media_chaos_slow_max_ms":
+		v := int(value)
+		if v < 1 {
+			v = 1
+		}
+		if v > 60000 {
+			v = 60000
+		}
+		c.MediaChaosSlowMaxMs = v
+	case "media_chaos_infinite_max_bytes":
+		v := int64(value)
+		if v < 0 {
+			v = 0
+		}
+		if v > 10737418240 { // 10GB
+			v = 10737418240
+		}
+		c.MediaChaosInfiniteMaxBytes = v
 	default:
 		return false
 	}
@@ -927,6 +998,72 @@ func (ac *APIChaosConfig) Snapshot() map[string]bool {
 }
 
 // ---------------------------------------------------------------------------
+// Media Chaos Config — controls which media chaos categories are active
+// ---------------------------------------------------------------------------
+
+// MediaChaosCategories lists all supported media chaos category names.
+var MediaChaosCategories = []string{
+	"format_corruption", "content_length_chaos", "content_type_chaos",
+	"range_request_chaos", "chunked_chaos", "slow_delivery",
+	"infinite_content", "stream_switching", "cache_poisoning",
+	"streaming_chaos",
+}
+
+// MediaChaosConfig controls per-category media chaos toggles.
+type MediaChaosConfig struct {
+	mu         sync.RWMutex
+	categories map[string]bool // category -> enabled
+}
+
+// NewMediaChaosConfig returns a MediaChaosConfig with all categories enabled.
+func NewMediaChaosConfig() *MediaChaosConfig {
+	cats := make(map[string]bool, len(MediaChaosCategories))
+	for _, c := range MediaChaosCategories {
+		cats[c] = true
+	}
+	return &MediaChaosConfig{categories: cats}
+}
+
+// IsEnabled returns whether a media chaos category is enabled.
+func (mc *MediaChaosConfig) IsEnabled(cat string) bool {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+	if enabled, ok := mc.categories[cat]; ok {
+		return enabled
+	}
+	return true
+}
+
+// SetCategory toggles a media chaos category.
+func (mc *MediaChaosConfig) SetCategory(cat string, enabled bool) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.categories[cat] = enabled
+	BumpConfigVersion()
+}
+
+// SetAll enables or disables all media chaos categories.
+func (mc *MediaChaosConfig) SetAll(enabled bool) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	for _, cat := range MediaChaosCategories {
+		mc.categories[cat] = enabled
+	}
+	BumpConfigVersion()
+}
+
+// Snapshot returns a copy of the current category states.
+func (mc *MediaChaosConfig) Snapshot() map[string]bool {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+	result := make(map[string]bool, len(mc.categories))
+	for k, v := range mc.categories {
+		result[k] = v
+	}
+	return result
+}
+
+// ---------------------------------------------------------------------------
 // Config Export/Import structs
 // ---------------------------------------------------------------------------
 
@@ -941,7 +1078,8 @@ type ConfigExport struct {
 	ErrorWeights     map[string]float64     `json:"error_weights,omitempty"`
 	PageTypeWeights  map[string]float64     `json:"page_type_weights,omitempty"`
 	Blocking         map[string]interface{} `json:"blocking,omitempty"`
-	APIChaosConfig   map[string]bool        `json:"api_chaos_config,omitempty"`
+	APIChaosConfig     map[string]bool        `json:"api_chaos_config,omitempty"`
+	MediaChaosConfig   map[string]bool        `json:"media_chaos_config,omitempty"`
 }
 
 // ExportConfig builds a ConfigExport from the current global state.
@@ -954,7 +1092,8 @@ func ExportConfig() *ConfigExport {
 		VulnConfig:      globalVulnConfig.Snapshot(),
 		ErrorWeights:    globalConfig.GetErrorWeights(),
 		PageTypeWeights: globalConfig.GetPageTypeWeights(),
-		APIChaosConfig:  globalAPIChaosConfig.Snapshot(),
+		APIChaosConfig:    globalAPIChaosConfig.Snapshot(),
+		MediaChaosConfig:  globalMediaChaosConfig.Snapshot(),
 	}
 }
 
@@ -1039,6 +1178,13 @@ func ImportConfig(export *ConfigExport) {
 	if export.APIChaosConfig != nil {
 		for cat, enabled := range export.APIChaosConfig {
 			globalAPIChaosConfig.SetCategory(cat, enabled)
+		}
+	}
+
+	// Import media chaos config
+	if export.MediaChaosConfig != nil {
+		for cat, enabled := range export.MediaChaosConfig {
+			globalMediaChaosConfig.SetCategory(cat, enabled)
 		}
 	}
 }
@@ -1226,8 +1372,9 @@ var (
 	globalFlags          = NewFeatureFlags()
 	globalConfig         = NewAdminConfig()
 	globalVulnConfig     = NewVulnConfig()
-	globalAPIChaosConfig = NewAPIChaosConfig()
-	globalProxyConfig    = NewProxyConfig()
+	globalAPIChaosConfig   = NewAPIChaosConfig()
+	globalMediaChaosConfig = NewMediaChaosConfig()
+	globalProxyConfig      = NewProxyConfig()
 	globalSpiderConfig = spider.NewConfig()
 	globalProxyManager = NewProxyManager()
 	globalRecorder     *recorder.Recorder
@@ -1251,6 +1398,9 @@ func GetVulnConfig() *VulnConfig { return globalVulnConfig }
 
 // GetAPIChaosConfig returns the global APIChaosConfig instance.
 func GetAPIChaosConfig() *APIChaosConfig { return globalAPIChaosConfig }
+
+// GetMediaChaosConfig returns the global MediaChaosConfig instance.
+func GetMediaChaosConfig() *MediaChaosConfig { return globalMediaChaosConfig }
 
 // GetProxyConfig returns the global ProxyConfig instance.
 func GetProxyConfig() *ProxyConfig { return globalProxyConfig }
@@ -1531,6 +1681,7 @@ func (f *FeatureFlags) SetAll(enabled bool) {
 	nv.health = enabled
 	nv.spider = enabled
 	nv.apiChaos = enabled
+	nv.mediaChaos = enabled
 	f.v.Store(&nv)
 }
 
