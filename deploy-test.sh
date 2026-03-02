@@ -351,10 +351,10 @@ ENVEOF
 # =========================================================================
 test_makefile() {
     local dir="$REPO_ROOT/deploy-test-makefile"
-    local pass="make-test-pass"
+    local port=9200 admin_port=9201 pass="make-test-pass"
 
-    log "=== Testing: Makefile background service ==="
-    log "Ports: default (8765/8766) — using Makefile defaults"
+    log "=== Testing: Makefile build + custom ports ==="
+    log "Ports: $port/$admin_port"
 
     # Clean checkout
     mkdir -p "$dir"
@@ -368,37 +368,35 @@ ENVEOF
 
     cd "$dir"
 
-    # Make start uses hardcoded ports 8765/8766 — check if something is running
-    if curl -sf http://localhost:8765/health > /dev/null 2>&1; then
-        warn "Port 8765 already in use, stopping existing server"
-        make stop 2>/dev/null || true
-        sleep 2
-    fi
-
-    # Build and start
-    make start 2>&1 || {
-        fail "make start failed"
-        cat /tmp/glitch.log 2>/dev/null || true
+    # Use make to build (verifies Makefile build target works)
+    make build 2>&1 || {
+        fail "make build failed"
         cd "$REPO_ROOT"
         return 1
     }
+    log "Binary built via Makefile"
 
-    if ! wait_for_http "http://localhost:8765/health/live" 15; then
-        fail "Server failed to start via Makefile"
-        cat /tmp/glitch.log 2>/dev/null || true
-        make stop 2>/dev/null || true
+    # Start with custom ports to avoid conflicts with any running server
+    GLITCH_ADMIN_PASSWORD="$pass" nohup "$dir/glitch" -port "$port" -dash-port "$admin_port" > "$dir/server.log" 2>&1 &
+    local pid=$!
+
+    if ! wait_for_http "http://localhost:$port/health/live" 15; then
+        fail "Server failed to start"
+        cat "$dir/server.log"
+        kill $pid 2>/dev/null || true
         cd "$REPO_ROOT"
         return 1
     fi
-    log "Server started via Makefile"
+    log "Server started (PID $pid)"
 
     # Run tests
     local failures=0
-    run_tests "8765" "8766" "$pass" "makefile" || failures=$?
+    run_tests "$port" "$admin_port" "$pass" "makefile" || failures=$?
 
     # Cleanup
-    make stop 2>&1 || true
-    log "Server stopped via Makefile"
+    kill $pid 2>/dev/null || true
+    wait $pid 2>/dev/null || true
+    log "Server stopped"
     cd "$REPO_ROOT"
 
     return $failures
@@ -440,6 +438,10 @@ GLITCH_DB_PORT=9302
 ENVEOF
 
     cd "$dir"
+
+    # Create empty config.json if it doesn't exist (required by volume mount)
+    touch "$dir/config.json"
+    mkdir -p "$dir/captures"
 
     # Build and start
     docker compose up -d --build 2>&1 || {
