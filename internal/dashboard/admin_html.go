@@ -609,6 +609,31 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   /* Settings panel */
   .settings-input { background: #0d0d0d; color: #00ff88; border: 1px solid #333; padding: 8px 12px; border-radius: 4px; font-family: inherit; font-size: 0.85em; width: 100%%; outline: none; }
   .settings-input:focus { border-color: #00ff8866; }
+
+  /* Audit log */
+  .audit-filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .audit-filters select, .audit-filters input {
+    background: #0d0d0d; color: #00ff88; border: 1px solid #333;
+    padding: 6px 10px; border-radius: 4px; font-family: inherit; font-size: 0.82em; min-width: 130px; outline: none;
+  }
+  .audit-filters select:focus, .audit-filters input:focus { border-color: #00ff8866; }
+  .audit-table { width: 100%%; border-collapse: collapse; margin: 0; }
+  .audit-table th { padding: 7px 10px; text-align: left; border-bottom: 1px solid #1a1a1a; font-size: 0.75em; color: #00ccaa; background: #0d0d0d; text-transform: uppercase; letter-spacing: 0.5px; font-weight: normal; }
+  .audit-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #1a1a1a; font-size: 0.78em; }
+  .audit-row { cursor: pointer; transition: background 0.15s; }
+  .audit-row:hover { background: #1a1a1a; }
+  .audit-detail { display: none; background: #0a0a0a; border-bottom: 1px solid #1a1a1a; }
+  .audit-detail td { padding: 10px 14px; font-size: 0.75em; color: #888; white-space: pre-wrap; word-break: break-all; }
+  .audit-ok { color: #00ff88; }
+  .audit-err { color: #ff4444; }
+  .audit-warn { color: #ffaa00; }
+  .audit-delta { color: #888; font-size: 0.85em; white-space: nowrap; }
+  .audit-delta .old-val { color: #ff8844; }
+  .audit-delta .new-val { color: #00ccff; }
+  .audit-pager { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; font-size: 0.8em; color: #666; }
+  .audit-pager button { background: #222; color: #aaa; border: 1px solid #333; padding: 4px 14px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.85em; }
+  .audit-pager button:hover:not(:disabled) { background: #333; color: #ccc; }
+  .audit-pager button:disabled { opacity: 0.3; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -1714,6 +1739,30 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div class="card"><div class="label">Dashboard Port</div><div class="value v-info" style="font-size:1em" id="settings-dash-port">--</div></div>
       <div class="card"><div class="label">Uptime</div><div class="value v-ok" style="font-size:1em" id="settings-uptime">--</div></div>
       <div class="card"><div class="label">Go Version</div><div class="value" style="font-size:1em;color:#888">1.24+</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 style="display:flex;align-items:center;justify-content:space-between">// Audit Log <button class="cfg-btn" onclick="refreshAuditLog()" style="font-size:0.75em;padding:4px 12px">Refresh</button></h2>
+    <div class="audit-filters">
+      <select id="audit-filter-actor"><option value="">All Actors</option></select>
+      <select id="audit-filter-action"><option value="">All Actions</option></select>
+      <input type="text" id="audit-filter-resource" placeholder="Resource filter...">
+      <select id="audit-filter-status"><option value="">All Statuses</option></select>
+    </div>
+    <div class="tbl-scroll" style="max-height:400px">
+      <table class="audit-table">
+        <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>&Delta;</th></tr></thead>
+        <tbody id="audit-log-body"></tbody>
+      </table>
+    </div>
+    <div class="audit-pager">
+      <span id="audit-pager-info">No entries</span>
+      <span>
+        <button id="audit-prev-btn" onclick="auditPage(-1)" disabled>&laquo; Prev</button>
+        <span id="audit-page-label" style="margin:0 8px"></span>
+        <button id="audit-next-btn" onclick="auditPage(1)" disabled>Next &raquo;</button>
+      </span>
     </div>
   </div>
 </div>
@@ -4977,6 +5026,150 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }
   }
 
+  // ------ Audit log ------
+  var auditOffset = 0;
+  var auditLimit = 50;
+  var auditTotal = 0;
+
+  function auditStatusClass(status) {
+    if (status === 'success') return 'audit-ok';
+    if (status === 'error') return 'audit-err';
+    return 'audit-warn';
+  }
+
+  function auditDelta(oldVal, newVal) {
+    if (oldVal === null && newVal === null) return '';
+    if (oldVal === undefined && newVal === undefined) return '';
+    if (typeof oldVal === 'boolean' || typeof newVal === 'boolean') {
+      var o = oldVal ? '\u25cf' : '\u25cb';
+      var n = newVal ? '\u25cf' : '\u25cb';
+      return '<span class="audit-delta"><span class="old-val">' + o + '</span>\u2192<span class="new-val">' + n + '</span></span>';
+    }
+    var os = oldVal !== null && oldVal !== undefined ? String(oldVal) : '';
+    var ns = newVal !== null && newVal !== undefined ? String(newVal) : '';
+    if (!os && !ns) return '';
+    if (os.length > 12) os = os.substring(0, 12) + '\u2026';
+    if (ns.length > 12) ns = ns.substring(0, 12) + '\u2026';
+    return '<span class="audit-delta"><span class="old-val">' + esc(os) + '</span>\u2192<span class="new-val">' + esc(ns) + '</span></span>';
+  }
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+  }
+
+  function fmtAuditTime(ts) {
+    var d = new Date(ts);
+    var h = ('0'+d.getHours()).slice(-2);
+    var m = ('0'+d.getMinutes()).slice(-2);
+    var s = ('0'+d.getSeconds()).slice(-2);
+    return h + ':' + m + ':' + s;
+  }
+
+  function truncate(s, max) {
+    if (!s) return '';
+    return s.length > max ? s.substring(0, max) + '\u2026' : s;
+  }
+
+  function fmtJSON(v) {
+    if (v === null || v === undefined) return '-';
+    if (typeof v === 'object') return JSON.stringify(v, null, 2);
+    return String(v);
+  }
+
+  function populateSelect(id, values, current) {
+    var sel = document.getElementById(id);
+    if (!sel) return;
+    var label = sel.options[0].text;
+    var html = '<option value="">' + label + '</option>';
+    for (var i = 0; i < values.length; i++) {
+      var selected = values[i] === current ? ' selected' : '';
+      html += '<option value="' + esc(values[i]) + '"' + selected + '>' + esc(values[i]) + '</option>';
+    }
+    sel.innerHTML = html;
+  }
+
+  window.auditPage = function(dir) {
+    auditOffset += dir * auditLimit;
+    if (auditOffset < 0) auditOffset = 0;
+    refreshAuditLog();
+  };
+
+  async function refreshAuditLog() {
+    try {
+      var actor = document.getElementById('audit-filter-actor').value;
+      var action = document.getElementById('audit-filter-action').value;
+      var resource = document.getElementById('audit-filter-resource').value;
+      var status = document.getElementById('audit-filter-status').value;
+
+      var qs = '?limit=' + auditLimit + '&offset=' + auditOffset;
+      if (actor) qs += '&actor=' + encodeURIComponent(actor);
+      if (action) qs += '&action=' + encodeURIComponent(action);
+      if (resource) qs += '&resource=' + encodeURIComponent(resource);
+      if (status) qs += '&status=' + encodeURIComponent(status);
+
+      var data = await api('/admin/api/audit' + qs);
+      var entries = data.entries || [];
+      auditTotal = data.total || 0;
+
+      // Populate filter dropdowns (preserve current selection)
+      if (data.filters) {
+        populateSelect('audit-filter-actor', data.filters.actors || [], actor);
+        populateSelect('audit-filter-action', data.filters.actions || [], action);
+        populateSelect('audit-filter-status', data.filters.statuses || [], status);
+      }
+
+      // Render table
+      var body = document.getElementById('audit-log-body');
+      var html = '';
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        var sc = auditStatusClass(e.status);
+        var res = esc(truncate(e.resource || '', 30));
+        var resFull = esc(e.resource || '');
+        var delta = auditDelta(e.old_value, e.new_value);
+        html += '<tr class="audit-row" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'table-row\':\'none\'">';
+        html += '<td title="' + esc(e.timestamp || '') + '">' + fmtAuditTime(e.timestamp) + '</td>';
+        html += '<td>' + esc(e.actor || '') + '</td>';
+        html += '<td class="' + sc + '">' + esc(e.action || '') + '</td>';
+        html += '<td title="' + resFull + '">' + res + '</td>';
+        html += '<td>' + delta + '</td>';
+        html += '</tr>';
+        html += '<tr class="audit-detail" style="display:none"><td colspan="5">';
+        html += '<strong style="color:#00ccaa">Old Value:</strong>\n' + esc(fmtJSON(e.old_value)) + '\n\n';
+        html += '<strong style="color:#00ccaa">New Value:</strong>\n' + esc(fmtJSON(e.new_value)) + '\n\n';
+        if (e.details) html += '<strong style="color:#00ccaa">Details:</strong>\n' + esc(fmtJSON(e.details)) + '\n\n';
+        if (e.client_ip) html += '<strong style="color:#00ccaa">Client IP:</strong> ' + esc(e.client_ip) + '\n';
+        html += '</td></tr>';
+      }
+      if (entries.length === 0) {
+        html = '<tr><td colspan="5" style="color:#555;text-align:center;padding:20px">No audit entries</td></tr>';
+      }
+      body.innerHTML = html;
+
+      // Pager
+      var start = auditTotal > 0 ? auditOffset + 1 : 0;
+      var end = Math.min(auditOffset + auditLimit, auditTotal);
+      var totalPages = Math.ceil(auditTotal / auditLimit) || 1;
+      var curPage = Math.floor(auditOffset / auditLimit) + 1;
+      document.getElementById('audit-pager-info').textContent = 'Showing ' + start + '-' + end + ' of ' + auditTotal;
+      document.getElementById('audit-page-label').textContent = 'Page ' + curPage + ' of ' + totalPages;
+      document.getElementById('audit-prev-btn').disabled = auditOffset <= 0;
+      document.getElementById('audit-next-btn').disabled = auditOffset + auditLimit >= auditTotal;
+    } catch(e) {}
+  }
+
+  // Reset offset when filters change
+  document.getElementById('audit-filter-actor').onchange = function() { auditOffset = 0; refreshAuditLog(); };
+  document.getElementById('audit-filter-action').onchange = function() { auditOffset = 0; refreshAuditLog(); };
+  document.getElementById('audit-filter-status').onchange = function() { auditOffset = 0; refreshAuditLog(); };
+  var auditResTimer = null;
+  document.getElementById('audit-filter-resource').oninput = function() {
+    clearTimeout(auditResTimer);
+    auditResTimer = setTimeout(function() { auditOffset = 0; refreshAuditLog(); }, 300);
+  };
+
   // ------ Settings refresh ------
   async function refreshSettings() {
     try {
@@ -4989,11 +5182,22 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var srvPort = document.getElementById('settings-server-port');
       if (srvPort) srvPort.textContent = (parseInt(window.location.port || '8766') - 1) + '';
     } catch(e) {}
+    await refreshAuditLog();
+  }
+
+  // ------ Header uptime (always visible, independent of active tab) ------
+  async function refreshHeaderUptime() {
+    try {
+      var m = await api('/api/metrics');
+      var el = document.getElementById('header-uptime');
+      if (el && m.uptime_seconds) el.textContent = 'uptime: ' + fmtUptime(m.uptime_seconds);
+    } catch(e) {}
   }
 
   // ------ Main loop ------
   async function refresh() {
     refreshNightmareBar();
+    refreshHeaderUptime();
     const active = document.querySelector('.panel.active');
     if (!active) return;
     const id = active.id;
