@@ -23,9 +23,11 @@ var (
 	builtinEngine *scanner.Engine
 	builtinReport *scanner.Report
 	builtinCancel context.CancelFunc
-	builtinState  = "idle" // idle, running, completed, error
-	builtinError  string
-	builtinStart  time.Time
+	builtinState   = "idle" // idle, running, completed, error
+	builtinError   string
+	builtinStart   time.Time
+	builtinProfile string
+	builtinTarget  string
 
 	// History of built-in scanner runs (ring buffer, max 50)
 	builtinHistory   []builtinHistoryEntry
@@ -192,6 +194,8 @@ func adminAPIBuiltinRun(w http.ResponseWriter, r *http.Request) {
 	builtinReport = nil
 	builtinError = ""
 	builtinStart = time.Now()
+	builtinProfile = cfg.Profile
+	builtinTarget = cfg.Target
 	builtinMu.Unlock()
 
 	// Run in background goroutine
@@ -275,6 +279,22 @@ func adminAPIBuiltinStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"state": builtinState,
 	}
+
+	// Always include profile/target if available
+	if builtinProfile != "" {
+		resp["profile"] = builtinProfile
+		resp["target"] = builtinTarget
+	}
+
+	// Include last completed scan info from history
+	builtinHistoryMu.RLock()
+	if len(builtinHistory) > 0 {
+		last := builtinHistory[len(builtinHistory)-1]
+		resp["last_profile"] = last.Profile
+		resp["last_timestamp"] = last.Timestamp
+		resp["last_findings"] = last.Findings
+	}
+	builtinHistoryMu.RUnlock()
 
 	if builtinState == "running" && builtinEngine != nil {
 		completed, total, findings := builtinEngine.Progress()
