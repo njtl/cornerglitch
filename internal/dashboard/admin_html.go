@@ -3154,15 +3154,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           slow_partial: 'Slow / Partial', data_edge_cases: 'Data Edge Cases',
           encoding_chaos: 'Encoding Chaos', auth_chaos: 'Auth Chaos'
         };
-        var html = '';
         var cats = Object.keys(d.categories).sort();
-        for (var i = 0; i < cats.length; i++) {
-          var cat = cats[i];
-          var on = d.categories[cat];
+        catsEl.innerHTML = cats.map(function(cat) {
+          var on = d.categories[cat] ? 'checked' : '';
           var label = catNames[cat] || cat;
-          html += '<button class="group-btn ' + (on ? 'on' : 'off') + '" onclick="toggleAPIChaosCategory(\'' + cat + '\',' + !on + ')" style="font-size:0.72em">' + label + '</button>';
-        }
-        catsEl.innerHTML = html;
+          return '<div class="group-toggle">' +
+            '<div class="toggle-name">' + label + '</div>' +
+            '<label class="toggle-sw">' +
+            '<input type="checkbox" ' + on + ' onchange="toggleAPIChaosCategory(\'' + cat + '\', this.checked)">' +
+            '<div class="toggle-track"></div>' +
+            '<div class="toggle-knob"></div>' +
+            '</label></div>';
+        }).join('');
       }
     } catch(e) {}
   }
@@ -3222,15 +3225,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           infinite_content: 'Infinite Content', stream_switching: 'Stream Switching',
           cache_poisoning: 'Cache Poisoning', streaming_chaos: 'HLS/DASH'
         };
-        var html = '';
         var cats = Object.keys(d.categories).sort();
-        for (var i = 0; i < cats.length; i++) {
-          var cat = cats[i];
-          var on = d.categories[cat];
+        catsEl.innerHTML = cats.map(function(cat) {
+          var on = d.categories[cat] ? 'checked' : '';
           var label = catNames[cat] || cat;
-          html += '<button class="group-btn ' + (on ? 'on' : 'off') + '" onclick="toggleMediaChaosCategory(\'' + cat + '\',' + !on + ')" style="font-size:0.72em">' + label + '</button>';
-        }
-        catsEl.innerHTML = html;
+          return '<div class="group-toggle">' +
+            '<div class="toggle-name">' + label + '</div>' +
+            '<label class="toggle-sw">' +
+            '<input type="checkbox" ' + on + ' onchange="toggleMediaChaosCategory(\'' + cat + '\', this.checked)">' +
+            '<div class="toggle-track"></div>' +
+            '<div class="toggle-knob"></div>' +
+            '</label></div>';
+        }).join('');
       }
     } catch(e) {}
   }
