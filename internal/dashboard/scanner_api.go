@@ -110,6 +110,17 @@ func LoadBuiltinScanHistory() {
 	log.Printf("\033[36m[glitch]\033[0m Restored %d scan history entries from PostgreSQL", len(scans))
 }
 
+// ClearBuiltinScanHistory removes all built-in scanner history and reports.
+func ClearBuiltinScanHistory() {
+	builtinHistoryMu.Lock()
+	builtinHistory = nil
+	builtinHistoryMu.Unlock()
+
+	builtinReportsMu.Lock()
+	builtinReports = make(map[string]*scanner.Report)
+	builtinReportsMu.Unlock()
+}
+
 // RegisterBuiltinScannerRoutes registers the built-in scanner API endpoints.
 func RegisterBuiltinScannerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/scanner/builtin/run", adminAPIBuiltinRun)

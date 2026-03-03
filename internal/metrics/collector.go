@@ -406,6 +406,38 @@ func (c *Collector) CurrentRPS() float64 {
 	return float64(sum) / float64(count)
 }
 
+// ResetCounters zeroes all global counters.
+func (c *Collector) ResetCounters() {
+	c.TotalRequests.Store(0)
+	c.TotalErrors.Store(0)
+	c.Total2xx.Store(0)
+	c.Total4xx.Store(0)
+	c.Total5xx.Store(0)
+	c.TotalDelayed.Store(0)
+	c.TotalLabyrinth.Store(0)
+	c.TotalRequestBytes.Store(0)
+	c.TotalResponseBytes.Store(0)
+	c.SessionRequestBytes.Store(0)
+	c.SessionResponseBytes.Store(0)
+}
+
+// ResetRecords clears the ring buffer and time-series buckets.
+func (c *Collector) ResetRecords() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.records = make([]RequestRecord, c.recordSize)
+	c.recordIdx = 0
+	c.buckets = make([]secondBucket, c.bucketSize)
+	c.bucketIdx = 0
+}
+
+// ResetClients clears all per-client profiles.
+func (c *Collector) ResetClients() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clients = make(map[string]*ClientProfile)
+}
+
 // Uptime returns server uptime.
 func (c *Collector) Uptime() time.Duration {
 	return time.Since(c.startTime)
