@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -202,6 +203,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	h.collector.ActiveConns.Add(1)
 	defer h.collector.ActiveConns.Add(-1)
+
+	// Panic recovery — log the stack trace instead of crashing the server
+	defer func() {
+		if rv := recover(); rv != nil {
+			log.Printf("\033[31m[PANIC]\033[0m %s %s: %v\n%s", r.Method, r.URL.Path, rv, debug.Stack())
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+	}()
 
 	// Wrap the response writer to track bytes written
 	mrw := &metricsResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
