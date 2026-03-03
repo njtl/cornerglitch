@@ -586,6 +586,7 @@ func TestOxylabs_PlatformMismatchDetected(t *testing.T) {
 	// Retry a few times since the server has probabilistic error injection
 	// that can randomly return 5xx on any request.
 	client := &http.Client{}
+	var lastErr error
 	for i := 0; i < 5; i++ {
 		req, _ := http.NewRequest("GET", serverURL+"/", nil)
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
@@ -594,13 +595,18 @@ func TestOxylabs_PlatformMismatchDetected(t *testing.T) {
 		req.Header.Set("Accept", "text/html")
 		resp, err := client.Do(req)
 		if err != nil {
-			t.Fatal(err)
+			lastErr = err
+			time.Sleep(100 * time.Millisecond)
+			continue // connection error from chaos injection, retry
 		}
 		resp.Body.Close()
 		if resp.StatusCode < 500 {
 			return // success — got a non-5xx response
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+	if lastErr != nil {
+		t.Fatalf("platform mismatch: all 5 attempts failed with errors, last: %v", lastErr)
 	}
 	t.Error("platform mismatch request returned 5xx on all 5 attempts")
 }
