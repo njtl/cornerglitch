@@ -115,12 +115,56 @@ func RegisterBuiltinScannerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/scanner/builtin/history", adminAPIBuiltinHistory)
 	mux.HandleFunc("/admin/api/scanner/builtin/history/detail", adminAPIBuiltinHistoryDetail)
 	mux.HandleFunc("/admin/api/scanner/builtin/modules", adminAPIBuiltinModules)
+	mux.HandleFunc("/admin/api/scanner/builtin/config", adminAPIBuiltinConfig)
 }
 
 func adminAPIBuiltinModules(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	modules := attacks.ListModules()
 	json.NewEncoder(w).Encode(modules)
+}
+
+func adminAPIBuiltinConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case "GET":
+		builtinMu.RLock()
+		resp := map[string]interface{}{
+			"default_profile": builtinProfile,
+			"default_target":  builtinTarget,
+			"default_modules": builtinModules,
+		}
+		builtinMu.RUnlock()
+		json.NewEncoder(w).Encode(resp)
+
+	case "POST":
+		var req struct {
+			Profile string   `json:"default_profile"`
+			Target  string   `json:"default_target"`
+			Modules []string `json:"default_modules"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+		builtinMu.Lock()
+		if req.Profile != "" {
+			builtinProfile = req.Profile
+		}
+		if req.Target != "" {
+			builtinTarget = req.Target
+		}
+		if req.Modules != nil {
+			builtinModules = req.Modules
+		}
+		builtinMu.Unlock()
+		TriggerAutoSave()
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+
+	default:
+		http.Error(w, `{"error":"GET or POST required"}`, http.StatusMethodNotAllowed)
+	}
 }
 
 func adminAPIBuiltinRun(w http.ResponseWriter, r *http.Request) {
@@ -262,6 +306,9 @@ func adminAPIBuiltinRun(w http.ResponseWriter, r *http.Request) {
 			if store := GetStore(); store != nil {
 				go persistScanToDB(store, cfg.Profile, report)
 			}
+
+			// Auto-save state file with latest scanner results
+			TriggerAutoSave()
 		}
 
 		builtinCancel = nil

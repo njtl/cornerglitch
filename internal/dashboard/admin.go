@@ -114,6 +114,7 @@ func TriggerAutoSave() {
 				APIChaosConfig:    export.APIChaosConfig,
 				MediaChaosConfig:  export.MediaChaosConfig,
 				ProxyConfig:       export.ProxyConfig,
+				ScannerConfig:     export.ScannerConfig,
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -147,6 +148,7 @@ func LoadStateFile() bool {
 				APIChaosConfig:   dbExport.APIChaosConfig,
 				MediaChaosConfig: dbExport.MediaChaosConfig,
 				ProxyConfig:      dbExport.ProxyConfig,
+				ScannerConfig:    dbExport.ScannerConfig,
 			}
 			ImportConfig(export)
 			audit.LogSystem("config.load", "config.load", map[string]interface{}{"source": "postgresql"})
