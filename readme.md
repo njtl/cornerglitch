@@ -191,6 +191,9 @@ cp .env.example .env    # then edit with your values
 |----------|----------|---------|---------|
 | `GLITCH_ADMIN_PASSWORD` | Recommended | Dashboard login password | Auto-generated (printed to stderr) |
 | `GLITCH_DB_URL` | **Yes** for persistence | PostgreSQL connection string | None (memory-only mode) |
+| `PASSWORD_RESET_FROM_ENV` | No | Set to `1` to force-reset password from env | `0` (disabled) |
+
+> **Password persistence**: Password changes via the admin UI are saved to the database. On restart, the DB password takes priority over the `.env` value. To recover from a forgotten password, set `PASSWORD_RESET_FROM_ENV=1` — this overwrites the DB password with `GLITCH_ADMIN_PASSWORD` on next startup. Remove the flag after resetting.
 
 > **Warning**: Without `GLITCH_DB_URL`, the server runs in memory-only mode. All metrics, scan history, client profiles, and configuration are lost on restart. The server logs a warning when no database URL is configured.
 

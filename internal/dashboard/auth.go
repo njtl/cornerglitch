@@ -1,12 +1,14 @@
 package dashboard
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -269,6 +271,8 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // ChangePassword validates the current password and sets a new one.
+// The new password is persisted to the database (if available) so it
+// survives server restarts.
 func ChangePassword(current, newPassword string) error {
 	if !checkPassword(current) {
 		audit.LogEntry(audit.Entry{
@@ -284,7 +288,60 @@ func ChangePassword(current, newPassword string) error {
 	// Invalidate all existing sessions
 	sessions = sync.Map{}
 	audit.LogAction("admin", "auth.password_change", "auth.password", nil)
+	// Persist to DB so password survives restarts.
+	savePasswordToDB(newPassword)
 	return nil
+}
+
+// savePasswordToDB persists the admin password to the database.
+func savePasswordToDB(password string) {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := store.SaveConfig(ctx, "admin_password", password); err != nil {
+		log.Printf("\033[33m[glitch]\033[0m Failed to persist password to DB: %v", err)
+	}
+}
+
+// RestorePassword loads the admin password from the database on startup.
+// Priority order:
+//  1. If PASSWORD_RESET_FROM_ENV=1 and GLITCH_ADMIN_PASSWORD is set, use env
+//     password and overwrite the DB copy (for password resets).
+//  2. If the DB has a stored password, use it.
+//  3. Otherwise keep whatever was set via env/flag (or auto-generate).
+func RestorePassword() {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+
+	envReset := os.Getenv("PASSWORD_RESET_FROM_ENV")
+	envPw := os.Getenv("GLITCH_ADMIN_PASSWORD")
+
+	if envReset == "1" && envPw != "" {
+		// Force reset from env — overwrite DB password.
+		SetAdminPassword(envPw)
+		savePasswordToDB(envPw)
+		log.Printf("\033[36m[glitch]\033[0m Password reset from environment (PASSWORD_RESET_FROM_ENV=1)")
+		return
+	}
+
+	// Try to load from DB.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var dbPassword string
+	found, err := store.LoadConfig(ctx, "admin_password", &dbPassword)
+	if err != nil {
+		log.Printf("\033[33m[glitch]\033[0m Failed to load password from DB: %v", err)
+		return
+	}
+	if found && dbPassword != "" {
+		SetAdminPassword(dbPassword)
+		log.Printf("\033[36m[glitch]\033[0m Restored admin password from database")
+	}
 }
 
 // ---------------------------------------------------------------------------

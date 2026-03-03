@@ -1227,6 +1227,20 @@ func ImportConfig(export *ConfigExport) {
 	// Import proxy config
 	if export.ProxyConfig != nil {
 		globalProxyConfig.Restore(export.ProxyConfig)
+		// Extract proxy runtime state for deferred auto-start.
+		if running, ok := export.ProxyConfig["proxy_running"].(bool); ok && running {
+			port := 8080
+			target := "http://localhost:8765"
+			if p, ok := export.ProxyConfig["proxy_port"].(float64); ok && p > 0 {
+				port = int(p)
+			}
+			if t, ok := export.ProxyConfig["proxy_target"].(string); ok && t != "" {
+				target = t
+			}
+			pendingBlockingMu.Lock()
+			pendingProxyRuntime = &proxyRuntimeState{Port: port, Target: target}
+			pendingBlockingMu.Unlock()
+		}
 	}
 
 	// Import blocking config — apply to adaptive engine if available,
@@ -1374,6 +1388,7 @@ func (pc *ProxyConfig) Snapshot() map[string]interface{} {
 
 // SnapshotForExport returns a minimal snapshot of proxy state suitable for persistence.
 // Unlike Snapshot() (which includes runtime stats), this only captures restorable config.
+// Includes proxy runtime state (running/port/target) so the proxy auto-starts on restore.
 func (pc *ProxyConfig) SnapshotForExport() map[string]interface{} {
 	pc.mu.RLock()
 	defer pc.mu.RUnlock()
@@ -1388,6 +1403,14 @@ func (pc *ProxyConfig) SnapshotForExport() map[string]interface{} {
 	}
 	if pc.Mirror != nil {
 		result["mirror"] = pc.Mirror
+	}
+	// Include proxy manager runtime state for restart persistence.
+	pm := globalProxyManager
+	pmStatus := pm.Status()
+	if running, ok := pmStatus["running"].(bool); ok && running {
+		result["proxy_running"] = true
+		result["proxy_port"] = pmStatus["port"]
+		result["proxy_target"] = pmStatus["target"]
 	}
 	return result
 }
@@ -1562,6 +1585,9 @@ var (
 	pendingOverrides  map[string]string
 	pendingBlockingMu sync.Mutex
 
+	// Pending proxy runtime state — stored by ImportConfig for deferred auto-start.
+	pendingProxyRuntime *proxyRuntimeState
+
 	// Scanner runner — uses the real scanner package
 	scanRunner   *scaneval.Runner
 	scanRunnerMu sync.Mutex
@@ -1590,6 +1616,32 @@ func GetProxyConfig() *ProxyConfig { return globalProxyConfig }
 
 // GetProxyManager returns the global ProxyManager instance.
 func GetProxyManager() *ProxyManager { return globalProxyManager }
+
+// proxyRuntimeState holds proxy running state for deferred auto-start.
+type proxyRuntimeState struct {
+	Port   int
+	Target string
+}
+
+// RestoreProxyRuntime auto-starts the embedded proxy if it was running before
+// the last shutdown. Called after config is fully loaded and subsystems are ready.
+func RestoreProxyRuntime() {
+	pendingBlockingMu.Lock()
+	state := pendingProxyRuntime
+	pendingProxyRuntime = nil
+	pendingBlockingMu.Unlock()
+
+	if state == nil {
+		return
+	}
+
+	log.Printf("[glitch] Restoring proxy runtime state (port=%d, target=%s)", state.Port, state.Target)
+	if err := globalProxyManager.Start(state.Port, state.Target); err != nil {
+		log.Printf("\033[33m[glitch]\033[0m Failed to auto-start proxy: %v", err)
+	} else {
+		log.Printf("\033[36m[glitch]\033[0m Proxy auto-started on :%d -> %s", state.Port, state.Target)
+	}
+}
 
 // GetSpiderConfig returns the global spider Config instance.
 func GetSpiderConfig() *spider.Config { return globalSpiderConfig }
