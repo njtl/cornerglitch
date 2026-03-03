@@ -851,11 +851,15 @@ func TestProxy_Behavioral_ServerStillResponds(t *testing.T) {
 func TestProxy_Mirror_CapturesErrorWeights(t *testing.T) {
 	requireAdmin(t)
 
-	// Set distinctive error weights on the server
+	// Set distinctive error weights on the server (one at a time via API)
 	postJSON(adminURL+"/admin/api/error-weights", map[string]interface{}{
-		"http_500": 0.5,
-		"http_503": 0.3,
-		"http_429": 0.2,
+		"error_type": "http_500", "weight": 0.5,
+	})
+	postJSON(adminURL+"/admin/api/error-weights", map[string]interface{}{
+		"error_type": "http_503", "weight": 0.3,
+	})
+	postJSON(adminURL+"/admin/api/error-weights", map[string]interface{}{
+		"error_type": "http_429", "weight": 0.2,
 	})
 
 	// Switch to mirror mode
@@ -1245,14 +1249,19 @@ func TestProxy_Nightmare_RestoreDifferentModes(t *testing.T) {
 func TestProxy_Mirror_ErrorWeightsRoundtrip(t *testing.T) {
 	requireAdmin(t)
 
-	// Set specific error weights on the server
-	weights := map[string]interface{}{
-		"http_500": 0.4,
-		"http_502": 0.3,
-		"http_503": 0.2,
-		"http_504": 0.1,
-	}
-	postJSON(adminURL+"/admin/api/error-weights", weights)
+	// Set specific error weights on the server (one at a time via API)
+	postJSON(adminURL+"/admin/api/error-weights", map[string]interface{}{
+		"error_type": "http_500", "weight": 0.4,
+	})
+	postJSON(adminURL+"/admin/api/error-weights", map[string]interface{}{
+		"error_type": "http_502", "weight": 0.3,
+	})
+	postJSON(adminURL+"/admin/api/error-weights", map[string]interface{}{
+		"error_type": "http_503", "weight": 0.2,
+	})
+	postJSON(adminURL+"/admin/api/error-weights", map[string]interface{}{
+		"error_type": "http_504", "weight": 0.1,
+	})
 
 	// Enter mirror mode and refresh
 	setProxyMode(t, "mirror")
