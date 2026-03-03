@@ -267,6 +267,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ResponseType: "blocked", UserAgent: r.UserAgent(), RemoteAddr: r.RemoteAddr,
 			RequestBytes: reqBytes, ResponseBytes: mrw.bytesWritten,
 		})
+		dashboard.LogRequest(clientID, r.Method, r.URL.Path, statusCode, float64(latency.Milliseconds()), "blocked", r.UserAgent())
 		log.Printf("%s[blocked]%s %s %s %d %s (client=%s class=%s)",
 			red, reset, r.Method, r.URL.Path, statusCode, latency, clientID[:16], clientClass)
 		return
@@ -296,6 +297,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RequestBytes:  reqBytes,
 		ResponseBytes: mrw.bytesWritten,
 	})
+	dashboard.LogRequest(clientID, r.Method, r.URL.Path, statusCode, float64(latency.Milliseconds()), responseType, r.UserAgent())
 
 	// Step 5.5: Record to traffic capture (if recording)
 	if h.rec != nil && h.flags.IsRecorderEnabled() && h.rec.IsRecording() {

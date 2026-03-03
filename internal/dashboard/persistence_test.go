@@ -11,6 +11,7 @@ import (
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/spider"
+	"github.com/glitchWebServer/internal/storage"
 )
 
 // ---------------------------------------------------------------------------
@@ -1234,6 +1235,7 @@ func resetGlobals() {
 	pendingBlockingMu.Lock()
 	pendingBlocking = nil
 	pendingOverrides = nil
+	pendingProxyRuntime = nil
 	pendingBlockingMu.Unlock()
 
 	// Reset scanner defaults.
@@ -1830,5 +1832,207 @@ func verifyGlobals(t *testing.T, expected expectedState) {
 				t.Errorf("override %q: got %v, want %q", clientID, gotMode, wantMode)
 			}
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Password persistence tests
+// ---------------------------------------------------------------------------
+
+// TestPersistence_PasswordChangeUpdatesGlobal verifies that ChangePassword
+// updates the in-memory password (DB persistence is tested with live DB).
+func TestPersistence_PasswordChangeUpdatesGlobal(t *testing.T) {
+	SetAdminPassword("original123")
+	if err := ChangePassword("original123", "newpass456"); err != nil {
+		t.Fatalf("ChangePassword should succeed: %v", err)
+	}
+	if !checkPassword("newpass456") {
+		t.Error("new password should be accepted after change")
+	}
+	if checkPassword("original123") {
+		t.Error("old password should be rejected after change")
+	}
+}
+
+// TestPersistence_PasswordChangeRejectsWrongCurrent verifies incorrect
+// current password is rejected.
+func TestPersistence_PasswordChangeRejectsWrongCurrent(t *testing.T) {
+	SetAdminPassword("correct")
+	err := ChangePassword("wrong", "newpw")
+	if err == nil {
+		t.Error("ChangePassword should fail with wrong current password")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Proxy runtime state persistence tests
+// ---------------------------------------------------------------------------
+
+// TestPersistence_ProxyRuntimeState verifies that proxy running state
+// (port + target) round-trips through export/import.
+func TestPersistence_ProxyRuntimeState(t *testing.T) {
+	resetGlobals()
+
+	// Simulate proxy config with runtime state.
+	proxyConfig := map[string]interface{}{
+		"mode":          "chaos",
+		"proxy_running": true,
+		"proxy_port":    float64(9090),
+		"proxy_target":  "http://localhost:8765",
+	}
+
+	export := &ConfigExport{
+		Version:     "1.0",
+		Features:    globalFlags.Snapshot(),
+		Config:      globalConfig.Get(),
+		VulnConfig:  globalVulnConfig.Snapshot(),
+		ProxyConfig: proxyConfig,
+	}
+
+	// Clear any pending state.
+	pendingBlockingMu.Lock()
+	pendingProxyRuntime = nil
+	pendingBlockingMu.Unlock()
+
+	ImportConfig(export)
+
+	// Verify pending proxy runtime state was captured.
+	pendingBlockingMu.Lock()
+	state := pendingProxyRuntime
+	pendingProxyRuntime = nil
+	pendingBlockingMu.Unlock()
+
+	if state == nil {
+		t.Fatal("pendingProxyRuntime should be set after import with proxy_running=true")
+	}
+	if state.Port != 9090 {
+		t.Errorf("proxy port: got %d, want 9090", state.Port)
+	}
+	if state.Target != "http://localhost:8765" {
+		t.Errorf("proxy target: got %q, want %q", state.Target, "http://localhost:8765")
+	}
+}
+
+// TestPersistence_ProxyRuntimeState_NotRunning verifies that stopped proxy
+// does not set pending runtime state.
+func TestPersistence_ProxyRuntimeState_NotRunning(t *testing.T) {
+	resetGlobals()
+
+	export := &ConfigExport{
+		Version:     "1.0",
+		Features:    globalFlags.Snapshot(),
+		Config:      globalConfig.Get(),
+		VulnConfig:  globalVulnConfig.Snapshot(),
+		ProxyConfig: map[string]interface{}{"mode": "transparent"},
+	}
+
+	pendingBlockingMu.Lock()
+	pendingProxyRuntime = nil
+	pendingBlockingMu.Unlock()
+
+	ImportConfig(export)
+
+	pendingBlockingMu.Lock()
+	state := pendingProxyRuntime
+	pendingBlockingMu.Unlock()
+
+	if state != nil {
+		t.Error("pendingProxyRuntime should be nil when proxy_running is not set")
+	}
+}
+
+// TestPersistence_ProxyRuntimeState_JSONRoundTrip verifies that proxy
+// runtime state survives JSON serialization.
+func TestPersistence_ProxyRuntimeState_JSONRoundTrip(t *testing.T) {
+	resetGlobals()
+
+	proxyConfig := map[string]interface{}{
+		"mode":          "waf",
+		"proxy_running": true,
+		"proxy_port":    float64(7070),
+		"proxy_target":  "http://backend:3000",
+	}
+
+	export := &ConfigExport{
+		Version:     "1.0",
+		Features:    globalFlags.Snapshot(),
+		Config:      globalConfig.Get(),
+		VulnConfig:  globalVulnConfig.Snapshot(),
+		ProxyConfig: proxyConfig,
+	}
+
+	// JSON round-trip
+	data, err := json.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var restored ConfigExport
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	pendingBlockingMu.Lock()
+	pendingProxyRuntime = nil
+	pendingBlockingMu.Unlock()
+
+	ImportConfig(&restored)
+
+	pendingBlockingMu.Lock()
+	state := pendingProxyRuntime
+	pendingProxyRuntime = nil
+	pendingBlockingMu.Unlock()
+
+	if state == nil {
+		t.Fatal("proxy runtime state should survive JSON round-trip")
+	}
+	if state.Port != 7070 {
+		t.Errorf("proxy port after JSON round-trip: got %d, want 7070", state.Port)
+	}
+	if state.Target != "http://backend:3000" {
+		t.Errorf("proxy target after JSON round-trip: got %q, want %q", state.Target, "http://backend:3000")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Request logger tests
+// ---------------------------------------------------------------------------
+
+// TestPersistence_RequestLoggerSampling verifies the sampling logic of the
+// request logger (without needing a real database).
+func TestPersistence_RequestLoggerSampling(t *testing.T) {
+	// Without globalRequestLogger set, LogRequest should be a no-op.
+	LogRequest("client1", "GET", "/test", 200, 1.5, "ok", "test-agent")
+	// No panic or error = pass.
+
+	// Verify the counter-based sampling works in isolation.
+	rl := &RequestLogger{
+		ch:      make(chan storage.RequestLogEntry, 100),
+		stopCh:  make(chan struct{}),
+		done:    make(chan struct{}),
+		sampleN: 5, // log every 5th request
+	}
+
+	// Temporarily set as global.
+	old := globalRequestLogger
+	globalRequestLogger = rl
+	defer func() { globalRequestLogger = old }()
+
+	// Send 20 requests — should get 4 logged (5th, 10th, 15th, 20th).
+	for i := 0; i < 20; i++ {
+		LogRequest("c1", "GET", "/path", 200, 1.0, "ok", "ua")
+	}
+
+	count := 0
+	for {
+		select {
+		case <-rl.ch:
+			count++
+		default:
+			goto done
+		}
+	}
+done:
+	if count != 4 {
+		t.Errorf("expected 4 sampled requests, got %d", count)
 	}
 }

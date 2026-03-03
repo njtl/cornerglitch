@@ -127,6 +127,10 @@ func main() {
 		log.Printf("\033[33m[glitch]\033[0m No GLITCH_DB_URL set — running without database persistence")
 	}
 
+	// Restore admin password from DB (before audit init, after storage).
+	// Respects PASSWORD_RESET_FROM_ENV=1 to force reset from env var.
+	dashboard.RestorePassword()
+
 	// Initialize audit logger (after storage, before config load).
 	var auditStore audit.AuditStore
 	if store := dashboard.GetStore(); store != nil {
@@ -208,7 +212,11 @@ func main() {
 	}
 
 	dashSrv := dashboard.NewServer(collector, fp, adapt, *dashPort)
+
+	// Auto-start proxy if it was running before last shutdown.
+	dashboard.RestoreProxyRuntime()
 	stopSnapshotter := dashboard.StartMetricsSnapshotter(collector)
+	stopRequestLogger := dashboard.StartRequestLogger(10) // sample 1 in 10 requests
 
 	go func() {
 		log.Printf("\033[36m[glitch]\033[0m Dashboard listening on :%d", *dashPort)
@@ -233,9 +241,14 @@ func main() {
 	log.Println("\033[33m[glitch]\033[0m Shutting down...")
 	audit.LogSystem("system.stop", "system.lifecycle", nil)
 	stopSnapshotter()
+	stopRequestLogger()
 	// Final metrics and client profile save before shutdown.
 	dashboard.SaveMetricsNow(collector)
 	dashboard.SaveClientProfiles(collector)
+	// Stop embedded proxy if running.
+	if pm := dashboard.GetProxyManager(); pm.IsRunning() {
+		pm.Stop()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)

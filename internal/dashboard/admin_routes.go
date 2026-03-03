@@ -936,6 +936,7 @@ func adminAPIOverridePost(w http.ResponseWriter, r *http.Request, s *Server) {
 	if req.Clear {
 		s.adapt.ClearOverride(req.ClientID)
 		audit.LogAction("admin", "client.override_clear", "client."+req.ClientID, map[string]interface{}{"old_mode": oldMode})
+		TriggerAutoSave()
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":        true,
 			"client_id": req.ClientID,
@@ -956,6 +957,7 @@ func adminAPIOverridePost(w http.ResponseWriter, r *http.Request, s *Server) {
 
 	s.adapt.SetOverride(req.ClientID, adaptive.BehaviorMode(req.Mode))
 	audit.Log("admin", "client.override", "client."+req.ClientID, oldMode, req.Mode, nil)
+	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":        true,
 		"client_id": req.ClientID,
@@ -2296,6 +2298,7 @@ func adminAPIProxyRuntime(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		audit.LogAction("admin", "proxy.start", "proxy.runtime", map[string]interface{}{"port": req.Port, "target": req.Target})
+		TriggerAutoSave()
 	case "stop":
 		if err := globalProxyManager.Stop(); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -2305,6 +2308,7 @@ func adminAPIProxyRuntime(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		audit.LogAction("admin", "proxy.stop", "proxy.runtime", nil)
+		TriggerAutoSave()
 	case "restart":
 		if err := globalProxyManager.Restart(); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -2314,6 +2318,7 @@ func adminAPIProxyRuntime(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		audit.LogAction("admin", "proxy.restart", "proxy.runtime", nil)
+		TriggerAutoSave()
 	default:
 		http.Error(w, `{"error":"invalid action, use: start, stop, restart"}`, http.StatusBadRequest)
 		return
