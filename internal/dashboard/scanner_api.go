@@ -2,7 +2,10 @@ package dashboard
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -83,10 +86,11 @@ func LoadBuiltinScanHistory() {
 		}
 
 		entry := builtinHistoryEntry{
-			ID:        rec.CreatedAt.Format("20060102-150405"),
+			ID:        generateHistoryID(),
 			Timestamp: rec.CreatedAt.UTC().Format(time.RFC3339),
 			Profile:   rec.ScannerName,
 			Findings:  len(report.Findings),
+			Duration:  report.DurationMs,
 			Requests:  report.TotalRequests,
 		}
 		if report.Summary != nil {
@@ -262,7 +266,7 @@ func adminAPIBuiltinRun(w http.ResponseWriter, r *http.Request) {
 
 			// Add to history
 			entry := builtinHistoryEntry{
-				ID:        time.Now().Format("20060102-150405"),
+				ID:        generateHistoryID(),
 				Timestamp: time.Now().UTC().Format(time.RFC3339),
 				Profile:   cfg.Profile,
 				Duration:  time.Since(builtinStart).Milliseconds(),
@@ -448,6 +452,15 @@ func persistScanToDB(store *storage.Store, profile string, report *scanner.Repor
 	}
 }
 
+// generateHistoryID returns a short unique hex ID for history entries.
+func generateHistoryID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
 // ---------------------------------------------------------------------------
 // Scanner config persistence — export/import default profile, target, modules
 // ---------------------------------------------------------------------------
@@ -466,6 +479,13 @@ func ExportScannerConfig() map[string]interface{} {
 	}
 	if len(builtinModules) > 0 {
 		cfg["default_modules"] = builtinModules
+	}
+	// Persist last terminal state so the UI shows the right status on restart.
+	if builtinState == "completed" || builtinState == "error" {
+		cfg["last_state"] = builtinState
+		if builtinState == "error" && builtinError != "" {
+			cfg["last_error"] = builtinError
+		}
 	}
 	if len(cfg) == 0 {
 		return nil
@@ -496,6 +516,15 @@ func ImportScannerConfig(cfg map[string]interface{}) {
 		builtinModules = mods
 	case []string:
 		builtinModules = v
+	}
+	// Restore last terminal state (completed/error) so the UI can display it.
+	if state, ok := cfg["last_state"].(string); ok {
+		if state == "completed" || state == "error" {
+			builtinState = state
+		}
+	}
+	if errMsg, ok := cfg["last_error"].(string); ok {
+		builtinError = errMsg
 	}
 }
 

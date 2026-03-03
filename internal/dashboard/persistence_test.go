@@ -676,6 +676,7 @@ func TestPersistence_ScannerConfig(t *testing.T) {
 	builtinProfile = "aggressive"
 	builtinTarget = "http://example.com:9090"
 	builtinModules = []string{"owasp", "injection", "auth"}
+	builtinState = "completed"
 	builtinMu.Unlock()
 
 	export := ExportConfig()
@@ -692,6 +693,9 @@ func TestPersistence_ScannerConfig(t *testing.T) {
 	}
 	if len(builtinModules) != 3 || builtinModules[0] != "owasp" || builtinModules[1] != "injection" || builtinModules[2] != "auth" {
 		t.Errorf("scanner modules: got %v, want [owasp injection auth]", builtinModules)
+	}
+	if builtinState != "completed" {
+		t.Errorf("scanner state: got %q, want %q", builtinState, "completed")
 	}
 }
 
@@ -731,6 +735,59 @@ func TestPersistence_ScannerConfig_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPersistence_ScannerConfig_ErrorState(t *testing.T) {
+	resetGlobals()
+
+	builtinMu.Lock()
+	builtinProfile = "nightmare"
+	builtinTarget = "http://localhost:8765"
+	builtinState = "error"
+	builtinError = "connection refused"
+	builtinMu.Unlock()
+
+	export := ExportConfig()
+	data, err := json.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var restored ConfigExport
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	resetGlobals()
+	ImportConfig(&restored)
+
+	builtinMu.RLock()
+	defer builtinMu.RUnlock()
+	if builtinState != "error" {
+		t.Errorf("scanner state: got %q, want %q", builtinState, "error")
+	}
+	if builtinError != "connection refused" {
+		t.Errorf("scanner error: got %q, want %q", builtinError, "connection refused")
+	}
+}
+
+func TestPersistence_ScannerConfig_IdleStateNotPersisted(t *testing.T) {
+	resetGlobals()
+
+	// When state is "idle" or "running", it should NOT be persisted.
+	builtinMu.Lock()
+	builtinProfile = "default"
+	builtinTarget = "http://localhost:8765"
+	builtinState = "idle"
+	builtinMu.Unlock()
+
+	export := ExportConfig()
+	if export.ScannerConfig == nil {
+		t.Fatal("ScannerConfig should not be nil when profile/target are set")
+	}
+	if _, ok := export.ScannerConfig["last_state"]; ok {
+		t.Error("idle state should NOT be exported")
+	}
+}
+
 func TestPersistence_ScannerConfig_Empty(t *testing.T) {
 	resetGlobals()
 
@@ -748,6 +805,24 @@ func TestPersistence_ScannerConfig_Empty(t *testing.T) {
 	defer builtinMu.RUnlock()
 	if builtinProfile != "" {
 		t.Errorf("scanner profile should be empty, got %q", builtinProfile)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// History ID uniqueness
+// ---------------------------------------------------------------------------
+
+func TestGenerateHistoryID_Unique(t *testing.T) {
+	ids := make(map[string]bool)
+	for i := 0; i < 1000; i++ {
+		id := generateHistoryID()
+		if id == "" {
+			t.Fatal("generateHistoryID returned empty string")
+		}
+		if ids[id] {
+			t.Fatalf("duplicate ID after %d iterations: %s", i, id)
+		}
+		ids[id] = true
 	}
 }
 
@@ -787,6 +862,8 @@ func resetGlobals() {
 	builtinProfile = ""
 	builtinTarget = ""
 	builtinModules = nil
+	builtinState = "idle"
+	builtinError = ""
 	builtinMu.Unlock()
 }
 
@@ -811,6 +888,8 @@ type expectedState struct {
 	scannerProfile   string
 	scannerTarget    string
 	scannerModules   []string
+	scannerState     string
+	scannerError     string
 }
 
 type adminConfigVals struct {
@@ -982,10 +1061,19 @@ func randomizeAll(rng *rand.Rand) expectedState {
 	numMods := rng.Intn(len(modChoices)) + 1
 	state.scannerModules = modChoices[:numMods]
 
+	// Scanner state — randomly set completed or error
+	states := []string{"completed", "error"}
+	state.scannerState = states[rng.Intn(len(states))]
+	if state.scannerState == "error" {
+		state.scannerError = "simulated error " + itoa(rng.Intn(1000))
+	}
+
 	builtinMu.Lock()
 	builtinProfile = state.scannerProfile
 	builtinTarget = state.scannerTarget
 	builtinModules = state.scannerModules
+	builtinState = state.scannerState
+	builtinError = state.scannerError
 	builtinMu.Unlock()
 
 	return state
@@ -1049,6 +1137,14 @@ func verifyExport(t *testing.T, export *ConfigExport, expected expectedState) {
 		}
 		if target, ok := export.ScannerConfig["default_target"].(string); !ok || target != expected.scannerTarget {
 			t.Errorf("export.ScannerConfig[default_target]: got %v, want %q", export.ScannerConfig["default_target"], expected.scannerTarget)
+		}
+		if state, ok := export.ScannerConfig["last_state"].(string); !ok || state != expected.scannerState {
+			t.Errorf("export.ScannerConfig[last_state]: got %v, want %q", export.ScannerConfig["last_state"], expected.scannerState)
+		}
+		if expected.scannerState == "error" {
+			if errMsg, ok := export.ScannerConfig["last_error"].(string); !ok || errMsg != expected.scannerError {
+				t.Errorf("export.ScannerConfig[last_error]: got %v, want %q", export.ScannerConfig["last_error"], expected.scannerError)
+			}
 		}
 	}
 }
@@ -1193,6 +1289,12 @@ func verifyGlobals(t *testing.T, expected expectedState) {
 					t.Errorf("scanner module[%d]: got %q, want %q", i, builtinModules[i], want)
 				}
 			}
+		}
+		if builtinState != expected.scannerState {
+			t.Errorf("scanner state: got %q, want %q", builtinState, expected.scannerState)
+		}
+		if builtinError != expected.scannerError {
+			t.Errorf("scanner error: got %q, want %q", builtinError, expected.scannerError)
 		}
 	}()
 }
