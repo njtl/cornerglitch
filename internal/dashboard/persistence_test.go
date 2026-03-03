@@ -10,6 +10,7 @@ import (
 	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/metrics"
+	"github.com/glitchWebServer/internal/spider"
 )
 
 // ---------------------------------------------------------------------------
@@ -827,6 +828,376 @@ func TestGenerateHistoryID_Unique(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Nightmare config round-trip
+// ---------------------------------------------------------------------------
+
+func TestPersistence_NightmareConfig(t *testing.T) {
+	resetGlobals()
+
+	globalNightmare.mu.Lock()
+	globalNightmare.ServerActive = true
+	globalNightmare.ScannerActive = false
+	globalNightmare.ProxyActive = true
+	globalNightmare.PreviousProxyMode = "waf"
+	globalNightmare.PreviousConfig = map[string]interface{}{
+		"error_rate_multiplier": 1.5,
+		"max_labyrinth_depth":   float64(10),
+	}
+	globalNightmare.PreviousFeatures = map[string]bool{
+		"labyrinth": true,
+		"honeypot":  false,
+		"vuln":      true,
+	}
+	globalNightmare.mu.Unlock()
+
+	export := ExportConfig()
+	resetGlobals()
+	ImportConfig(export)
+
+	globalNightmare.mu.RLock()
+	defer globalNightmare.mu.RUnlock()
+	if !globalNightmare.ServerActive {
+		t.Error("nightmare server should be active after import")
+	}
+	if globalNightmare.ScannerActive {
+		t.Error("nightmare scanner should NOT be active after import")
+	}
+	if !globalNightmare.ProxyActive {
+		t.Error("nightmare proxy should be active after import")
+	}
+	if globalNightmare.PreviousProxyMode != "waf" {
+		t.Errorf("nightmare previous_proxy_mode: got %q, want %q", globalNightmare.PreviousProxyMode, "waf")
+	}
+	if globalNightmare.PreviousFeatures == nil {
+		t.Fatal("nightmare PreviousFeatures should not be nil")
+	}
+	if globalNightmare.PreviousFeatures["labyrinth"] != true {
+		t.Error("nightmare PreviousFeatures[labyrinth] should be true")
+	}
+	if globalNightmare.PreviousFeatures["honeypot"] != false {
+		t.Error("nightmare PreviousFeatures[honeypot] should be false")
+	}
+}
+
+func TestPersistence_NightmareConfig_JSONRoundTrip(t *testing.T) {
+	resetGlobals()
+
+	globalNightmare.mu.Lock()
+	globalNightmare.ServerActive = true
+	globalNightmare.ProxyActive = true
+	globalNightmare.PreviousProxyMode = "chaos"
+	globalNightmare.PreviousFeatures = map[string]bool{
+		"vuln":    true,
+		"captcha": false,
+	}
+	globalNightmare.mu.Unlock()
+
+	export := ExportConfig()
+	data, err := json.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var restored ConfigExport
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	resetGlobals()
+	ImportConfig(&restored)
+
+	globalNightmare.mu.RLock()
+	defer globalNightmare.mu.RUnlock()
+	if !globalNightmare.ServerActive {
+		t.Error("nightmare server should be active after JSON import")
+	}
+	if !globalNightmare.ProxyActive {
+		t.Error("nightmare proxy should be active after JSON import")
+	}
+	if globalNightmare.PreviousProxyMode != "chaos" {
+		t.Errorf("nightmare previous_proxy_mode: got %q, want %q", globalNightmare.PreviousProxyMode, "chaos")
+	}
+	// After JSON round-trip, PreviousFeatures comes back as map[string]interface{}
+	// and importNightmareConfig should convert it to map[string]bool.
+	if globalNightmare.PreviousFeatures == nil {
+		t.Fatal("nightmare PreviousFeatures should not be nil after JSON round-trip")
+	}
+	if globalNightmare.PreviousFeatures["vuln"] != true {
+		t.Error("nightmare PreviousFeatures[vuln] should be true after JSON round-trip")
+	}
+}
+
+func TestPersistence_NightmareConfig_Inactive(t *testing.T) {
+	resetGlobals()
+	// No nightmare active — should export nil
+	export := ExportConfig()
+	if export.NightmareConfig != nil {
+		t.Errorf("NightmareConfig should be nil when no nightmare is active, got %v", export.NightmareConfig)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Spider config round-trip
+// ---------------------------------------------------------------------------
+
+func TestPersistence_SpiderConfig(t *testing.T) {
+	resetGlobals()
+
+	globalSpiderConfig.Set("sitemap_error_rate", 0.5)
+	globalSpiderConfig.Set("sitemap_entry_count", 200)
+	globalSpiderConfig.Set("robots_crawl_delay", 5)
+	globalSpiderConfig.Set("robots_disallow_paths", []string{"/secret/", "/hidden/"})
+	globalSpiderConfig.Set("enable_sitemap_index", false)
+	globalSpiderConfig.Set("enable_gzip_sitemap", false)
+
+	export := ExportConfig()
+	resetGlobals()
+	ImportConfig(export)
+
+	snap := globalSpiderConfig.Snapshot()
+	if v := snap["sitemap_entry_count"].(int); v != 200 {
+		t.Errorf("spider sitemap_entry_count: got %v, want 200", v)
+	}
+	if v := snap["robots_crawl_delay"].(int); v != 5 {
+		t.Errorf("spider robots_crawl_delay: got %v, want 5", v)
+	}
+	if v := snap["enable_sitemap_index"].(bool); v != false {
+		t.Error("spider enable_sitemap_index should be false after import")
+	}
+	if paths := snap["robots_disallow_paths"].([]string); len(paths) != 2 || paths[0] != "/secret/" {
+		t.Errorf("spider robots_disallow_paths: got %v", paths)
+	}
+}
+
+func TestPersistence_SpiderConfig_JSONRoundTrip(t *testing.T) {
+	resetGlobals()
+
+	globalSpiderConfig.Set("sitemap_entry_count", 300)
+	globalSpiderConfig.Set("robots_crawl_delay", 8)
+	globalSpiderConfig.Set("robots_disallow_paths", []string{"/api/", "/debug/"})
+
+	export := ExportConfig()
+	data, err := json.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var restored ConfigExport
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	resetGlobals()
+	ImportConfig(&restored)
+
+	snap := globalSpiderConfig.Snapshot()
+	// After JSON round-trip, int fields come back as float64 — importSpiderConfig handles coercion.
+	if v := snap["sitemap_entry_count"].(int); v != 300 {
+		t.Errorf("spider sitemap_entry_count after JSON: got %v, want 300", v)
+	}
+	if v := snap["robots_crawl_delay"].(int); v != 8 {
+		t.Errorf("spider robots_crawl_delay after JSON: got %v, want 8", v)
+	}
+	// []string comes back as []interface{} from JSON — importSpiderConfig handles conversion.
+	if paths := snap["robots_disallow_paths"].([]string); len(paths) != 2 || paths[0] != "/api/" {
+		t.Errorf("spider robots_disallow_paths after JSON: got %v", paths)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-client overrides round-trip
+// ---------------------------------------------------------------------------
+
+func TestPersistence_Overrides(t *testing.T) {
+	resetGlobals()
+
+	globalAdaptive.SetOverride("client_abc", adaptive.BehaviorMode("aggressive"))
+	globalAdaptive.SetOverride("client_xyz", adaptive.BehaviorMode("blocked"))
+
+	export := ExportConfig()
+	resetGlobals()
+	ImportConfig(export)
+
+	overrides := globalAdaptive.GetOverrides()
+	if string(overrides["client_abc"]) != "aggressive" {
+		t.Errorf("override client_abc: got %v, want %q", overrides["client_abc"], "aggressive")
+	}
+	if string(overrides["client_xyz"]) != "blocked" {
+		t.Errorf("override client_xyz: got %v, want %q", overrides["client_xyz"], "blocked")
+	}
+}
+
+func TestPersistence_Overrides_JSONRoundTrip(t *testing.T) {
+	resetGlobals()
+
+	globalAdaptive.SetOverride("scanner_1", adaptive.BehaviorMode("labyrinth"))
+	globalAdaptive.SetOverride("bot_2", adaptive.BehaviorMode("cooperative"))
+
+	export := ExportConfig()
+	data, err := json.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var restored ConfigExport
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	resetGlobals()
+	ImportConfig(&restored)
+
+	overrides := globalAdaptive.GetOverrides()
+	if string(overrides["scanner_1"]) != "labyrinth" {
+		t.Errorf("override scanner_1: got %v, want %q", overrides["scanner_1"], "labyrinth")
+	}
+	if string(overrides["bot_2"]) != "cooperative" {
+		t.Errorf("override bot_2: got %v, want %q", overrides["bot_2"], "cooperative")
+	}
+}
+
+func TestPersistence_Overrides_PendingMechanism(t *testing.T) {
+	// Test the pending overrides mechanism:
+	// If ImportConfig is called before SetAdaptive, overrides should be stored
+	// as pending and applied when SetAdaptive is called.
+	globalFlags = NewFeatureFlags()
+	globalConfig = NewAdminConfig()
+	globalVulnConfig = NewVulnConfig()
+	globalAPIChaosConfig = NewAPIChaosConfig()
+	globalMediaChaosConfig = NewMediaChaosConfig()
+	globalProxyConfig = NewProxyConfig()
+	globalSpiderConfig = spider.NewConfig()
+	globalNightmare = &NightmareState{}
+	globalAdaptive = nil // no adaptive engine yet
+
+	pendingBlockingMu.Lock()
+	pendingBlocking = nil
+	pendingOverrides = nil
+	pendingBlockingMu.Unlock()
+
+	export := &ConfigExport{
+		Overrides: map[string]string{
+			"client_a": "aggressive",
+			"client_b": "blocked",
+		},
+	}
+	ImportConfig(export)
+
+	// Now create the adaptive engine — pending overrides should be applied.
+	col := metrics.NewCollector()
+	fp := fingerprint.NewEngine()
+	a := adaptive.NewEngine(col, fp)
+	SetAdaptive(a)
+
+	overrides := globalAdaptive.GetOverrides()
+	if string(overrides["client_a"]) != "aggressive" {
+		t.Errorf("override client_a: got %v, want %q", overrides["client_a"], "aggressive")
+	}
+	if string(overrides["client_b"]) != "blocked" {
+		t.Errorf("override client_b: got %v, want %q", overrides["client_b"], "blocked")
+	}
+}
+
+func TestPersistence_Overrides_Empty(t *testing.T) {
+	resetGlobals()
+	// No overrides set — should export nil
+	export := ExportConfig()
+	if export.Overrides != nil {
+		t.Errorf("Overrides should be nil when no overrides are set, got %v", export.Overrides)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Client profile snapshot round-trip (via metrics)
+// ---------------------------------------------------------------------------
+
+func TestPersistence_ClientProfileSnapshot(t *testing.T) {
+	col := metrics.NewCollector()
+
+	// Create a snapshot and restore it
+	snap := metrics.ClientProfileSnapshot{
+		ClientID:        "test_client_1",
+		FirstSeen:       time.Now().Add(-time.Hour),
+		LastSeen:        time.Now(),
+		TotalRequests:   500,
+		RequestsPerSec:  10.5,
+		PathsVisited:    map[string]int{"/api/users": 50, "/health": 100},
+		StatusCodes:     map[int]int{200: 400, 404: 50, 500: 50},
+		ErrorsReceived:  100,
+		LabyrinthDepth:  5,
+		UserAgents:      map[string]int{"Mozilla/5.0": 300, "curl/7.0": 200},
+		BurstWindows:    3,
+		AdaptiveProfile: "aggressive",
+	}
+
+	col.RestoreClientProfile(snap)
+
+	// Retrieve and verify
+	cp := col.GetClientProfile("test_client_1")
+	if cp == nil {
+		t.Fatal("client profile should exist after restore")
+	}
+	restored := cp.Snapshot()
+	if restored.ClientID != "test_client_1" {
+		t.Errorf("ClientID: got %q, want %q", restored.ClientID, "test_client_1")
+	}
+	if restored.TotalRequests != 500 {
+		t.Errorf("TotalRequests: got %d, want 500", restored.TotalRequests)
+	}
+	if restored.AdaptiveProfile != "aggressive" {
+		t.Errorf("AdaptiveProfile: got %q, want %q", restored.AdaptiveProfile, "aggressive")
+	}
+	if restored.PathsVisited["/api/users"] != 50 {
+		t.Errorf("PathsVisited[/api/users]: got %d, want 50", restored.PathsVisited["/api/users"])
+	}
+	if restored.StatusCodes[200] != 400 {
+		t.Errorf("StatusCodes[200]: got %d, want 400", restored.StatusCodes[200])
+	}
+}
+
+func TestPersistence_ClientProfileSnapshot_JSONRoundTrip(t *testing.T) {
+	snap := metrics.ClientProfileSnapshot{
+		ClientID:        "json_client",
+		TotalRequests:   1000,
+		PathsVisited:    map[string]int{"/": 500},
+		StatusCodes:     map[int]int{200: 900, 503: 100},
+		AdaptiveProfile: "normal",
+	}
+
+	data, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var restored metrics.ClientProfileSnapshot
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if restored.ClientID != "json_client" {
+		t.Errorf("ClientID: got %q, want %q", restored.ClientID, "json_client")
+	}
+	if restored.TotalRequests != 1000 {
+		t.Errorf("TotalRequests: got %d, want 1000", restored.TotalRequests)
+	}
+	if restored.StatusCodes[200] != 900 {
+		t.Errorf("StatusCodes[200]: got %d, want 900", restored.StatusCodes[200])
+	}
+
+	// Now restore into collector and verify
+	col := metrics.NewCollector()
+	col.RestoreClientProfile(restored)
+	cp := col.GetClientProfile("json_client")
+	if cp == nil {
+		t.Fatal("client profile should exist after JSON round-trip restore")
+	}
+	s := cp.Snapshot()
+	if s.TotalRequests != 1000 {
+		t.Errorf("TotalRequests after restore: got %d, want 1000", s.TotalRequests)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -850,12 +1221,20 @@ func resetGlobals() {
 	globalAPIChaosConfig = NewAPIChaosConfig()
 	globalMediaChaosConfig = NewMediaChaosConfig()
 	globalProxyConfig = NewProxyConfig()
+	globalSpiderConfig = spider.NewConfig()
+	globalNightmare = &NightmareState{}
 
 	// Create a fresh adaptive engine so blocking config can round-trip.
 	col := metrics.NewCollector()
 	fp := fingerprint.NewEngine()
 	a := adaptive.NewEngine(col, fp)
 	SetAdaptive(a)
+
+	// Clear pending state.
+	pendingBlockingMu.Lock()
+	pendingBlocking = nil
+	pendingOverrides = nil
+	pendingBlockingMu.Unlock()
 
 	// Reset scanner defaults.
 	builtinMu.Lock()
@@ -890,6 +1269,20 @@ type expectedState struct {
 	scannerModules   []string
 	scannerState     string
 	scannerError     string
+	// Nightmare state
+	nightmareServerActive  bool
+	nightmareScannerActive bool
+	nightmareProxyActive   bool
+	nightmarePrevProxyMode string
+	// Spider config
+	spiderSitemapErrorRate    float64
+	spiderSitemapEntryCount   int
+	spiderRobotsCrawlDelay    int
+	spiderRobotsDisallowPaths []string
+	spiderEnableSitemapIndex  bool
+	spiderEnableGzipSitemap   bool
+	// Overrides
+	overrides map[string]string
 }
 
 type adminConfigVals struct {
@@ -1076,6 +1469,52 @@ func randomizeAll(rng *rand.Rand) expectedState {
 	builtinError = state.scannerError
 	builtinMu.Unlock()
 
+	// Nightmare state — randomly activate subsystems
+	state.nightmareServerActive = rng.Intn(2) == 0
+	state.nightmareScannerActive = rng.Intn(2) == 0
+	state.nightmareProxyActive = rng.Intn(2) == 0
+	state.nightmarePrevProxyMode = []string{"transparent", "waf", "chaos", "gateway"}[rng.Intn(4)]
+	globalNightmare.mu.Lock()
+	globalNightmare.ServerActive = state.nightmareServerActive
+	globalNightmare.ScannerActive = state.nightmareScannerActive
+	globalNightmare.ProxyActive = state.nightmareProxyActive
+	globalNightmare.PreviousProxyMode = state.nightmarePrevProxyMode
+	if state.nightmareServerActive {
+		globalNightmare.PreviousConfig = map[string]interface{}{
+			"error_rate_multiplier": 1.0,
+		}
+		globalNightmare.PreviousFeatures = map[string]bool{
+			"labyrinth": true,
+			"honeypot":  false,
+		}
+	}
+	globalNightmare.mu.Unlock()
+
+	// Spider config
+	state.spiderSitemapErrorRate = float64(rng.Intn(100)) / 100.0
+	state.spiderSitemapEntryCount = rng.Intn(500) + 1
+	state.spiderRobotsCrawlDelay = rng.Intn(10)
+	state.spiderRobotsDisallowPaths = []string{"/test/", "/secret/"}
+	state.spiderEnableSitemapIndex = rng.Intn(2) == 0
+	state.spiderEnableGzipSitemap = rng.Intn(2) == 0
+	globalSpiderConfig.Set("sitemap_error_rate", state.spiderSitemapErrorRate)
+	globalSpiderConfig.Set("sitemap_entry_count", state.spiderSitemapEntryCount)
+	globalSpiderConfig.Set("robots_crawl_delay", state.spiderRobotsCrawlDelay)
+	globalSpiderConfig.Set("robots_disallow_paths", state.spiderRobotsDisallowPaths)
+	globalSpiderConfig.Set("enable_sitemap_index", state.spiderEnableSitemapIndex)
+	globalSpiderConfig.Set("enable_gzip_sitemap", state.spiderEnableGzipSitemap)
+
+	// Per-client overrides
+	behaviorModes := []string{"normal", "cooperative", "aggressive", "labyrinth", "blocked"}
+	state.overrides = make(map[string]string)
+	numOverrides := rng.Intn(3) + 1
+	for i := 0; i < numOverrides; i++ {
+		clientID := "client_" + itoa(rng.Intn(1000))
+		mode := behaviorModes[rng.Intn(len(behaviorModes))]
+		state.overrides[clientID] = mode
+		globalAdaptive.SetOverride(clientID, adaptive.BehaviorMode(mode))
+	}
+
 	return state
 }
 
@@ -1144,6 +1583,45 @@ func verifyExport(t *testing.T, export *ConfigExport, expected expectedState) {
 		if expected.scannerState == "error" {
 			if errMsg, ok := export.ScannerConfig["last_error"].(string); !ok || errMsg != expected.scannerError {
 				t.Errorf("export.ScannerConfig[last_error]: got %v, want %q", export.ScannerConfig["last_error"], expected.scannerError)
+			}
+		}
+	}
+
+	// Nightmare config
+	if expected.nightmareServerActive || expected.nightmareScannerActive || expected.nightmareProxyActive {
+		if export.NightmareConfig == nil {
+			t.Error("export.NightmareConfig should not be nil when nightmare is active")
+		} else {
+			if v, ok := export.NightmareConfig["server_active"].(bool); !ok || v != expected.nightmareServerActive {
+				t.Errorf("export.NightmareConfig[server_active]: got %v, want %v", export.NightmareConfig["server_active"], expected.nightmareServerActive)
+			}
+			if v, ok := export.NightmareConfig["previous_proxy_mode"].(string); !ok || v != expected.nightmarePrevProxyMode {
+				t.Errorf("export.NightmareConfig[previous_proxy_mode]: got %v, want %q", export.NightmareConfig["previous_proxy_mode"], expected.nightmarePrevProxyMode)
+			}
+		}
+	}
+
+	// Spider config
+	if export.SpiderConfig == nil {
+		t.Error("export.SpiderConfig should not be nil")
+	} else {
+		if v, ok := export.SpiderConfig["sitemap_entry_count"].(int); !ok || v != expected.spiderSitemapEntryCount {
+			t.Errorf("export.SpiderConfig[sitemap_entry_count]: got %v, want %d", export.SpiderConfig["sitemap_entry_count"], expected.spiderSitemapEntryCount)
+		}
+		if v, ok := export.SpiderConfig["enable_sitemap_index"].(bool); !ok || v != expected.spiderEnableSitemapIndex {
+			t.Errorf("export.SpiderConfig[enable_sitemap_index]: got %v, want %v", export.SpiderConfig["enable_sitemap_index"], expected.spiderEnableSitemapIndex)
+		}
+	}
+
+	// Overrides
+	if len(expected.overrides) > 0 {
+		if export.Overrides == nil {
+			t.Error("export.Overrides should not be nil when overrides are set")
+		} else {
+			for clientID, mode := range expected.overrides {
+				if got, ok := export.Overrides[clientID]; !ok || got != mode {
+					t.Errorf("export.Overrides[%q]: got %v, want %q", clientID, got, mode)
+				}
 			}
 		}
 	}
@@ -1297,4 +1775,60 @@ func verifyGlobals(t *testing.T, expected expectedState) {
 			t.Errorf("scanner error: got %q, want %q", builtinError, expected.scannerError)
 		}
 	}()
+
+	// Nightmare state
+	func() {
+		globalNightmare.mu.RLock()
+		defer globalNightmare.mu.RUnlock()
+		if globalNightmare.ServerActive != expected.nightmareServerActive {
+			t.Errorf("nightmare server_active: got %v, want %v", globalNightmare.ServerActive, expected.nightmareServerActive)
+		}
+		if globalNightmare.ScannerActive != expected.nightmareScannerActive {
+			t.Errorf("nightmare scanner_active: got %v, want %v", globalNightmare.ScannerActive, expected.nightmareScannerActive)
+		}
+		if globalNightmare.ProxyActive != expected.nightmareProxyActive {
+			t.Errorf("nightmare proxy_active: got %v, want %v", globalNightmare.ProxyActive, expected.nightmareProxyActive)
+		}
+		if globalNightmare.PreviousProxyMode != expected.nightmarePrevProxyMode {
+			t.Errorf("nightmare previous_proxy_mode: got %q, want %q", globalNightmare.PreviousProxyMode, expected.nightmarePrevProxyMode)
+		}
+	}()
+
+	// Spider config
+	func() {
+		snap := globalSpiderConfig.Snapshot()
+		if v, ok := snap["sitemap_entry_count"].(int); !ok || v != expected.spiderSitemapEntryCount {
+			t.Errorf("spider sitemap_entry_count: got %v, want %d", snap["sitemap_entry_count"], expected.spiderSitemapEntryCount)
+		}
+		if v, ok := snap["robots_crawl_delay"].(int); !ok || v != expected.spiderRobotsCrawlDelay {
+			t.Errorf("spider robots_crawl_delay: got %v, want %d", snap["robots_crawl_delay"], expected.spiderRobotsCrawlDelay)
+		}
+		if v, ok := snap["enable_sitemap_index"].(bool); !ok || v != expected.spiderEnableSitemapIndex {
+			t.Errorf("spider enable_sitemap_index: got %v, want %v", snap["enable_sitemap_index"], expected.spiderEnableSitemapIndex)
+		}
+		if v, ok := snap["enable_gzip_sitemap"].(bool); !ok || v != expected.spiderEnableGzipSitemap {
+			t.Errorf("spider enable_gzip_sitemap: got %v, want %v", snap["enable_gzip_sitemap"], expected.spiderEnableGzipSitemap)
+		}
+		if paths, ok := snap["robots_disallow_paths"].([]string); ok {
+			if len(paths) != len(expected.spiderRobotsDisallowPaths) {
+				t.Errorf("spider robots_disallow_paths len: got %d, want %d", len(paths), len(expected.spiderRobotsDisallowPaths))
+			} else {
+				for i, want := range expected.spiderRobotsDisallowPaths {
+					if paths[i] != want {
+						t.Errorf("spider robots_disallow_paths[%d]: got %q, want %q", i, paths[i], want)
+					}
+				}
+			}
+		}
+	}()
+
+	// Per-client overrides
+	if globalAdaptive != nil && len(expected.overrides) > 0 {
+		gotOverrides := globalAdaptive.GetOverrides()
+		for clientID, wantMode := range expected.overrides {
+			if gotMode, ok := gotOverrides[clientID]; !ok || string(gotMode) != wantMode {
+				t.Errorf("override %q: got %v, want %q", clientID, gotMode, wantMode)
+			}
+		}
+	}
 }

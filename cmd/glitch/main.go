@@ -158,6 +158,7 @@ func main() {
 
 	collector := metrics.NewCollector()
 	dashboard.RestoreMetrics(collector)
+	dashboard.RestoreClientProfiles(collector)
 	fp := fingerprint.NewEngine()
 	adapt := adaptive.NewEngine(collector, fp)
 	errGen := errors.NewGenerator()
@@ -232,8 +233,9 @@ func main() {
 	log.Println("\033[33m[glitch]\033[0m Shutting down...")
 	audit.LogSystem("system.stop", "system.lifecycle", nil)
 	stopSnapshotter()
-	// Final metrics save before shutdown.
+	// Final metrics and client profile save before shutdown.
 	dashboard.SaveMetricsNow(collector)
+	dashboard.SaveClientProfiles(collector)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)
