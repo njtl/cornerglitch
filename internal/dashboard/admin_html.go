@@ -1020,9 +1020,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <span class="srv-arrow">&#9654;</span>
     </div>
     <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Inject chaos into API responses — malformed JSON, wrong status codes, encoding issues, auth failures.</p>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <button class="cfg-btn" id="apichaos-toggle" onclick="toggleAPIChaos()" style="min-width:80px"></button>
-        <span id="apichaos-status" style="color:#888;font-size:0.8em"></span>
+        <button class="cfg-btn" id="apichaos-toggle" onclick="toggleAPIChaos()" style="min-width:80px">DISABLED</button>
+        <span id="apichaos-status" style="color:#888;font-size:0.8em">Probability: 30%%</span>
       </div>
       <div style="margin-bottom:12px">
         <label style="color:#888;font-size:0.78em;display:block;margin-bottom:4px">Chaos Probability</label>
@@ -1031,7 +1032,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <span id="apichaos-prob-val" style="color:#ff6600;font-size:0.85em;min-width:35px">30%%</span>
         </div>
       </div>
-      <div style="margin-bottom:8px;display:flex;gap:6px">
+      <div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="cfg-btn" onclick="setAllAPIChaos(true)" style="font-size:0.72em;padding:3px 10px">All On</button>
         <button class="cfg-btn" onclick="setAllAPIChaos(false)" style="font-size:0.72em;padding:3px 10px">All Off</button>
       </div>
@@ -1046,9 +1047,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <span class="srv-arrow">&#9654;</span>
     </div>
     <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Corrupt and manipulate media content — broken images, malformed audio/video, wrong codecs, infinite streams.</p>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <button class="cfg-btn" id="mediachaos-toggle" onclick="toggleMediaChaos()" style="min-width:80px"></button>
-        <span id="mediachaos-status" style="color:#888;font-size:0.8em"></span>
+        <button class="cfg-btn" id="mediachaos-toggle" onclick="toggleMediaChaos()" style="min-width:80px">DISABLED</button>
+        <span id="mediachaos-status" style="color:#888;font-size:0.8em">Probability: 30%%</span>
       </div>
       <div style="margin-bottom:12px">
         <label style="color:#888;font-size:0.78em;display:block;margin-bottom:4px">Chaos Probability</label>
@@ -1064,7 +1066,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <span id="mediachaos-intensity-val" style="color:#e040fb;font-size:0.85em;min-width:35px">50%%</span>
         </div>
       </div>
-      <div style="margin-bottom:8px;display:flex;gap:6px">
+      <div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="cfg-btn" onclick="setAllMediaChaos(true)" style="font-size:0.72em;padding:3px 10px">All On</button>
         <button class="cfg-btn" onclick="setAllMediaChaos(false)" style="font-size:0.72em;padding:3px 10px">All Off</button>
       </div>
@@ -4863,10 +4865,12 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       methodHtml += '<div style="width:' + pctVal + '%%;background:' + col + ';min-width:' + (pctVal > 3 ? '0' : '2') + 'px" title="' + m + ': ' + methods[m] + ' (' + pctVal + '%%' + ')"></div>';
     });
     methodHtml += '</div>';
+    methodHtml += '<div style="display:flex;flex-wrap:wrap;gap:4px 0">';
     methodKeys.forEach(function(m) {
       var col = methodColors[m] || '#888';
-      methodHtml += '<span style="margin-right:12px;font-size:0.78em"><span style="display:inline-block;width:8px;height:8px;background:' + col + ';border-radius:2px;margin-right:4px"></span>' + m + ': ' + methods[m] + '</span>';
+      methodHtml += '<span style="margin-right:12px;font-size:0.78em;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;display:inline-block"><span style="display:inline-block;width:8px;height:8px;background:' + col + ';border-radius:2px;margin-right:4px"></span>' + escapeHtml(m) + ': ' + methods[m] + '</span>';
     });
+    methodHtml += '</div>';
     var methodsEl = document.getElementById('replay-meta-methods');
     if (methodsEl) methodsEl.innerHTML = methodHtml;
 
