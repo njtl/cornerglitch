@@ -70,17 +70,21 @@ func (s *Server) apiMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	resp := map[string]interface{}{
-		"uptime_seconds":     int(s.collector.Uptime().Seconds()),
-		"total_requests":     s.collector.TotalRequests.Load(),
-		"total_errors":       s.collector.TotalErrors.Load(),
-		"total_2xx":          s.collector.Total2xx.Load(),
-		"total_4xx":          s.collector.Total4xx.Load(),
-		"total_5xx":          s.collector.Total5xx.Load(),
-		"total_delayed":      s.collector.TotalDelayed.Load(),
-		"total_labyrinth":    s.collector.TotalLabyrinth.Load(),
-		"active_connections": s.collector.ActiveConns.Load(),
-		"unique_clients":     len(s.collector.GetAllClientProfiles()),
-		"current_rps":        s.collector.CurrentRPS(),
+		"uptime_seconds":         int(s.collector.Uptime().Seconds()),
+		"total_requests":         s.collector.TotalRequests.Load(),
+		"total_errors":           s.collector.TotalErrors.Load(),
+		"total_2xx":              s.collector.Total2xx.Load(),
+		"total_4xx":              s.collector.Total4xx.Load(),
+		"total_5xx":              s.collector.Total5xx.Load(),
+		"total_delayed":          s.collector.TotalDelayed.Load(),
+		"total_labyrinth":        s.collector.TotalLabyrinth.Load(),
+		"active_connections":     s.collector.ActiveConns.Load(),
+		"unique_clients":         len(s.collector.GetAllClientProfiles()),
+		"current_rps":            s.collector.CurrentRPS(),
+		"total_request_bytes":    s.collector.TotalRequestBytes.Load(),
+		"total_response_bytes":   s.collector.TotalResponseBytes.Load(),
+		"session_request_bytes":  s.collector.SessionRequestBytes.Load(),
+		"session_response_bytes": s.collector.SessionResponseBytes.Load(),
 	}
 
 	total := s.collector.TotalRequests.Load()
