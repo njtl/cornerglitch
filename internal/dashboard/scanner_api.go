@@ -19,15 +19,16 @@ import (
 // ---------------------------------------------------------------------------
 
 var (
-	builtinMu     sync.RWMutex
-	builtinEngine *scanner.Engine
-	builtinReport *scanner.Report
-	builtinCancel context.CancelFunc
+	builtinMu      sync.RWMutex
+	builtinEngine  *scanner.Engine
+	builtinReport  *scanner.Report
+	builtinCancel  context.CancelFunc
 	builtinState   = "idle" // idle, running, completed, error
 	builtinError   string
 	builtinStart   time.Time
 	builtinProfile string
 	builtinTarget  string
+	builtinModules []string // last-used module selections
 
 	// History of built-in scanner runs (ring buffer, max 50)
 	builtinHistory   []builtinHistoryEntry
@@ -196,7 +197,11 @@ func adminAPIBuiltinRun(w http.ResponseWriter, r *http.Request) {
 	builtinStart = time.Now()
 	builtinProfile = cfg.Profile
 	builtinTarget = cfg.Target
+	builtinModules = req.Modules
 	builtinMu.Unlock()
+
+	// Auto-save scanner settings (profile, target, modules)
+	TriggerAutoSave()
 
 	// Run in background goroutine
 	go func() {
@@ -393,5 +398,75 @@ func persistScanToDB(store *storage.Store, profile string, report *scanner.Repor
 	_, err := store.SaveScanFromReport(ctx, "builtin:"+profile, "completed", "", 0, report)
 	if err != nil {
 		log.Printf("\033[33m[glitch]\033[0m Failed to persist scan to DB: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Scanner config persistence — export/import default profile, target, modules
+// ---------------------------------------------------------------------------
+
+// ExportScannerConfig returns the current scanner defaults for config export.
+func ExportScannerConfig() map[string]interface{} {
+	builtinMu.RLock()
+	defer builtinMu.RUnlock()
+
+	cfg := map[string]interface{}{}
+	if builtinProfile != "" {
+		cfg["default_profile"] = builtinProfile
+	}
+	if builtinTarget != "" {
+		cfg["default_target"] = builtinTarget
+	}
+	if len(builtinModules) > 0 {
+		cfg["default_modules"] = builtinModules
+	}
+	if len(cfg) == 0 {
+		return nil
+	}
+	return cfg
+}
+
+// ImportScannerConfig restores scanner defaults from a config export.
+func ImportScannerConfig(cfg map[string]interface{}) {
+	builtinMu.Lock()
+	defer builtinMu.Unlock()
+
+	if profile, ok := cfg["default_profile"].(string); ok {
+		builtinProfile = profile
+	}
+	if target, ok := cfg["default_target"].(string); ok {
+		builtinTarget = target
+	}
+	// Modules may be []interface{} (from JSON) or []string (direct).
+	switch v := cfg["default_modules"].(type) {
+	case []interface{}:
+		mods := make([]string, 0, len(v))
+		for _, m := range v {
+			if s, ok := m.(string); ok {
+				mods = append(mods, s)
+			}
+		}
+		builtinModules = mods
+	case []string:
+		builtinModules = v
+	}
+}
+
+// ---------------------------------------------------------------------------
+// External scanner comparison history persistence
+// ---------------------------------------------------------------------------
+
+// PersistComparisonToDB saves an external scanner comparison report to the DB.
+func PersistComparisonToDB(report interface{}, scannerName, grade string, detectionRate float64) {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := store.SaveScanFromReport(ctx, "external:"+scannerName, "completed", grade, detectionRate, report)
+	if err != nil {
+		log.Printf("\033[33m[glitch]\033[0m Failed to persist external scan to DB: %v", err)
 	}
 }

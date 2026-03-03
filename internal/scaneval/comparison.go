@@ -243,6 +243,16 @@ func (h *ComparisonHistory) Add(report *ComparisonReport) {
 	}
 }
 
+// AddEntry adds a pre-built history entry directly (used for restoring from DB).
+func (h *ComparisonHistory) AddEntry(entry HistoryEntry) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.entries = append(h.entries, entry)
+	if len(h.entries) > h.maxSize {
+		h.entries = h.entries[len(h.entries)-h.maxSize:]
+	}
+}
+
 // GetAll returns a copy of all history entries, oldest first.
 func (h *ComparisonHistory) GetAll() []HistoryEntry {
 	h.mu.RLock()

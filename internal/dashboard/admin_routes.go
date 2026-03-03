@@ -1110,6 +1110,9 @@ func adminAPIScannerCompare(w http.ResponseWriter, r *http.Request, s *Server) {
 	// Record in comparison history
 	comparisonHistory.Add(report)
 
+	// Persist to PostgreSQL
+	go PersistComparisonToDB(report, req.Scanner, report.Grade, report.DetectionRate)
+
 	audit.LogAction("admin", "scanner.compare", "scanner.compare", map[string]interface{}{"scanner": req.Scanner})
 	json.NewEncoder(w).Encode(report)
 }
@@ -1605,6 +1608,8 @@ func adminAPIScannerMultiCompare(w http.ResponseWriter, r *http.Request, s *Serv
 		reports[scannerName] = report
 		// Also record each individual report in history
 		comparisonHistory.Add(report)
+		// Persist to PostgreSQL
+		go PersistComparisonToDB(report, scannerName, report.Grade, report.DetectionRate)
 	}
 
 	mc := scaneval.CompareMultiple(reports, profile)

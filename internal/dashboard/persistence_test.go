@@ -666,6 +666,92 @@ func TestPersistence_BlockingConfig_PendingMechanism(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Scanner config round-trip
+// ---------------------------------------------------------------------------
+
+func TestPersistence_ScannerConfig(t *testing.T) {
+	resetGlobals()
+
+	builtinMu.Lock()
+	builtinProfile = "aggressive"
+	builtinTarget = "http://example.com:9090"
+	builtinModules = []string{"owasp", "injection", "auth"}
+	builtinMu.Unlock()
+
+	export := ExportConfig()
+	resetGlobals()
+	ImportConfig(export)
+
+	builtinMu.RLock()
+	defer builtinMu.RUnlock()
+	if builtinProfile != "aggressive" {
+		t.Errorf("scanner profile: got %q, want %q", builtinProfile, "aggressive")
+	}
+	if builtinTarget != "http://example.com:9090" {
+		t.Errorf("scanner target: got %q, want %q", builtinTarget, "http://example.com:9090")
+	}
+	if len(builtinModules) != 3 || builtinModules[0] != "owasp" || builtinModules[1] != "injection" || builtinModules[2] != "auth" {
+		t.Errorf("scanner modules: got %v, want [owasp injection auth]", builtinModules)
+	}
+}
+
+func TestPersistence_ScannerConfig_JSONRoundTrip(t *testing.T) {
+	resetGlobals()
+
+	builtinMu.Lock()
+	builtinProfile = "stealth"
+	builtinTarget = "http://target:8765"
+	builtinModules = []string{"fuzzing", "protocol"}
+	builtinMu.Unlock()
+
+	export := ExportConfig()
+	data, err := json.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var restored ConfigExport
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	resetGlobals()
+	ImportConfig(&restored)
+
+	builtinMu.RLock()
+	defer builtinMu.RUnlock()
+	if builtinProfile != "stealth" {
+		t.Errorf("scanner profile: got %q, want %q", builtinProfile, "stealth")
+	}
+	if builtinTarget != "http://target:8765" {
+		t.Errorf("scanner target: got %q, want %q", builtinTarget, "http://target:8765")
+	}
+	if len(builtinModules) != 2 || builtinModules[0] != "fuzzing" || builtinModules[1] != "protocol" {
+		t.Errorf("scanner modules: got %v, want [fuzzing protocol]", builtinModules)
+	}
+}
+
+func TestPersistence_ScannerConfig_Empty(t *testing.T) {
+	resetGlobals()
+
+	// No scanner config set — export should have nil ScannerConfig.
+	export := ExportConfig()
+	if export.ScannerConfig != nil {
+		t.Errorf("expected nil ScannerConfig when no scanner settings, got %v", export.ScannerConfig)
+	}
+
+	// Import with nil scanner config should not error.
+	resetGlobals()
+	ImportConfig(export)
+
+	builtinMu.RLock()
+	defer builtinMu.RUnlock()
+	if builtinProfile != "" {
+		t.Errorf("scanner profile should be empty, got %q", builtinProfile)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -695,6 +781,13 @@ func resetGlobals() {
 	fp := fingerprint.NewEngine()
 	a := adaptive.NewEngine(col, fp)
 	SetAdaptive(a)
+
+	// Reset scanner defaults.
+	builtinMu.Lock()
+	builtinProfile = ""
+	builtinTarget = ""
+	builtinModules = nil
+	builtinMu.Unlock()
 }
 
 type expectedState struct {
@@ -715,6 +808,9 @@ type expectedState struct {
 	blockEnabled     bool
 	blockChance      float64
 	blockDurationSec int
+	scannerProfile   string
+	scannerTarget    string
+	scannerModules   []string
 }
 
 type adminConfigVals struct {
@@ -878,6 +974,20 @@ func randomizeAll(rng *rand.Rand) expectedState {
 		globalAdaptive.SetBlockDuration(time.Duration(state.blockDurationSec) * time.Second)
 	}
 
+	// Scanner config
+	profiles := []string{"default", "compliance", "aggressive", "stealth", "nightmare"}
+	state.scannerProfile = profiles[rng.Intn(len(profiles))]
+	state.scannerTarget = "http://localhost:" + itoa(8000+rng.Intn(1000))
+	modChoices := []string{"owasp", "injection", "fuzzing", "protocol", "auth", "crawl"}
+	numMods := rng.Intn(len(modChoices)) + 1
+	state.scannerModules = modChoices[:numMods]
+
+	builtinMu.Lock()
+	builtinProfile = state.scannerProfile
+	builtinTarget = state.scannerTarget
+	builtinModules = state.scannerModules
+	builtinMu.Unlock()
+
 	return state
 }
 
@@ -927,6 +1037,18 @@ func verifyExport(t *testing.T, export *ConfigExport, expected expectedState) {
 		}
 		if durSec, ok := export.Blocking["duration_sec"].(int); !ok || durSec != expected.blockDurationSec {
 			t.Errorf("export.Blocking[duration_sec]: got %v, want %v", export.Blocking["duration_sec"], expected.blockDurationSec)
+		}
+	}
+
+	// Scanner config
+	if export.ScannerConfig == nil {
+		t.Error("export.ScannerConfig should not be nil")
+	} else {
+		if profile, ok := export.ScannerConfig["default_profile"].(string); !ok || profile != expected.scannerProfile {
+			t.Errorf("export.ScannerConfig[default_profile]: got %v, want %q", export.ScannerConfig["default_profile"], expected.scannerProfile)
+		}
+		if target, ok := export.ScannerConfig["default_target"].(string); !ok || target != expected.scannerTarget {
+			t.Errorf("export.ScannerConfig[default_target]: got %v, want %q", export.ScannerConfig["default_target"], expected.scannerTarget)
 		}
 	}
 }
@@ -1052,4 +1174,25 @@ func verifyGlobals(t *testing.T, expected expectedState) {
 	} else {
 		t.Error("globalAdaptive should not be nil after resetGlobals")
 	}
+
+	// Scanner config — use scoped lock to avoid holding two mutexes via defer.
+	func() {
+		builtinMu.RLock()
+		defer builtinMu.RUnlock()
+		if builtinProfile != expected.scannerProfile {
+			t.Errorf("scanner profile: got %q, want %q", builtinProfile, expected.scannerProfile)
+		}
+		if builtinTarget != expected.scannerTarget {
+			t.Errorf("scanner target: got %q, want %q", builtinTarget, expected.scannerTarget)
+		}
+		if len(builtinModules) != len(expected.scannerModules) {
+			t.Errorf("scanner modules count: got %d, want %d", len(builtinModules), len(expected.scannerModules))
+		} else {
+			for i, want := range expected.scannerModules {
+				if builtinModules[i] != want {
+					t.Errorf("scanner module[%d]: got %q, want %q", i, builtinModules[i], want)
+				}
+			}
+		}
+	}()
 }
