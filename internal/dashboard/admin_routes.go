@@ -564,7 +564,9 @@ func adminAPIFeaturesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	audit.Log("admin", "feature.toggle", "feature_flags."+req.Feature, old, req.Enabled, nil)
+	if old != req.Enabled {
+		audit.Log("admin", "feature.toggle", "feature_flags."+req.Feature, old, req.Enabled, nil)
+	}
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
