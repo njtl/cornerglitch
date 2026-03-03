@@ -307,14 +307,70 @@ func (e *Engine) applyFormatCorruption(w http.ResponseWriter, r *http.Request, d
 	rng := rand.New(rand.NewSource(rand.Int63()))
 	var corrupted []byte
 	switch {
+	// Image formats
 	case strings.Contains(contentType, "image/png"):
 		corrupted = corruptPNG(data, intensity, rng)
 	case strings.Contains(contentType, "image/jpeg") || strings.Contains(contentType, "image/jpg"):
 		corrupted = corruptJPEG(data, intensity, rng)
 	case strings.Contains(contentType, "image/gif"):
 		corrupted = corruptGIF(data, intensity, rng)
+	case strings.Contains(contentType, "image/webp"):
+		corrupted = corruptWebP(data, intensity, rng)
+	case strings.Contains(contentType, "image/bmp") || strings.Contains(contentType, "image/x-bmp"):
+		corrupted = corruptBMP(data, intensity, rng)
+	case strings.Contains(contentType, "image/svg+xml"):
+		corrupted = corruptSVG(data, intensity, rng)
+	case strings.Contains(contentType, "image/x-icon") || strings.Contains(contentType, "image/vnd.microsoft.icon"):
+		corrupted = corruptICO(data, intensity, rng)
+	case strings.Contains(contentType, "image/tiff"):
+		corrupted = corruptTIFF(data, intensity, rng)
+
+	// Audio formats
 	case strings.Contains(contentType, "audio/wav") || strings.Contains(contentType, "audio/x-wav"):
 		corrupted = corruptWAV(data, intensity, rng)
+	case strings.Contains(contentType, "audio/mpeg") || strings.Contains(contentType, "audio/mp3"):
+		corrupted = corruptMP3(data, intensity, rng)
+	case strings.Contains(contentType, "audio/ogg"):
+		corrupted = corruptOGG(data, intensity, rng)
+	case strings.Contains(contentType, "audio/flac"):
+		corrupted = corruptFLAC(data, intensity, rng)
+
+	// Video formats
+	case strings.Contains(contentType, "video/mp4"):
+		corrupted = corruptMP4(data, intensity, rng)
+	case strings.Contains(contentType, "video/webm"):
+		corrupted = corruptWebM(data, intensity, rng)
+	case strings.Contains(contentType, "video/x-msvideo") || strings.Contains(contentType, "video/avi"):
+		corrupted = corruptAVI(data, intensity, rng)
+	case strings.Contains(contentType, "video/mp2t"):
+		corrupted = corruptTS(data, intensity, rng)
+
+	// Container formats that may use content-type detection by extension
+	case strings.HasSuffix(r.URL.Path, ".webp"):
+		corrupted = corruptWebP(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".bmp"):
+		corrupted = corruptBMP(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".svg"):
+		corrupted = corruptSVG(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".ico"):
+		corrupted = corruptICO(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".tif") || strings.HasSuffix(r.URL.Path, ".tiff"):
+		corrupted = corruptTIFF(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".mp3"):
+		corrupted = corruptMP3(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".ogg") || strings.HasSuffix(r.URL.Path, ".oga"):
+		corrupted = corruptOGG(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".flac"):
+		corrupted = corruptFLAC(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".mp4") || strings.HasSuffix(r.URL.Path, ".m4v") || strings.HasSuffix(r.URL.Path, ".m4a"):
+		corrupted = corruptMP4(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".webm"):
+		corrupted = corruptWebM(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".avi"):
+		corrupted = corruptAVI(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".ts"):
+		corrupted = corruptTS(data, intensity, rng)
+
 	default:
 		corrupted = corruptGeneric(data, intensity, rng)
 	}
@@ -706,82 +762,6 @@ func (e *Engine) applyStreamingChaos(w http.ResponseWriter, r *http.Request, dat
 		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(http.StatusOK)
 		w.Write(corrupted)
-	}
-}
-
-// --- Streaming chaos helpers ---
-
-// corruptHLS corrupts an HLS (.m3u8) playlist by introducing:
-// invalid segment URLs, duration mismatches, and sequence number gaps.
-func corruptHLS(data []byte) []byte {
-	variant := rand.Intn(3)
-	original := string(data)
-	switch variant {
-	case 0:
-		// Replace segment URLs with invalid ones.
-		lines := strings.Split(original, "\n")
-		for i, line := range lines {
-			if !strings.HasPrefix(line, "#") && strings.TrimSpace(line) != "" {
-				lines[i] = "https://invalid.example.com/nonexistent-segment-" + fmt.Sprintf("%d", rand.Intn(9999)) + ".ts"
-			}
-		}
-		return []byte(strings.Join(lines, "\n"))
-
-	case 1:
-		// Corrupt EXTINF duration values.
-		lines := strings.Split(original, "\n")
-		for i, line := range lines {
-			if strings.HasPrefix(line, "#EXTINF:") {
-				lines[i] = fmt.Sprintf("#EXTINF:%d,", rand.Intn(900)+100) // absurd duration
-			}
-		}
-		return []byte(strings.Join(lines, "\n"))
-
-	default:
-		// Inject sequence gaps by mangling EXT-X-MEDIA-SEQUENCE.
-		lines := strings.Split(original, "\n")
-		for i, line := range lines {
-			if strings.HasPrefix(line, "#EXT-X-MEDIA-SEQUENCE:") {
-				lines[i] = fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d", rand.Intn(100000)+9999)
-			}
-		}
-		// Also inject a duplicate EXT-X-ENDLIST in the middle.
-		mid := len(lines) / 2
-		newLines := make([]string, 0, len(lines)+1)
-		newLines = append(newLines, lines[:mid]...)
-		newLines = append(newLines, "#EXT-X-ENDLIST")
-		newLines = append(newLines, lines[mid:]...)
-		return []byte(strings.Join(newLines, "\n"))
-	}
-}
-
-// corruptDASH corrupts a DASH (.mpd) manifest by introducing
-// invalid XML, duration mismatches, or broken segment URLs.
-func corruptDASH(data []byte) []byte {
-	variant := rand.Intn(3)
-	original := string(data)
-	switch variant {
-	case 0:
-		// Truncate the XML mid-element to produce a parse error.
-		cutAt := len(original) / 2
-		if cutAt < 1 {
-			cutAt = 1
-		}
-		return []byte(original[:cutAt])
-
-	case 1:
-		// Replace mediaPresentationDuration with an invalid value.
-		original = strings.ReplaceAll(original, "mediaPresentationDuration=", "mediaPresentationDuration=\"INVALID_DURATION\" data-orig=")
-		return []byte(original)
-
-	default:
-		// Inject a malformed segment template.
-		inject := `<SegmentTemplate timescale="NOTANUMBER" media="$Number$.ts" startNumber="NOTANUMBER"/>`
-		insertAt := strings.Index(original, "</AdaptationSet>")
-		if insertAt < 0 {
-			return []byte(original + inject)
-		}
-		return []byte(original[:insertAt] + inject + original[insertAt:])
 	}
 }
 

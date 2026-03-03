@@ -65,6 +65,27 @@ var sitemapPaths = []string{
 	"/articles/tech/web-scraping-101",
 	"/articles/security/owasp-top-10",
 	"/articles/devops/ci-cd-pipelines",
+	// Media content paths (all 18 formats)
+	"/media/image/hero.png",
+	"/media/image/banner.jpg",
+	"/media/image/logo.gif",
+	"/media/image/background.webp",
+	"/media/image/illustration.svg",
+	"/media/image/diagram.bmp",
+	"/media/image/favicon.ico",
+	"/media/image/photo.tiff",
+	"/media/audio/podcast.mp3",
+	"/media/audio/notification.wav",
+	"/media/audio/music.ogg",
+	"/media/audio/lossless.flac",
+	"/media/video/intro.mp4",
+	"/media/video/demo.webm",
+	"/media/video/tutorial.avi",
+	"/media/video/segment.ts",
+	"/media/stream/live/playlist.m3u8",
+	"/media/stream/vod/manifest.mpd",
+	"/uploads/documents/report.png",
+	"/content/media/gallery/photo-001.jpg",
 }
 
 // serveSitemap generates and serves /sitemap.xml with URL entries.
