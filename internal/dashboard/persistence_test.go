@@ -5,6 +5,11 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"time"
+
+	"github.com/glitchWebServer/internal/adaptive"
+	"github.com/glitchWebServer/internal/fingerprint"
+	"github.com/glitchWebServer/internal/metrics"
 )
 
 // ---------------------------------------------------------------------------
@@ -562,6 +567,105 @@ func TestProxyConfig_Restore_WithMirror(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Blocking config round-trip
+// ---------------------------------------------------------------------------
+
+func TestPersistence_BlockingConfig(t *testing.T) {
+	resetGlobals()
+
+	globalAdaptive.SetBlockEnabled(true)
+	globalAdaptive.SetBlockChance(0.75)
+	globalAdaptive.SetBlockDuration(120 * time.Second)
+
+	export := ExportConfig()
+	resetGlobals()
+	ImportConfig(export)
+
+	chance, duration, enabled := globalAdaptive.GetBlockConfig()
+	if !enabled {
+		t.Error("blocking should be enabled after import")
+	}
+	if math.Abs(chance-0.75) > 0.001 {
+		t.Errorf("block chance: got %f, want 0.75", chance)
+	}
+	if int(duration.Seconds()) != 120 {
+		t.Errorf("block duration: got %v, want 120s", duration)
+	}
+}
+
+func TestPersistence_BlockingConfig_JSONRoundTrip(t *testing.T) {
+	resetGlobals()
+
+	globalAdaptive.SetBlockEnabled(false)
+	globalAdaptive.SetBlockChance(0.33)
+	globalAdaptive.SetBlockDuration(60 * time.Second)
+
+	export := ExportConfig()
+	data, err := json.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var restored ConfigExport
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	resetGlobals()
+	ImportConfig(&restored)
+
+	chance, duration, enabled := globalAdaptive.GetBlockConfig()
+	if enabled {
+		t.Error("blocking should be disabled after JSON import")
+	}
+	if math.Abs(chance-0.33) > 0.001 {
+		t.Errorf("block chance: got %f, want 0.33", chance)
+	}
+	if int(duration.Seconds()) != 60 {
+		t.Errorf("block duration: got %v, want 60s", duration)
+	}
+}
+
+func TestPersistence_BlockingConfig_PendingMechanism(t *testing.T) {
+	// Test the pending blocking config mechanism:
+	// If ImportConfig is called before SetAdaptive, the blocking config
+	// should be stored as pending and applied when SetAdaptive is called.
+	globalFlags = NewFeatureFlags()
+	globalConfig = NewAdminConfig()
+	globalVulnConfig = NewVulnConfig()
+	globalAPIChaosConfig = NewAPIChaosConfig()
+	globalMediaChaosConfig = NewMediaChaosConfig()
+	globalProxyConfig = NewProxyConfig()
+	globalAdaptive = nil // no adaptive engine yet
+
+	export := &ConfigExport{
+		Blocking: map[string]interface{}{
+			"enabled":      true,
+			"chance":       0.88,
+			"duration_sec": float64(200),
+		},
+	}
+	ImportConfig(export)
+
+	// Now create the adaptive engine — pending config should be applied.
+	col := metrics.NewCollector()
+	fp := fingerprint.NewEngine()
+	a := adaptive.NewEngine(col, fp)
+	SetAdaptive(a)
+
+	chance, duration, enabled := globalAdaptive.GetBlockConfig()
+	if !enabled {
+		t.Error("blocking should be enabled after pending sync")
+	}
+	if math.Abs(chance-0.88) > 0.001 {
+		t.Errorf("block chance: got %f, want 0.88", chance)
+	}
+	if int(duration.Seconds()) != 200 {
+		t.Errorf("block duration: got %v, want 200s", duration)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -585,6 +689,12 @@ func resetGlobals() {
 	globalAPIChaosConfig = NewAPIChaosConfig()
 	globalMediaChaosConfig = NewMediaChaosConfig()
 	globalProxyConfig = NewProxyConfig()
+
+	// Create a fresh adaptive engine so blocking config can round-trip.
+	col := metrics.NewCollector()
+	fp := fingerprint.NewEngine()
+	a := adaptive.NewEngine(col, fp)
+	SetAdaptive(a)
 }
 
 type expectedState struct {
@@ -602,6 +712,9 @@ type expectedState struct {
 	proxyCorruptProb float64
 	proxyDropProb    float64
 	proxyResetProb   float64
+	blockEnabled     bool
+	blockChance      float64
+	blockDurationSec int
 }
 
 type adminConfigVals struct {
@@ -682,13 +795,17 @@ func randomizeAll(rng *rand.Rand) expectedState {
 		state.config[k] = v
 	}
 
-	// Error weights
+	// Error weights — includes HTTP + TCP/network error types
 	state.errorWeights = map[string]float64{
 		"slow_drip":        float64(rng.Intn(100)) / 100.0,
 		"timeout":          float64(rng.Intn(100)) / 100.0,
 		"connection_reset": float64(rng.Intn(100)) / 100.0,
 		"malformed":        float64(rng.Intn(100)) / 100.0,
 		"delayed":          float64(rng.Intn(100)) / 100.0,
+		"tcp_reset":        float64(rng.Intn(100)) / 100.0,
+		"slow_headers":     float64(rng.Intn(100)) / 100.0,
+		"empty_response":   float64(rng.Intn(100)) / 100.0,
+		"partial_response": float64(rng.Intn(100)) / 100.0,
 	}
 	for k, v := range state.errorWeights {
 		globalConfig.SetErrorWeight(k, v)
@@ -751,6 +868,16 @@ func randomizeAll(rng *rand.Rand) expectedState {
 	globalProxyConfig.ResetProb = state.proxyResetProb
 	globalProxyConfig.mu.Unlock()
 
+	// Blocking config (via adaptive engine)
+	state.blockEnabled = rng.Intn(2) == 0
+	state.blockChance = float64(rng.Intn(100)) / 100.0
+	state.blockDurationSec = rng.Intn(300) + 1
+	if globalAdaptive != nil {
+		globalAdaptive.SetBlockEnabled(state.blockEnabled)
+		globalAdaptive.SetBlockChance(state.blockChance)
+		globalAdaptive.SetBlockDuration(time.Duration(state.blockDurationSec) * time.Second)
+	}
+
 	return state
 }
 
@@ -786,6 +913,21 @@ func verifyExport(t *testing.T, export *ConfigExport, expected expectedState) {
 	}
 	if mode, ok := export.ProxyConfig["mode"].(string); !ok || mode != expected.proxyMode {
 		t.Errorf("export.ProxyConfig[mode]: got %v, want %q", export.ProxyConfig["mode"], expected.proxyMode)
+	}
+
+	// Blocking config
+	if export.Blocking == nil {
+		t.Error("export.Blocking should not be nil")
+	} else {
+		if enabled, ok := export.Blocking["enabled"].(bool); !ok || enabled != expected.blockEnabled {
+			t.Errorf("export.Blocking[enabled]: got %v, want %v", export.Blocking["enabled"], expected.blockEnabled)
+		}
+		if chance, ok := export.Blocking["chance"].(float64); !ok || math.Abs(chance-expected.blockChance) > 0.01 {
+			t.Errorf("export.Blocking[chance]: got %v, want %v", export.Blocking["chance"], expected.blockChance)
+		}
+		if durSec, ok := export.Blocking["duration_sec"].(int); !ok || durSec != expected.blockDurationSec {
+			t.Errorf("export.Blocking[duration_sec]: got %v, want %v", export.Blocking["duration_sec"], expected.blockDurationSec)
+		}
 	}
 }
 
@@ -892,5 +1034,22 @@ func verifyGlobals(t *testing.T, expected expectedState) {
 	}
 	if math.Abs(globalProxyConfig.ResetProb-expected.proxyResetProb) > 0.01 {
 		t.Errorf("proxy ResetProb: got %f, want %f", globalProxyConfig.ResetProb, expected.proxyResetProb)
+	}
+
+	// Blocking config (via adaptive engine)
+	if globalAdaptive != nil {
+		chance, duration, enabled := globalAdaptive.GetBlockConfig()
+		if enabled != expected.blockEnabled {
+			t.Errorf("blocking enabled: got %v, want %v", enabled, expected.blockEnabled)
+		}
+		if math.Abs(chance-expected.blockChance) > 0.01 {
+			t.Errorf("blocking chance: got %f, want %f", chance, expected.blockChance)
+		}
+		gotDurSec := int(duration.Seconds())
+		if gotDurSec != expected.blockDurationSec {
+			t.Errorf("blocking duration_sec: got %d, want %d", gotDurSec, expected.blockDurationSec)
+		}
+	} else {
+		t.Error("globalAdaptive should not be nil after resetGlobals")
 	}
 }
