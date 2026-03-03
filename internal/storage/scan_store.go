@@ -95,6 +95,34 @@ func (s *Store) GetScan(ctx context.Context, id int64) (*ScanRecord, error) {
 	return &r, nil
 }
 
+// ListScansByPrefix returns recent scan results filtered by scanner_name prefix, newest first.
+func (s *Store) ListScansByPrefix(ctx context.Context, prefix string, limit int) ([]ScanRecord, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, scanner_name, status, COALESCE(grade, ''), detection_rate, report, created_at
+		FROM scan_history
+		WHERE scanner_name LIKE $1
+		ORDER BY created_at DESC
+		LIMIT $2
+	`, prefix+"%", limit)
+	if err != nil {
+		return nil, fmt.Errorf("query scans by prefix: %w", err)
+	}
+	defer rows.Close()
+
+	var scans []ScanRecord
+	for rows.Next() {
+		var r ScanRecord
+		if err := rows.Scan(&r.ID, &r.ScannerName, &r.Status, &r.Grade, &r.DetectionRate, &r.Report, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		scans = append(scans, r)
+	}
+	return scans, rows.Err()
+}
+
 // CountScans returns the total number of scan records.
 func (s *Store) CountScans(ctx context.Context) (int64, error) {
 	var count int64

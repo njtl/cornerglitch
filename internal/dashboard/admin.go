@@ -1096,6 +1096,7 @@ type ConfigExport struct {
 	APIChaosConfig     map[string]bool        `json:"api_chaos_config,omitempty"`
 	MediaChaosConfig   map[string]bool        `json:"media_chaos_config,omitempty"`
 	ProxyConfig        map[string]interface{} `json:"proxy_config,omitempty"`
+	ScannerConfig      map[string]interface{} `json:"scanner_config,omitempty"`
 }
 
 // ExportConfig builds a ConfigExport from the current global state.
@@ -1112,6 +1113,7 @@ func ExportConfig() *ConfigExport {
 		APIChaosConfig:   globalAPIChaosConfig.Snapshot(),
 		MediaChaosConfig: globalMediaChaosConfig.Snapshot(),
 		ProxyConfig:      globalProxyConfig.SnapshotForExport(),
+		ScannerConfig:    ExportScannerConfig(),
 	}
 }
 
@@ -1223,6 +1225,11 @@ func ImportConfig(export *ConfigExport) {
 			pendingBlocking = export.Blocking
 			pendingBlockingMu.Unlock()
 		}
+	}
+
+	// Import scanner config (default profile, target, modules)
+	if export.ScannerConfig != nil {
+		ImportScannerConfig(export.ScannerConfig)
 	}
 }
 
@@ -1657,7 +1664,8 @@ func persistExternalScanRun(run *scaneval.ScanRun) {
 	}
 }
 
-// LoadExternalScanHistory restores external scanner runs from PostgreSQL on startup.
+// LoadExternalScanHistory restores external scanner runs and comparison history
+// from PostgreSQL on startup.
 func LoadExternalScanHistory() {
 	store := GetStore()
 	if store == nil {
@@ -1671,21 +1679,49 @@ func LoadExternalScanHistory() {
 		return
 	}
 	runner := getScanRunner()
-	loaded := 0
+	loadedRuns := 0
+	loadedComparisons := 0
 	for i := len(scans) - 1; i >= 0; i-- {
 		rec := scans[i]
 		if !strings.HasPrefix(rec.ScannerName, "external:") {
 			continue
 		}
+		scannerName := rec.ScannerName[9:] // strip "external:"
+
+		// Try restoring as a ScanRun (external scanner run data).
 		var run scaneval.ScanRun
-		if err := json.Unmarshal(rec.Report, &run); err != nil {
-			continue
+		if err := json.Unmarshal(rec.Report, &run); err == nil && run.Scanner != "" {
+			runner.AddResult(&run)
+			loadedRuns++
 		}
-		runner.AddResult(&run)
-		loaded++
+
+		// Also restore as a comparison history entry for the history tab.
+		entry := scaneval.HistoryEntry{
+			ID:        rec.CreatedAt.Format("20060102-150405"),
+			Timestamp: rec.CreatedAt.UTC().Format(time.RFC3339),
+			Scanner:   scannerName,
+			Grade:     rec.Grade,
+			Detection: rec.DetectionRate,
+		}
+		// Try to extract additional details from the report JSON.
+		var reportMeta struct {
+			TruePositives []json.RawMessage `json:"true_positives"`
+			ExpectedVulns int               `json:"expected_vulns"`
+			FPRate        float64           `json:"false_positive_rate"`
+		}
+		if err := json.Unmarshal(rec.Report, &reportMeta); err == nil {
+			entry.VulnsFound = len(reportMeta.TruePositives)
+			entry.VulnsTotal = reportMeta.ExpectedVulns
+			entry.FPRate = reportMeta.FPRate
+		}
+		comparisonHistory.AddEntry(entry)
+		loadedComparisons++
 	}
-	if loaded > 0 {
-		log.Printf("[glitch] Restored %d external scan runs from DB", loaded)
+	if loadedRuns > 0 {
+		log.Printf("[glitch] Restored %d external scan runs from DB", loadedRuns)
+	}
+	if loadedComparisons > 0 {
+		log.Printf("[glitch] Restored %d external scan comparison entries from DB", loadedComparisons)
 	}
 }
 
