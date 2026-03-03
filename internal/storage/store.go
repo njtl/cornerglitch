@@ -248,6 +248,9 @@ func (s *Store) SaveFullConfig(ctx context.Context, export *FullConfigExport) er
 	if export.MediaChaosConfig != nil {
 		entities["media_chaos_config"] = export.MediaChaosConfig
 	}
+	if export.ProxyConfig != nil {
+		entities["proxy_config"] = export.ProxyConfig
+	}
 
 	for entity, data := range entities {
 		if data == nil {
@@ -334,6 +337,12 @@ func (s *Store) LoadFullConfig(ctx context.Context) (*FullConfigExport, error) {
 				return nil, fmt.Errorf("unmarshal media_chaos_config: %w", err)
 			}
 			export.MediaChaosConfig = v
+		case "proxy_config":
+			var v map[string]interface{}
+			if err := json.Unmarshal(jsonData, &v); err != nil {
+				return nil, fmt.Errorf("unmarshal proxy_config: %w", err)
+			}
+			export.ProxyConfig = v
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -359,4 +368,5 @@ type FullConfigExport struct {
 	Blocking        map[string]interface{} `json:"blocking,omitempty"`
 	APIChaosConfig    map[string]bool        `json:"api_chaos_config,omitempty"`
 	MediaChaosConfig  map[string]bool        `json:"media_chaos_config,omitempty"`
+	ProxyConfig       map[string]interface{} `json:"proxy_config,omitempty"`
 }

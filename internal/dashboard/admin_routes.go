@@ -198,6 +198,7 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 			return
 		}
 		audit.Log("admin", "proxy.mode_change", "proxy.mode", oldMode, req.Mode, nil)
+		TriggerAutoSave()
 		resp := map[string]interface{}{
 			"ok":   true,
 			"mode": req.Mode,
@@ -219,6 +220,7 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		mc := SnapshotMirrorFromServer()
 		globalProxyConfig.SetMirror(mc)
 		audit.LogAction("admin", "proxy.mirror_refresh", "proxy.mirror", nil)
+		TriggerAutoSave()
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":     true,
 			"mirror": mc,
