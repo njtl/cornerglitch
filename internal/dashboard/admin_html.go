@@ -1794,6 +1794,24 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   </div>
 
   <div class="section">
+    <h2>// Reset Statistics</h2>
+    <p style="color:#666;font-size:0.8em;margin-bottom:8px">Clear traffic metrics, scan history, and proxy counters. Configuration is not affected.</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="reset-server" checked> <span style="color:#ccc;font-size:0.85em"><strong>Server</strong> — request counters, time series, client profiles, request log</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="reset-scanner" checked> <span style="color:#ccc;font-size:0.85em"><strong>Scanner</strong> — built-in scan history, external scan results, comparison history</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="reset-proxy" checked> <span style="color:#ccc;font-size:0.85em"><strong>Proxy</strong> — proxy request counter</span>
+      </label>
+    </div>
+    <button class="scanner-btn danger" onclick="resetStatistics()">Reset Selected</button>
+    <div id="reset-stats-status" style="font-size:0.82em;margin-top:8px;color:#555"></div>
+  </div>
+
+  <div class="section">
     <h2>// Server Info</h2>
     <div class="grid" id="settings-info">
       <div class="card"><div class="label">Server Port</div><div class="value v-info" style="font-size:1em" id="settings-server-port">--</div></div>
@@ -5131,6 +5149,38 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         document.getElementById('settings-current-pw').value = '';
         document.getElementById('settings-new-pw').value = '';
         document.getElementById('settings-confirm-pw').value = '';
+      } else {
+        status.style.color = '#ff4444';
+        status.textContent = resp.error || 'Failed';
+      }
+    } catch(e) {
+      status.style.color = '#ff4444';
+      status.textContent = 'Error: ' + e.message;
+    }
+  };
+
+  // ------ Reset Statistics ------
+  window.resetStatistics = async function() {
+    var server = document.getElementById('reset-server').checked;
+    var scanner = document.getElementById('reset-scanner').checked;
+    var proxy = document.getElementById('reset-proxy').checked;
+    var status = document.getElementById('reset-stats-status');
+    if (!server && !scanner && !proxy) { status.style.color = '#ff4444'; status.textContent = 'Select at least one category'; return; }
+    var parts = [];
+    if (server) parts.push('server');
+    if (scanner) parts.push('scanner');
+    if (proxy) parts.push('proxy');
+    if (!confirm('Reset ' + parts.join(', ') + ' statistics? This cannot be undone.')) return;
+    try {
+      var resp = await fetch(API + '/admin/api/stats/reset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({server: server, scanner: scanner, proxy: proxy})
+      }).then(function(r) { return r.json(); });
+      if (resp.ok) {
+        status.style.color = '#00ff88';
+        status.textContent = 'Statistics reset: ' + parts.join(', ');
+        toast('Statistics reset');
       } else {
         status.style.color = '#ff4444';
         status.textContent = resp.error || 'Failed';

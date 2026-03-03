@@ -1982,6 +1982,77 @@ func LoadExternalScanHistory() {
 	}
 }
 
+// ClearExternalScanHistory removes all external scanner run history and comparison entries.
+func ClearExternalScanHistory() {
+	comparisonHistory.Clear()
+	scanRunnerMu.Lock()
+	if scanRunner != nil {
+		scanRunner.ClearHistory()
+	}
+	scanRunnerMu.Unlock()
+}
+
+// ResetStatistics clears server, scanner, and/or proxy statistics based on the flags.
+// It resets both in-memory data structures and database tables.
+func ResetStatistics(collector *metrics.Collector, resetServer, resetScanner, resetProxy bool) map[string]interface{} {
+	result := map[string]interface{}{}
+	store := GetStore()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if resetServer {
+		// Reset in-memory counters, ring buffer, client profiles
+		collector.ResetCounters()
+		collector.ResetRecords()
+		collector.ResetClients()
+
+		// Clear DB tables
+		if store != nil {
+			if n, err := store.TruncateMetricsSnapshots(ctx); err != nil {
+				log.Printf("[glitch] Failed to truncate metrics_snapshots: %v", err)
+			} else {
+				result["metrics_snapshots_deleted"] = n
+			}
+			if n, err := store.TruncateClientProfiles(ctx); err != nil {
+				log.Printf("[glitch] Failed to truncate client_profiles: %v", err)
+			} else {
+				result["client_profiles_deleted"] = n
+			}
+			if n, err := store.TruncateRequestLog(ctx); err != nil {
+				log.Printf("[glitch] Failed to truncate request_log: %v", err)
+			} else {
+				result["request_log_deleted"] = n
+			}
+		}
+		result["server"] = "reset"
+	}
+
+	if resetScanner {
+		// Clear built-in scanner history
+		ClearBuiltinScanHistory()
+		// Clear external scanner history
+		ClearExternalScanHistory()
+
+		// Clear DB scan history
+		if store != nil {
+			if n, err := store.TruncateScans(ctx); err != nil {
+				log.Printf("[glitch] Failed to truncate scan_history: %v", err)
+			} else {
+				result["scan_history_deleted"] = n
+			}
+		}
+		result["scanner"] = "reset"
+	}
+
+	if resetProxy {
+		pm := GetProxyManager()
+		pm.ResetStats()
+		result["proxy"] = "reset"
+	}
+
+	return result
+}
+
 // RestoreMetrics loads the latest metrics snapshot from PostgreSQL and restores
 // cumulative counters on the collector so the dashboard doesn't start from zero.
 func RestoreMetrics(collector *metrics.Collector) {

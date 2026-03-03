@@ -130,6 +130,24 @@ func (s *Store) CountScans(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+// TruncateScans deletes all scan history records.
+func (s *Store) TruncateScans(ctx context.Context) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM scan_history`)
+	if err != nil {
+		return 0, fmt.Errorf("truncate scan_history: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// TruncateScansByPrefix deletes scan history records matching a scanner_name prefix.
+func (s *Store) TruncateScansByPrefix(ctx context.Context, prefix string) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM scan_history WHERE scanner_name LIKE $1`, prefix+"%")
+	if err != nil {
+		return 0, fmt.Errorf("truncate scans by prefix %s: %w", prefix, err)
+	}
+	return result.RowsAffected()
+}
+
 // nullString returns a sql.NullString — NULL for empty, valid otherwise.
 func nullString(s string) sql.NullString {
 	if s == "" {

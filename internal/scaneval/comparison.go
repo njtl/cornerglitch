@@ -217,6 +217,13 @@ func NewComparisonHistory(maxSize int) *ComparisonHistory {
 	}
 }
 
+// Clear removes all entries from the history.
+func (h *ComparisonHistory) Clear() {
+	h.mu.Lock()
+	h.entries = make([]HistoryEntry, 0)
+	h.mu.Unlock()
+}
+
 // Add records a comparison report in the history. If the buffer is full, the
 // oldest entry is evicted.
 func (h *ComparisonHistory) Add(report *ComparisonReport) {

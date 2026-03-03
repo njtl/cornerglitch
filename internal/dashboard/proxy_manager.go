@@ -213,6 +213,11 @@ func (pm *ProxyManager) Status() map[string]interface{} {
 	return status
 }
 
+// ResetStats zeroes the proxy request counter.
+func (pm *ProxyManager) ResetStats() {
+	pm.reqCount.Store(0)
+}
+
 // IncrementRequests increments the proxy request counter. This can be called
 // externally if additional request tracking is needed.
 func (pm *ProxyManager) IncrementRequests() {
