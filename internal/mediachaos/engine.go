@@ -1,6 +1,7 @@
 package mediachaos
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -274,7 +275,10 @@ func (e *Engine) Apply(w http.ResponseWriter, r *http.Request, mediaData []byte,
 		return
 	}
 
-	cat := enabled[rand.Intn(len(enabled))]
+	// Deterministic category selection from request path
+	pathHash := sha256.Sum256([]byte(r.URL.Path))
+	catIdx := int(pathHash[8])%len(enabled)
+	cat := enabled[catIdx]
 	switch cat {
 	case FormatCorruption:
 		e.applyFormatCorruption(w, r, mediaData, contentType, intensity)
@@ -304,7 +308,14 @@ func (e *Engine) Apply(w http.ResponseWriter, r *http.Request, mediaData []byte,
 // applyFormatCorruption corrupts the raw bytes of the media payload.
 // The corruption strategy is selected based on the content type and the engine's intensity.
 func (e *Engine) applyFormatCorruption(w http.ResponseWriter, r *http.Request, data []byte, contentType string, intensity float64) {
-	rng := rand.New(rand.NewSource(rand.Int63()))
+	// Deterministic RNG seeded from request path for reproducible corruption
+	h := sha256.Sum256([]byte(r.URL.Path))
+	seed := int64(h[0])<<56 | int64(h[1])<<48 | int64(h[2])<<40 | int64(h[3])<<32 |
+		int64(h[4])<<24 | int64(h[5])<<16 | int64(h[6])<<8 | int64(h[7])
+	if seed < 0 {
+		seed = -seed
+	}
+	rng := rand.New(rand.NewSource(seed))
 	var corrupted []byte
 	switch {
 	// Image formats
@@ -345,7 +356,13 @@ func (e *Engine) applyFormatCorruption(w http.ResponseWriter, r *http.Request, d
 	case strings.Contains(contentType, "video/mp2t"):
 		corrupted = corruptTS(data, intensity, rng)
 
-	// Container formats that may use content-type detection by extension
+	// Streaming manifest formats
+	case strings.Contains(contentType, "application/vnd.apple.mpegurl") || strings.Contains(contentType, "audio/mpegurl"):
+		corrupted = corruptHLS(data)
+	case strings.Contains(contentType, "application/dash+xml"):
+		corrupted = corruptDASH(data)
+
+	// Extension-based fallbacks for ambiguous content types
 	case strings.HasSuffix(r.URL.Path, ".webp"):
 		corrupted = corruptWebP(data, intensity, rng)
 	case strings.HasSuffix(r.URL.Path, ".bmp"):
@@ -370,6 +387,10 @@ func (e *Engine) applyFormatCorruption(w http.ResponseWriter, r *http.Request, d
 		corrupted = corruptAVI(data, intensity, rng)
 	case strings.HasSuffix(r.URL.Path, ".ts"):
 		corrupted = corruptTS(data, intensity, rng)
+	case strings.HasSuffix(r.URL.Path, ".m3u8"):
+		corrupted = corruptHLS(data)
+	case strings.HasSuffix(r.URL.Path, ".mpd"):
+		corrupted = corruptDASH(data)
 
 	default:
 		corrupted = corruptGeneric(data, intensity, rng)
