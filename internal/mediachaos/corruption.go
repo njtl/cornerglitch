@@ -2043,6 +2043,9 @@ func corruptTS(data []byte, intensity float64, rng *rand.Rand) []byte {
 // invalid segment URLs, duration mismatches, sequence number gaps,
 // missing required tags, encryption chaos, and nested master playlists.
 func corruptHLS(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
 	variant := rand.Intn(7)
 	original := string(data)
 	switch variant {
@@ -2143,6 +2146,9 @@ https://invalid.example.com/master4.m3u8
 // invalid XML, duration mismatches, broken segment URLs, circular references,
 // impossible values, and conflicting mime types.
 func corruptDASH(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
 	variant := rand.Intn(7)
 	original := string(data)
 	switch variant {
