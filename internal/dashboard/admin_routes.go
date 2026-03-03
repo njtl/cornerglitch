@@ -328,6 +328,11 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 		}
 	})
 
+	// Statistics reset
+	mux.HandleFunc("/admin/api/stats/reset", func(w http.ResponseWriter, r *http.Request) {
+		adminAPIStatsReset(w, r, s)
+	})
+
 	// Password change
 	mux.HandleFunc("/admin/api/password", func(w http.ResponseWriter, r *http.Request) {
 		adminAPIPasswordChange(w, r)
@@ -2623,6 +2628,54 @@ func restoreProxyNightmare(s *Server) {
 // ---------------------------------------------------------------------------
 // API handler: POST /admin/api/password
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// API handler: POST /admin/api/stats/reset
+// ---------------------------------------------------------------------------
+
+func adminAPIStatsReset(w http.ResponseWriter, r *http.Request, s *Server) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Server  bool `json:"server"`
+		Scanner bool `json:"scanner"`
+		Proxy   bool `json:"proxy"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if !req.Server && !req.Scanner && !req.Proxy {
+		http.Error(w, `{"error":"select at least one category to reset"}`, http.StatusBadRequest)
+		return
+	}
+
+	result := ResetStatistics(s.collector, req.Server, req.Scanner, req.Proxy)
+
+	audit.LogAction("admin", "stats.reset", "statistics", map[string]interface{}{
+		"server":  req.Server,
+		"scanner": req.Scanner,
+		"proxy":   req.Proxy,
+	})
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":     true,
+		"result": result,
+	})
+}
 
 func adminAPIPasswordChange(w http.ResponseWriter, r *http.Request) {
 	setCORS(w)

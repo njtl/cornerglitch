@@ -125,6 +125,15 @@ func (s *Store) PruneRequests(ctx context.Context, olderThan time.Duration) (int
 	return result.RowsAffected()
 }
 
+// TruncateRequestLog deletes all request log entries.
+func (s *Store) TruncateRequestLog(ctx context.Context) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM request_log`)
+	if err != nil {
+		return 0, fmt.Errorf("truncate request_log: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 // CountRequests returns the total number of request log entries.
 func (s *Store) CountRequests(ctx context.Context) (int64, error) {
 	var count int64
