@@ -439,6 +439,13 @@ func (r *Runner) AddResult(run *ScanRun) {
 	r.results = append(r.results, run)
 }
 
+// ClearHistory removes all stored scan run results.
+func (r *Runner) ClearHistory() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.results = nil
+}
+
 // generateWordlist creates a wordlist file for ffuf based on known server paths.
 func (r *Runner) generateWordlist() string {
 	paths := []string{

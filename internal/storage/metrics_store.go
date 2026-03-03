@@ -237,6 +237,24 @@ func (s *Store) PruneClientProfiles(ctx context.Context, keepVersions int) (int6
 	return result.RowsAffected()
 }
 
+// TruncateMetricsSnapshots deletes all metrics snapshots.
+func (s *Store) TruncateMetricsSnapshots(ctx context.Context) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM metrics_snapshots`)
+	if err != nil {
+		return 0, fmt.Errorf("truncate metrics_snapshots: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// TruncateClientProfiles deletes all client profile records.
+func (s *Store) TruncateClientProfiles(ctx context.Context) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM client_profiles`)
+	if err != nil {
+		return 0, fmt.Errorf("truncate client_profiles: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 // nullJSON returns nil for empty/nil RawMessage, the value otherwise.
 func nullJSON(data json.RawMessage) interface{} {
 	if len(data) == 0 {
