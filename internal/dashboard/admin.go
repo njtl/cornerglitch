@@ -112,6 +112,7 @@ func TriggerAutoSave() {
 				Blocking:          export.Blocking,
 				APIChaosConfig:    export.APIChaosConfig,
 				MediaChaosConfig:  export.MediaChaosConfig,
+				ProxyConfig:       export.ProxyConfig,
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -144,6 +145,7 @@ func LoadStateFile() bool {
 				Blocking:         dbExport.Blocking,
 				APIChaosConfig:   dbExport.APIChaosConfig,
 				MediaChaosConfig: dbExport.MediaChaosConfig,
+				ProxyConfig:      dbExport.ProxyConfig,
 			}
 			ImportConfig(export)
 			audit.LogSystem("config.load", "config.load", map[string]interface{}{"source": "postgresql"})
@@ -786,18 +788,25 @@ func (c *AdminConfig) SetString(key, value string) bool {
 }
 
 // GetErrorWeights returns a copy of the current error weights map.
+// Empty keys are excluded.
 func (c *AdminConfig) GetErrorWeights() map[string]float64 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	result := make(map[string]float64, len(c.ErrorWeights))
 	for k, v := range c.ErrorWeights {
-		result[k] = v
+		if k != "" {
+			result[k] = v
+		}
 	}
 	return result
 }
 
 // SetErrorWeight sets a single error type weight.
+// Empty error type keys are silently ignored.
 func (c *AdminConfig) SetErrorWeight(errType string, weight float64) {
+	if errType == "" {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if weight < 0 {
@@ -829,7 +838,12 @@ func (c *AdminConfig) GetPageTypeWeights() map[string]float64 {
 }
 
 // SetPageTypeWeight sets a single page type weight.
+// SetPageTypeWeight sets a single page type weight.
+// Empty page type keys are silently ignored.
 func (c *AdminConfig) SetPageTypeWeight(pageType string, weight float64) {
+	if pageType == "" {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if weight < 0 {
@@ -1080,20 +1094,22 @@ type ConfigExport struct {
 	Blocking         map[string]interface{} `json:"blocking,omitempty"`
 	APIChaosConfig     map[string]bool        `json:"api_chaos_config,omitempty"`
 	MediaChaosConfig   map[string]bool        `json:"media_chaos_config,omitempty"`
+	ProxyConfig        map[string]interface{} `json:"proxy_config,omitempty"`
 }
 
 // ExportConfig builds a ConfigExport from the current global state.
 func ExportConfig() *ConfigExport {
 	return &ConfigExport{
-		Version:         "1.0",
-		ExportedAt:      time.Now().UTC().Format(time.RFC3339),
-		Features:        globalFlags.Snapshot(),
-		Config:          globalConfig.Get(),
-		VulnConfig:      globalVulnConfig.Snapshot(),
-		ErrorWeights:    globalConfig.GetErrorWeights(),
-		PageTypeWeights: globalConfig.GetPageTypeWeights(),
-		APIChaosConfig:    globalAPIChaosConfig.Snapshot(),
-		MediaChaosConfig:  globalMediaChaosConfig.Snapshot(),
+		Version:          "1.0",
+		ExportedAt:       time.Now().UTC().Format(time.RFC3339),
+		Features:         globalFlags.Snapshot(),
+		Config:           globalConfig.Get(),
+		VulnConfig:       globalVulnConfig.Snapshot(),
+		ErrorWeights:     globalConfig.GetErrorWeights(),
+		PageTypeWeights:  globalConfig.GetPageTypeWeights(),
+		APIChaosConfig:   globalAPIChaosConfig.Snapshot(),
+		MediaChaosConfig: globalMediaChaosConfig.Snapshot(),
+		ProxyConfig:      globalProxyConfig.SnapshotForExport(),
 	}
 }
 
@@ -1113,6 +1129,8 @@ func ImportConfig(export *ConfigExport) {
 			case float64:
 				globalConfig.Set(key, v)
 			case int:
+				globalConfig.Set(key, float64(v))
+			case int64:
 				globalConfig.Set(key, float64(v))
 			case bool:
 				if v {
@@ -1186,6 +1204,11 @@ func ImportConfig(export *ConfigExport) {
 		for cat, enabled := range export.MediaChaosConfig {
 			globalMediaChaosConfig.SetCategory(cat, enabled)
 		}
+	}
+
+	// Import proxy config
+	if export.ProxyConfig != nil {
+		globalProxyConfig.Restore(export.ProxyConfig)
 	}
 }
 
@@ -1297,6 +1320,110 @@ func (pc *ProxyConfig) Snapshot() map[string]interface{} {
 		result["mirror"] = pc.Mirror
 	}
 	return result
+}
+
+// SnapshotForExport returns a minimal snapshot of proxy state suitable for persistence.
+// Unlike Snapshot() (which includes runtime stats), this only captures restorable config.
+func (pc *ProxyConfig) SnapshotForExport() map[string]interface{} {
+	pc.mu.RLock()
+	defer pc.mu.RUnlock()
+	result := map[string]interface{}{
+		"mode":             pc.Mode,
+		"waf_enabled":      pc.WAFEnabled,
+		"waf_block_action": pc.WAFBlockAction,
+		"latency_prob":     pc.LatencyProb,
+		"corrupt_prob":     pc.CorruptProb,
+		"drop_prob":        pc.DropProb,
+		"reset_prob":       pc.ResetProb,
+	}
+	if pc.Mirror != nil {
+		result["mirror"] = pc.Mirror
+	}
+	return result
+}
+
+// Restore applies a snapshot produced by SnapshotForExport.
+// Unknown keys are ignored; partial snapshots are applied incrementally.
+func (pc *ProxyConfig) Restore(cfg map[string]interface{}) {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if v, ok := cfg["mode"].(string); ok {
+		valid := false
+		for _, m := range ProxyModes {
+			if m == v {
+				valid = true
+				break
+			}
+		}
+		if valid {
+			pc.Mode = v
+		}
+	}
+	if v, ok := cfg["waf_enabled"].(bool); ok {
+		pc.WAFEnabled = v
+	}
+	if v, ok := cfg["waf_block_action"].(string); ok {
+		pc.WAFBlockAction = v
+	}
+	if v, ok := cfg["latency_prob"].(float64); ok {
+		pc.LatencyProb = v
+	}
+	if v, ok := cfg["corrupt_prob"].(float64); ok {
+		pc.CorruptProb = v
+	}
+	if v, ok := cfg["drop_prob"].(float64); ok {
+		pc.DropProb = v
+	}
+	if v, ok := cfg["reset_prob"].(float64); ok {
+		pc.ResetProb = v
+	}
+	if raw, ok := cfg["mirror"]; ok && raw != nil {
+		switch m := raw.(type) {
+		case map[string]interface{}:
+			mc := &MirrorConfig{}
+			if v, ok := m["error_rate_multiplier"].(float64); ok {
+				mc.ErrorRateMultiplier = v
+			}
+			if v, ok := m["header_corrupt_level"].(float64); ok {
+				mc.HeaderCorruptLevel = int(v)
+			}
+			if v, ok := m["protocol_glitch_enabled"].(bool); ok {
+				mc.ProtocolGlitchEnabled = v
+			}
+			if v, ok := m["protocol_glitch_level"].(float64); ok {
+				mc.ProtocolGlitchLevel = int(v)
+			}
+			if v, ok := m["delay_min_ms"].(float64); ok {
+				mc.DelayMinMs = int(v)
+			}
+			if v, ok := m["delay_max_ms"].(float64); ok {
+				mc.DelayMaxMs = int(v)
+			}
+			if v, ok := m["content_theme"].(string); ok {
+				mc.ContentTheme = v
+			}
+			if v, ok := m["snapshot_time"].(string); ok {
+				mc.SnapshotTime = v
+			}
+			if ew, ok := m["error_weights"].(map[string]interface{}); ok {
+				mc.ErrorWeights = make(map[string]float64, len(ew))
+				for k, v := range ew {
+					if f, ok := v.(float64); ok {
+						mc.ErrorWeights[k] = f
+					}
+				}
+			}
+			if pw, ok := m["page_type_weights"].(map[string]interface{}); ok {
+				mc.PageTypeWeights = make(map[string]float64, len(pw))
+				for k, v := range pw {
+					if f, ok := v.(float64); ok {
+						mc.PageTypeWeights[k] = f
+					}
+				}
+			}
+			pc.Mirror = mc
+		}
+	}
 }
 
 // SnapshotMirrorFromServer creates a MirrorConfig by reading current server settings.

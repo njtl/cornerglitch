@@ -544,9 +544,9 @@ func TestPersist_FullConfig_FileRoundTrip(t *testing.T) {
 // Category 7: Proxy config is NOT persisted
 // ---------------------------------------------------------------------------
 
-// TestPersist_ProxyConfig_NotInExport verifies proxy settings are not included
-// in the config export — proxy is runtime-only state that resets on restart.
-func TestPersist_ProxyConfig_NotInExport(t *testing.T) {
+// TestPersist_ProxyConfig_InExport verifies proxy settings ARE included
+// in the config export so they survive restarts.
+func TestPersist_ProxyConfig_InExport(t *testing.T) {
 	_ = setupTestEnv(t)
 	resetAll(t)
 
@@ -554,7 +554,7 @@ func TestPersist_ProxyConfig_NotInExport(t *testing.T) {
 	pc := dashboard.GetProxyConfig()
 	pc.SetMode("chaos")
 
-	// Export should NOT contain proxy settings
+	// Export should contain proxy settings
 	exported := dashboard.ExportConfig()
 	data, err := json.Marshal(exported)
 	if err != nil {
@@ -566,21 +566,27 @@ func TestPersist_ProxyConfig_NotInExport(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	// Proxy-related keys should not exist in the export
-	proxyKeys := []string{"proxy", "proxy_config", "proxy_mode", "proxy_status"}
-	for _, key := range proxyKeys {
-		if _, exists := raw[key]; exists {
-			t.Errorf("ConfigExport contains proxy key %q — proxy should NOT be persisted", key)
-		}
+	proxyData, exists := raw["proxy_config"]
+	if !exists {
+		t.Fatal("ConfigExport should contain proxy_config key")
+	}
+
+	proxyMap, ok := proxyData.(map[string]interface{})
+	if !ok {
+		t.Fatal("proxy_config should be a map")
+	}
+
+	if proxyMap["mode"] != "chaos" {
+		t.Errorf("proxy_config.mode: got %v, want %q", proxyMap["mode"], "chaos")
 	}
 
 	// Reset proxy back to default
 	pc.SetMode("transparent")
 }
 
-// TestPersist_ProxyConfig_ResetsOnRestart verifies that proxy config resets
-// to defaults after export/import (simulating restart).
-func TestPersist_ProxyConfig_ResetsOnRestart(t *testing.T) {
+// TestPersist_ProxyConfig_SurvivesRestart verifies that proxy config survives
+// export/import (simulating restart).
+func TestPersist_ProxyConfig_SurvivesRestart(t *testing.T) {
 	_ = setupTestEnv(t)
 	resetAll(t)
 
@@ -591,17 +597,20 @@ func TestPersist_ProxyConfig_ResetsOnRestart(t *testing.T) {
 		t.Fatalf("proxy mode should be 'waf', got %q", pc.GetMode())
 	}
 
-	// Export/import simulates a restart — proxy mode should NOT be restored
+	// Export captures proxy config
 	exported := dashboard.ExportConfig()
+
+	// Simulate restart: reset to defaults then import
+	pc.SetMode("transparent")
+	if pc.GetMode() != "transparent" {
+		t.Fatalf("proxy mode should be 'transparent' after reset, got %q", pc.GetMode())
+	}
+
 	dashboard.ImportConfig(exported)
 
-	// Proxy config is NOT part of export/import, so we verify it's unchanged
-	// (still waf because import didn't touch it). In a real restart, the proxy
-	// would be re-initialized to "transparent" by NewProxyConfig().
-	// We verify NewProxyConfig gives "transparent".
-	fresh := dashboard.NewProxyConfig()
-	if fresh.GetMode() != "transparent" {
-		t.Errorf("NewProxyConfig().GetMode() = %q, want 'transparent'", fresh.GetMode())
+	// Proxy mode should be restored to "waf"
+	if pc.GetMode() != "waf" {
+		t.Errorf("proxy mode should be 'waf' after import, got %q", pc.GetMode())
 	}
 
 	// Clean up
