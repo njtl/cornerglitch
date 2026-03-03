@@ -470,3 +470,38 @@ func (cp *ClientProfile) Snapshot() ClientProfileSnapshot {
 		AdaptiveProfile: cp.AdaptiveProfile,
 	}
 }
+
+// RestoreClientProfile adds a client profile from persisted data.
+// Used during startup to reload client state from the database.
+func (c *Collector) RestoreClientProfile(snap ClientProfileSnapshot) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	paths := snap.PathsVisited
+	if paths == nil {
+		paths = make(map[string]int)
+	}
+	codes := snap.StatusCodes
+	if codes == nil {
+		codes = make(map[int]int)
+	}
+	agents := snap.UserAgents
+	if agents == nil {
+		agents = make(map[string]int)
+	}
+
+	c.clients[snap.ClientID] = &ClientProfile{
+		ClientID:        snap.ClientID,
+		FirstSeen:       snap.FirstSeen,
+		LastSeen:        snap.LastSeen,
+		TotalRequests:   snap.TotalRequests,
+		RequestsPerSec:  snap.RequestsPerSec,
+		PathsVisited:    paths,
+		StatusCodes:     codes,
+		ErrorsReceived:  snap.ErrorsReceived,
+		LabyrinthDepth:  snap.LabyrinthDepth,
+		UserAgents:      agents,
+		BurstWindows:    snap.BurstWindows,
+		AdaptiveProfile: snap.AdaptiveProfile,
+	}
+}

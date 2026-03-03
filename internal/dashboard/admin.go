@@ -115,6 +115,9 @@ func TriggerAutoSave() {
 				MediaChaosConfig:  export.MediaChaosConfig,
 				ProxyConfig:       export.ProxyConfig,
 				ScannerConfig:     export.ScannerConfig,
+				NightmareConfig:   export.NightmareConfig,
+				SpiderConfig:      export.SpiderConfig,
+				Overrides:         export.Overrides,
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -149,6 +152,9 @@ func LoadStateFile() bool {
 				MediaChaosConfig: dbExport.MediaChaosConfig,
 				ProxyConfig:      dbExport.ProxyConfig,
 				ScannerConfig:    dbExport.ScannerConfig,
+				NightmareConfig:  dbExport.NightmareConfig,
+				SpiderConfig:     dbExport.SpiderConfig,
+				Overrides:        dbExport.Overrides,
 			}
 			ImportConfig(export)
 			audit.LogSystem("config.load", "config.load", map[string]interface{}{"source": "postgresql"})
@@ -1099,6 +1105,9 @@ type ConfigExport struct {
 	MediaChaosConfig   map[string]bool        `json:"media_chaos_config,omitempty"`
 	ProxyConfig        map[string]interface{} `json:"proxy_config,omitempty"`
 	ScannerConfig      map[string]interface{} `json:"scanner_config,omitempty"`
+	NightmareConfig    map[string]interface{} `json:"nightmare_config,omitempty"`
+	SpiderConfig       map[string]interface{} `json:"spider_config,omitempty"`
+	Overrides          map[string]string      `json:"overrides,omitempty"`
 }
 
 // ExportConfig builds a ConfigExport from the current global state.
@@ -1116,6 +1125,9 @@ func ExportConfig() *ConfigExport {
 		MediaChaosConfig: globalMediaChaosConfig.Snapshot(),
 		ProxyConfig:      globalProxyConfig.SnapshotForExport(),
 		ScannerConfig:    ExportScannerConfig(),
+		NightmareConfig:  ExportNightmareConfig(),
+		SpiderConfig:     exportSpiderConfig(),
+		Overrides:        ExportOverrides(),
 	}
 }
 
@@ -1232,6 +1244,21 @@ func ImportConfig(export *ConfigExport) {
 	// Import scanner config (default profile, target, modules)
 	if export.ScannerConfig != nil {
 		ImportScannerConfig(export.ScannerConfig)
+	}
+
+	// Import nightmare state
+	if export.NightmareConfig != nil {
+		importNightmareConfig(export.NightmareConfig)
+	}
+
+	// Import spider config
+	if export.SpiderConfig != nil {
+		importSpiderConfig(export.SpiderConfig)
+	}
+
+	// Import per-client overrides
+	if export.Overrides != nil {
+		importOverrides(export.Overrides)
 	}
 }
 
@@ -1530,8 +1557,9 @@ var (
 	globalRecorder     *recorder.Recorder
 	globalAdaptive     *adaptive.Engine
 
-	// Pending blocking config — stored by ImportConfig before adaptive engine exists.
+	// Pending blocking/overrides config — stored by ImportConfig before adaptive engine exists.
 	pendingBlocking   map[string]interface{}
+	pendingOverrides  map[string]string
 	pendingBlockingMu sync.Mutex
 
 	// Scanner runner — uses the real scanner package
@@ -1579,6 +1607,7 @@ func SetSpiderConfig(cfg *spider.Config) {
 func SetAdaptive(a *adaptive.Engine) {
 	globalAdaptive = a
 	SyncBlockingToAdaptive()
+	syncOverridesToAdaptive()
 }
 
 // SyncBlockingToAdaptive applies any pending blocking config to the adaptive engine.
@@ -1596,6 +1625,24 @@ func SyncBlockingToAdaptive() {
 		return
 	}
 	applyBlockingToAdaptive(cfg, globalAdaptive)
+}
+
+// syncOverridesToAdaptive applies any pending per-client overrides to the adaptive engine.
+func syncOverridesToAdaptive() {
+	if globalAdaptive == nil {
+		return
+	}
+	pendingBlockingMu.Lock()
+	overrides := pendingOverrides
+	pendingOverrides = nil
+	pendingBlockingMu.Unlock()
+
+	if overrides == nil {
+		return
+	}
+	for clientID, mode := range overrides {
+		globalAdaptive.SetOverride(clientID, adaptive.BehaviorMode(mode))
+	}
 }
 
 // applyBlockingToAdaptive pushes a blocking config map to the adaptive engine.
@@ -1625,6 +1672,162 @@ func ExportBlocking() map[string]interface{} {
 		"enabled":      enabled,
 		"chance":       chance,
 		"duration_sec": int(duration.Seconds()),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Nightmare config export/import
+// ---------------------------------------------------------------------------
+
+// ExportNightmareConfig returns the current nightmare state for config export.
+func ExportNightmareConfig() map[string]interface{} {
+	globalNightmare.mu.RLock()
+	defer globalNightmare.mu.RUnlock()
+
+	if !globalNightmare.ServerActive && !globalNightmare.ScannerActive && !globalNightmare.ProxyActive {
+		return nil // not active, nothing to persist
+	}
+	cfg := map[string]interface{}{
+		"server_active":  globalNightmare.ServerActive,
+		"scanner_active": globalNightmare.ScannerActive,
+		"proxy_active":   globalNightmare.ProxyActive,
+	}
+	if globalNightmare.PreviousConfig != nil {
+		cfg["previous_config"] = globalNightmare.PreviousConfig
+	}
+	if globalNightmare.PreviousFeatures != nil {
+		cfg["previous_features"] = globalNightmare.PreviousFeatures
+	}
+	if globalNightmare.PreviousProxyMode != "" {
+		cfg["previous_proxy_mode"] = globalNightmare.PreviousProxyMode
+	}
+	return cfg
+}
+
+// importNightmareConfig restores nightmare state from a config export.
+func importNightmareConfig(cfg map[string]interface{}) {
+	globalNightmare.mu.Lock()
+	defer globalNightmare.mu.Unlock()
+
+	if v, ok := cfg["server_active"].(bool); ok {
+		globalNightmare.ServerActive = v
+	}
+	if v, ok := cfg["scanner_active"].(bool); ok {
+		globalNightmare.ScannerActive = v
+	}
+	if v, ok := cfg["proxy_active"].(bool); ok {
+		globalNightmare.ProxyActive = v
+	}
+	if v, ok := cfg["previous_proxy_mode"].(string); ok {
+		globalNightmare.PreviousProxyMode = v
+	}
+
+	// Restore previous config snapshot (map[string]interface{})
+	switch v := cfg["previous_config"].(type) {
+	case map[string]interface{}:
+		globalNightmare.PreviousConfig = v
+	}
+
+	// Restore previous features (may be map[string]interface{} from JSON)
+	switch v := cfg["previous_features"].(type) {
+	case map[string]bool:
+		globalNightmare.PreviousFeatures = v
+	case map[string]interface{}:
+		m := make(map[string]bool, len(v))
+		for k, val := range v {
+			if b, ok := val.(bool); ok {
+				m[k] = b
+			}
+		}
+		globalNightmare.PreviousFeatures = m
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Spider config export/import
+// ---------------------------------------------------------------------------
+
+// exportSpiderConfig returns the current spider config for config export.
+func exportSpiderConfig() map[string]interface{} {
+	if globalSpiderConfig == nil {
+		return nil
+	}
+	return globalSpiderConfig.Snapshot()
+}
+
+// importSpiderConfig restores spider config from a config export.
+func importSpiderConfig(cfg map[string]interface{}) {
+	if globalSpiderConfig == nil {
+		return
+	}
+	for key, val := range cfg {
+		// JSON round-trip converts int to float64, so handle type coercion.
+		switch key {
+		case "sitemap_entry_count":
+			switch v := val.(type) {
+			case float64:
+				globalSpiderConfig.Set(key, int(v))
+			case int:
+				globalSpiderConfig.Set(key, v)
+			}
+		case "robots_crawl_delay":
+			switch v := val.(type) {
+			case float64:
+				globalSpiderConfig.Set(key, int(v))
+			case int:
+				globalSpiderConfig.Set(key, v)
+			}
+		case "robots_disallow_paths":
+			switch v := val.(type) {
+			case []string:
+				globalSpiderConfig.Set(key, v)
+			case []interface{}:
+				paths := make([]string, 0, len(v))
+				for _, p := range v {
+					if s, ok := p.(string); ok {
+						paths = append(paths, s)
+					}
+				}
+				globalSpiderConfig.Set(key, paths)
+			}
+		default:
+			// Float64 and bool values can be passed through directly.
+			globalSpiderConfig.Set(key, val)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-client overrides export/import
+// ---------------------------------------------------------------------------
+
+// ExportOverrides returns the current per-client behavior overrides.
+func ExportOverrides() map[string]string {
+	if globalAdaptive == nil {
+		return nil
+	}
+	overrides := globalAdaptive.GetOverrides()
+	if len(overrides) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(overrides))
+	for clientID, mode := range overrides {
+		result[clientID] = string(mode)
+	}
+	return result
+}
+
+// importOverrides restores per-client behavior overrides.
+func importOverrides(overrides map[string]string) {
+	if globalAdaptive == nil {
+		// Store as pending for when the engine is created
+		pendingBlockingMu.Lock()
+		pendingOverrides = overrides
+		pendingBlockingMu.Unlock()
+		return
+	}
+	for clientID, mode := range overrides {
+		globalAdaptive.SetOverride(clientID, adaptive.BehaviorMode(mode))
 	}
 }
 
@@ -1755,12 +1958,16 @@ func RestoreMetrics(collector *metrics.Collector) {
 	// Restore extended counters from snapshot_data if available.
 	if len(snap.SnapshotData) > 0 {
 		var extra struct {
-			TotalDelayed   int64 `json:"total_delayed"`
-			TotalLabyrinth int64 `json:"total_labyrinth"`
+			TotalDelayed       int64 `json:"total_delayed"`
+			TotalLabyrinth     int64 `json:"total_labyrinth"`
+			TotalRequestBytes  int64 `json:"total_request_bytes"`
+			TotalResponseBytes int64 `json:"total_response_bytes"`
 		}
 		if json.Unmarshal(snap.SnapshotData, &extra) == nil {
 			cs.TotalDelayed = extra.TotalDelayed
 			cs.TotalLabyrinth = extra.TotalLabyrinth
+			cs.TotalRequestBytes = extra.TotalRequestBytes
+			cs.TotalResponseBytes = extra.TotalResponseBytes
 		}
 	}
 	collector.RestoreCounters(cs)
@@ -1777,15 +1984,19 @@ func StartMetricsSnapshotter(collector *metrics.Collector) func() {
 	}
 	stopCh := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
+		metricsTicker := time.NewTicker(30 * time.Second)
+		profileTicker := time.NewTicker(5 * time.Minute)
+		defer metricsTicker.Stop()
+		defer profileTicker.Stop()
 		for {
 			select {
-			case <-ticker.C:
+			case <-metricsTicker.C:
 				cs := collector.GetCounterSnapshot()
 				extraData, _ := json.Marshal(map[string]int64{
-					"total_delayed":   cs.TotalDelayed,
-					"total_labyrinth": cs.TotalLabyrinth,
+					"total_delayed":        cs.TotalDelayed,
+					"total_labyrinth":      cs.TotalLabyrinth,
+					"total_request_bytes":  cs.TotalRequestBytes,
+					"total_response_bytes": cs.TotalResponseBytes,
 				})
 				snap := &storage.MetricsSnapshot{
 					TotalRequests:     cs.TotalRequests,
@@ -1800,6 +2011,8 @@ func StartMetricsSnapshotter(collector *metrics.Collector) func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				store.SaveMetricsSnapshot(ctx, snap)
 				cancel()
+			case <-profileTicker.C:
+				SaveClientProfiles(collector)
 			case <-stopCh:
 				return
 			}
@@ -1817,8 +2030,10 @@ func SaveMetricsNow(collector *metrics.Collector) {
 	}
 	cs := collector.GetCounterSnapshot()
 	extraData, _ := json.Marshal(map[string]int64{
-		"total_delayed":   cs.TotalDelayed,
-		"total_labyrinth": cs.TotalLabyrinth,
+		"total_delayed":        cs.TotalDelayed,
+		"total_labyrinth":      cs.TotalLabyrinth,
+		"total_request_bytes":  cs.TotalRequestBytes,
+		"total_response_bytes": cs.TotalResponseBytes,
 	})
 	snap := &storage.MetricsSnapshot{
 		TotalRequests:     cs.TotalRequests,
@@ -1835,6 +2050,86 @@ func SaveMetricsNow(collector *metrics.Collector) {
 	if _, err := store.SaveMetricsSnapshot(ctx, snap); err != nil {
 		log.Printf("[glitch] Failed to save final metrics snapshot: %v", err)
 	}
+}
+
+// SaveClientProfiles saves active client profiles to the database.
+// Called periodically by the metrics snapshotter and during shutdown.
+func SaveClientProfiles(collector *metrics.Collector) {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+	profiles := collector.GetAllClientProfiles()
+	if len(profiles) == 0 {
+		return
+	}
+	// Sort by total requests descending, keep top 100.
+	sort.Slice(profiles, func(i, j int) bool {
+		return profiles[i].TotalRequests > profiles[j].TotalRequests
+	})
+	limit := 100
+	if len(profiles) < limit {
+		limit = len(profiles)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	saved := 0
+	for _, cp := range profiles[:limit] {
+		snap := cp.Snapshot()
+		profileData, err := json.Marshal(snap)
+		if err != nil {
+			continue
+		}
+		rec := &storage.ClientProfileRecord{
+			ClientID:      snap.ClientID,
+			TotalRequests: snap.TotalRequests,
+			AdaptiveMode:  snap.AdaptiveProfile,
+			ProfileData:   profileData,
+		}
+		if err := store.SaveClientProfile(ctx, rec); err != nil {
+			log.Printf("[glitch] Failed to save client profile %s: %v", snap.ClientID, err)
+			continue
+		}
+		saved++
+	}
+	if saved > 0 {
+		log.Printf("[glitch] Saved %d client profiles to DB", saved)
+	}
+}
+
+// RestoreClientProfiles loads client profiles from the database into the collector.
+func RestoreClientProfiles(collector *metrics.Collector) {
+	store := GetStore()
+	if store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	records, err := store.ListClientProfiles(ctx, 100)
+	if err != nil {
+		log.Printf("[glitch] Failed to load client profiles: %v", err)
+		return
+	}
+	if len(records) == 0 {
+		return
+	}
+	restored := 0
+	for _, rec := range records {
+		if len(rec.ProfileData) == 0 {
+			continue
+		}
+		var snap metrics.ClientProfileSnapshot
+		if err := json.Unmarshal(rec.ProfileData, &snap); err != nil {
+			log.Printf("[glitch] Failed to unmarshal client profile %s: %v", rec.ClientID, err)
+			continue
+		}
+		if snap.ClientID == "" {
+			snap.ClientID = rec.ClientID
+		}
+		collector.RestoreClientProfile(snap)
+		restored++
+	}
+	log.Printf("[glitch] Restored %d client profiles from DB", restored)
 }
 
 // getScanRunner returns the singleton scaneval.Runner, creating it on first call.

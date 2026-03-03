@@ -254,6 +254,15 @@ func (s *Store) SaveFullConfig(ctx context.Context, export *FullConfigExport) er
 	if export.ScannerConfig != nil {
 		entities["scanner_config"] = export.ScannerConfig
 	}
+	if export.NightmareConfig != nil {
+		entities["nightmare_config"] = export.NightmareConfig
+	}
+	if export.SpiderConfig != nil {
+		entities["spider_config"] = export.SpiderConfig
+	}
+	if export.Overrides != nil {
+		entities["overrides"] = export.Overrides
+	}
 
 	for entity, data := range entities {
 		if data == nil {
@@ -352,6 +361,24 @@ func (s *Store) LoadFullConfig(ctx context.Context) (*FullConfigExport, error) {
 				return nil, fmt.Errorf("unmarshal scanner_config: %w", err)
 			}
 			export.ScannerConfig = v
+		case "nightmare_config":
+			var v map[string]interface{}
+			if err := json.Unmarshal(jsonData, &v); err != nil {
+				return nil, fmt.Errorf("unmarshal nightmare_config: %w", err)
+			}
+			export.NightmareConfig = v
+		case "spider_config":
+			var v map[string]interface{}
+			if err := json.Unmarshal(jsonData, &v); err != nil {
+				return nil, fmt.Errorf("unmarshal spider_config: %w", err)
+			}
+			export.SpiderConfig = v
+		case "overrides":
+			var v map[string]string
+			if err := json.Unmarshal(jsonData, &v); err != nil {
+				return nil, fmt.Errorf("unmarshal overrides: %w", err)
+			}
+			export.Overrides = v
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -379,4 +406,7 @@ type FullConfigExport struct {
 	MediaChaosConfig  map[string]bool        `json:"media_chaos_config,omitempty"`
 	ProxyConfig       map[string]interface{} `json:"proxy_config,omitempty"`
 	ScannerConfig     map[string]interface{} `json:"scanner_config,omitempty"`
+	NightmareConfig   map[string]interface{} `json:"nightmare_config,omitempty"`
+	SpiderConfig      map[string]interface{} `json:"spider_config,omitempty"`
+	Overrides         map[string]string      `json:"overrides,omitempty"`
 }
