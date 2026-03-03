@@ -843,19 +843,19 @@ func (h *Handler) isMediaPath(path string) bool {
 	if strings.HasPrefix(path, "/media/") {
 		return true
 	}
-	// Upload/content paths with media extensions
+	// Upload/content paths that always serve media
 	if strings.HasPrefix(path, "/uploads/") || strings.HasPrefix(path, "/content/media/") ||
 		strings.HasPrefix(path, "/assets/media/") || strings.HasPrefix(path, "/stream/") ||
 		strings.HasPrefix(path, "/live/") {
 		return true
 	}
-	// Any path with a known media extension
+	// Paths under media-related prefixes, but ONLY if they have a recognized
+	// media file extension — prevents misrouting /images/api or /audio/settings.
 	format := media.FormatFromPath(path)
 	if format != "" {
-		// Only match if it's under a media-like prefix or has explicit media query
-		if strings.Contains(path, "/img/") || strings.Contains(path, "/images/") ||
-			strings.Contains(path, "/video/") || strings.Contains(path, "/audio/") ||
-			strings.Contains(path, "/files/") || strings.Contains(path, "/download/") {
+		if strings.HasPrefix(path, "/img/") || strings.HasPrefix(path, "/images/") ||
+			strings.HasPrefix(path, "/video/") || strings.HasPrefix(path, "/audio/") ||
+			strings.HasPrefix(path, "/files/") || strings.HasPrefix(path, "/download/") {
 			return true
 		}
 	}
@@ -883,14 +883,8 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request) (int, strin
 	isStream := strings.Contains(path, "/stream/") || strings.Contains(path, "/live/") ||
 		r.URL.Query().Get("stream") == "true"
 
-	// Apply CDN headers if CDN emulation is enabled
-	if h.cdnEng != nil && h.flags.IsCDNEnabled() {
-		clientID := r.Header.Get("X-Client-ID")
-		if clientID == "" {
-			clientID = r.RemoteAddr
-		}
-		h.cdnEng.ApplyHeaders(w, path, clientID)
-	}
+	// CDN headers are already applied in ServeHTTP (Step 2.5) for all
+	// responses, so no need to apply them again here.
 
 	// Streaming path: use InfiniteReader for unbounded content delivery
 	if isStream && (format == media.FormatWAV || format == media.FormatMP3 ||
@@ -909,6 +903,18 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request) (int, strin
 		return 500, "media"
 	}
 
+	// Deterministic ETag from path (computed before chaos so conditional
+	// requests work even when chaos is enabled)
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256([]byte(path)))[:18] + `"`
+
+	// Conditional request support — check BEFORE chaos or serving
+	if match := r.Header.Get("If-None-Match"); match != "" {
+		if match == etag || match == "*" {
+			w.WriteHeader(http.StatusNotModified)
+			return 304, "media"
+		}
+	}
+
 	// Apply media chaos if engine is available and probability triggers
 	if h.mediaChaosEng != nil && h.mediaChaosEng.ShouldApply() {
 		h.mediaChaosEng.Apply(w, r, data, contentType)
@@ -924,18 +930,8 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request) (int, strin
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Header().Set("Accept-Ranges", "bytes")
-	// Deterministic ETag from path
-	etag := fmt.Sprintf(`"%x"`, sha256.Sum256([]byte(path)))[:18] + `"`
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-
-	// Conditional request support
-	if match := r.Header.Get("If-None-Match"); match != "" {
-		if match == etag || match == "*" {
-			w.WriteHeader(http.StatusNotModified)
-			return 304, "media"
-		}
-	}
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
