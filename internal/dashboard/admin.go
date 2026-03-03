@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/glitchWebServer/internal/adaptive"
 	"github.com/glitchWebServer/internal/audit"
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/recorder"
@@ -1107,6 +1108,7 @@ func ExportConfig() *ConfigExport {
 		VulnConfig:       globalVulnConfig.Snapshot(),
 		ErrorWeights:     globalConfig.GetErrorWeights(),
 		PageTypeWeights:  globalConfig.GetPageTypeWeights(),
+		Blocking:         ExportBlocking(),
 		APIChaosConfig:   globalAPIChaosConfig.Snapshot(),
 		MediaChaosConfig: globalMediaChaosConfig.Snapshot(),
 		ProxyConfig:      globalProxyConfig.SnapshotForExport(),
@@ -1209,6 +1211,18 @@ func ImportConfig(export *ConfigExport) {
 	// Import proxy config
 	if export.ProxyConfig != nil {
 		globalProxyConfig.Restore(export.ProxyConfig)
+	}
+
+	// Import blocking config — apply to adaptive engine if available,
+	// otherwise store as pending for when the engine is created.
+	if export.Blocking != nil {
+		if globalAdaptive != nil {
+			applyBlockingToAdaptive(export.Blocking, globalAdaptive)
+		} else {
+			pendingBlockingMu.Lock()
+			pendingBlocking = export.Blocking
+			pendingBlockingMu.Unlock()
+		}
 	}
 }
 
@@ -1505,6 +1519,11 @@ var (
 	globalSpiderConfig = spider.NewConfig()
 	globalProxyManager = NewProxyManager()
 	globalRecorder     *recorder.Recorder
+	globalAdaptive     *adaptive.Engine
+
+	// Pending blocking config — stored by ImportConfig before adaptive engine exists.
+	pendingBlocking   map[string]interface{}
+	pendingBlockingMu sync.Mutex
 
 	// Scanner runner — uses the real scanner package
 	scanRunner   *scaneval.Runner
@@ -1543,6 +1562,60 @@ func GetSpiderConfig() *spider.Config { return globalSpiderConfig }
 func SetSpiderConfig(cfg *spider.Config) {
 	if cfg != nil {
 		globalSpiderConfig = cfg
+	}
+}
+
+// SetAdaptive stores the global adaptive engine reference and syncs any
+// pending blocking config that was loaded before the engine existed.
+func SetAdaptive(a *adaptive.Engine) {
+	globalAdaptive = a
+	SyncBlockingToAdaptive()
+}
+
+// SyncBlockingToAdaptive applies any pending blocking config to the adaptive engine.
+// Called from SetAdaptive after the engine is created.
+func SyncBlockingToAdaptive() {
+	if globalAdaptive == nil {
+		return
+	}
+	pendingBlockingMu.Lock()
+	cfg := pendingBlocking
+	pendingBlocking = nil
+	pendingBlockingMu.Unlock()
+
+	if cfg == nil {
+		return
+	}
+	applyBlockingToAdaptive(cfg, globalAdaptive)
+}
+
+// applyBlockingToAdaptive pushes a blocking config map to the adaptive engine.
+func applyBlockingToAdaptive(cfg map[string]interface{}, a *adaptive.Engine) {
+	if enabled, ok := cfg["enabled"].(bool); ok {
+		a.SetBlockEnabled(enabled)
+	}
+	if chance, ok := cfg["chance"].(float64); ok {
+		a.SetBlockChance(chance)
+	}
+	// duration_sec may be int (direct round-trip) or float64 (JSON round-trip).
+	switch v := cfg["duration_sec"].(type) {
+	case float64:
+		a.SetBlockDuration(time.Duration(int(v)) * time.Second)
+	case int:
+		a.SetBlockDuration(time.Duration(v) * time.Second)
+	}
+}
+
+// ExportBlocking returns the current blocking config from the adaptive engine.
+func ExportBlocking() map[string]interface{} {
+	if globalAdaptive == nil {
+		return nil
+	}
+	chance, duration, enabled := globalAdaptive.GetBlockConfig()
+	return map[string]interface{}{
+		"enabled":      enabled,
+		"chance":       chance,
+		"duration_sec": int(duration.Seconds()),
 	}
 }
 
