@@ -221,7 +221,7 @@ func main() {
 	go func() {
 		log.Printf("\033[36m[glitch]\033[0m Dashboard listening on :%d", *dashPort)
 		if err := dashSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Dashboard server error: %v", err)
+			log.Printf("\033[31m[glitch]\033[0m Dashboard server error: %v (main server continues)", err)
 		}
 	}()
 
