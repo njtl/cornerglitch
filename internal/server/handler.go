@@ -2,11 +2,13 @@ package server
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -435,7 +437,8 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	}
 
 	// Media content serving (with optional chaos)
-	if h.mediaGen != nil && h.flags.IsMediaChaosEnabled() && strings.HasPrefix(r.URL.Path, "/media/") {
+	// Serves on /media/*, /assets/media/*, /uploads/*, /content/media/*, /stream/*
+	if h.mediaGen != nil && h.flags.IsMediaChaosEnabled() && h.isMediaPath(r.URL.Path) {
 		return h.serveMedia(w, r)
 	}
 
@@ -834,15 +837,69 @@ func (h *Handler) isVulnDisabled(path string, vc *dashboard.VulnConfig) bool {
 	return false
 }
 
+// isMediaPath checks if the URL path should be handled by the media subsystem.
+func (h *Handler) isMediaPath(path string) bool {
+	// Direct media paths
+	if strings.HasPrefix(path, "/media/") {
+		return true
+	}
+	// Upload/content paths with media extensions
+	if strings.HasPrefix(path, "/uploads/") || strings.HasPrefix(path, "/content/media/") ||
+		strings.HasPrefix(path, "/assets/media/") || strings.HasPrefix(path, "/stream/") ||
+		strings.HasPrefix(path, "/live/") {
+		return true
+	}
+	// Any path with a known media extension
+	format := media.FormatFromPath(path)
+	if format != "" {
+		// Only match if it's under a media-like prefix or has explicit media query
+		if strings.Contains(path, "/img/") || strings.Contains(path, "/images/") ||
+			strings.Contains(path, "/video/") || strings.Contains(path, "/audio/") ||
+			strings.Contains(path, "/files/") || strings.Contains(path, "/download/") {
+			return true
+		}
+	}
+	return false
+}
+
 // serveMedia generates media content and optionally applies chaos.
+// Supports: direct serving, streaming (infinite), range requests, CDN headers,
+// and content negotiation via Accept header.
 func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request) (int, string) {
 	path := r.URL.Path
 
 	// Determine format from path extension
 	format := media.FormatFromPath(path)
 	if format == "" {
-		http.Error(w, "Unknown media format", http.StatusNotFound)
-		return 404, "media"
+		// Check for directory-style media paths (e.g., /media/stream/video)
+		format = h.inferMediaFormat(path, r)
+		if format == "" {
+			http.Error(w, "Unknown media format", http.StatusNotFound)
+			return 404, "media"
+		}
+	}
+
+	// Check for streaming request (infinite content / live streams)
+	isStream := strings.Contains(path, "/stream/") || strings.Contains(path, "/live/") ||
+		r.URL.Query().Get("stream") == "true"
+
+	// Apply CDN headers if CDN emulation is enabled
+	if h.cdnEng != nil && h.flags.IsCDNEnabled() {
+		clientID := r.Header.Get("X-Client-ID")
+		if clientID == "" {
+			clientID = r.RemoteAddr
+		}
+		h.cdnEng.ApplyHeaders(w, path, clientID)
+	}
+
+	// Streaming path: use InfiniteReader for unbounded content delivery
+	if isStream && (format == media.FormatWAV || format == media.FormatMP3 ||
+		format == media.FormatOGG || format == media.FormatFLAC ||
+		format == media.FormatMP4 || format == media.FormatWebM ||
+		format == media.FormatAVI || format == media.FormatTS ||
+		format == media.FormatPNG || format == media.FormatGIF ||
+		format == media.FormatHLS || format == media.FormatDASH) {
+		return h.serveMediaStream(w, r, format, path)
 	}
 
 	// Generate deterministic media content
@@ -858,10 +915,173 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request) (int, strin
 		return 200, "media_chaos"
 	}
 
-	// Serve clean media
+	// Handle Range requests for non-streaming content
+	if rangeHdr := r.Header.Get("Range"); rangeHdr != "" {
+		return h.serveMediaRange(w, r, data, contentType, rangeHdr)
+	}
+
+	// Serve clean media with proper headers
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("Accept-Ranges", "bytes")
+	// Deterministic ETag from path
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256([]byte(path)))[:18] + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	// Conditional request support
+	if match := r.Header.Get("If-None-Match"); match != "" {
+		if match == etag || match == "*" {
+			w.WriteHeader(http.StatusNotModified)
+			return 304, "media"
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
 	return 200, "media"
+}
+
+// serveMediaStream serves unbounded streaming content using InfiniteReader.
+func (h *Handler) serveMediaStream(w http.ResponseWriter, r *http.Request, format media.Format, path string) (int, string) {
+	// Determine max bytes: query param, or default based on config
+	maxBytes := int64(10 * 1024 * 1024) // 10MB default
+	if mb := r.URL.Query().Get("max_bytes"); mb != "" {
+		if v, err := strconv.ParseInt(mb, 10, 64); err == nil && v > 0 {
+			maxBytes = v
+		}
+	}
+	// Cap at configured infinite_max_bytes from media chaos snapshot
+	if h.mediaChaosEng != nil {
+		snap := h.mediaChaosEng.Snapshot()
+		if v, ok := snap["infiniteMaxBytes"].(int64); ok && v > 0 && maxBytes > v {
+			maxBytes = v
+		} else if v, ok := snap["infiniteMaxBytes"].(float64); ok && int64(v) > 0 && maxBytes > int64(v) {
+			maxBytes = int64(v)
+		}
+	}
+
+	reader := h.mediaGen.GenerateStream(format, path, maxBytes)
+	contentType := format.ContentType()
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Transfer-Encoding", "chunked")
+	w.Header().Set("X-Content-Stream", "true")
+	w.Header().Set("Cache-Control", "no-cache, no-store")
+	w.WriteHeader(http.StatusOK)
+
+	flusher, hasFlusher := w.(http.Flusher)
+	buf := make([]byte, 8192)
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			w.Write(buf[:n])
+			if hasFlusher {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return 200, "media_stream"
+}
+
+// serveMediaRange handles HTTP Range requests for media content.
+func (h *Handler) serveMediaRange(w http.ResponseWriter, r *http.Request, data []byte, contentType, rangeHdr string) (int, string) {
+	total := len(data)
+	// Parse "bytes=start-end" format
+	if !strings.HasPrefix(rangeHdr, "bytes=") {
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+		return 200, "media"
+	}
+	spec := strings.TrimPrefix(rangeHdr, "bytes=")
+	parts := strings.SplitN(spec, "-", 2)
+	if len(parts) != 2 {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		return 416, "media"
+	}
+
+	var start, end int
+	if parts[0] == "" {
+		// Suffix range: bytes=-N
+		suffix, err := strconv.Atoi(parts[1])
+		if err != nil || suffix <= 0 {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return 416, "media"
+		}
+		start = total - suffix
+		if start < 0 {
+			start = 0
+		}
+		end = total - 1
+	} else {
+		var err error
+		start, err = strconv.Atoi(parts[0])
+		if err != nil || start < 0 || start >= total {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return 416, "media"
+		}
+		if parts[1] == "" {
+			end = total - 1
+		} else {
+			end, err = strconv.Atoi(parts[1])
+			if err != nil || end < start {
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+				return 416, "media"
+			}
+			if end >= total {
+				end = total - 1
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.WriteHeader(http.StatusPartialContent)
+	w.Write(data[start : end+1])
+	return 206, "media"
+}
+
+// inferMediaFormat infers media format from path structure and Accept header
+// when no file extension is present.
+func (h *Handler) inferMediaFormat(path string, r *http.Request) media.Format {
+	lower := strings.ToLower(path)
+	// Path-based inference for common patterns
+	switch {
+	case strings.Contains(lower, "/video/") || strings.Contains(lower, "/stream/video"):
+		return media.FormatMP4
+	case strings.Contains(lower, "/audio/") || strings.Contains(lower, "/stream/audio"):
+		return media.FormatMP3
+	case strings.Contains(lower, "/image/") || strings.Contains(lower, "/photo/"):
+		return media.FormatJPEG
+	case strings.Contains(lower, "/live/") || strings.Contains(lower, "/hls/"):
+		return media.FormatHLS
+	case strings.Contains(lower, "/dash/"):
+		return media.FormatDASH
+	case strings.Contains(lower, "/icon/") || strings.Contains(lower, "/favicon"):
+		return media.FormatICO
+	}
+
+	// Accept header-based inference
+	accept := r.Header.Get("Accept")
+	switch {
+	case strings.Contains(accept, "video/"):
+		return media.FormatMP4
+	case strings.Contains(accept, "audio/"):
+		return media.FormatMP3
+	case strings.Contains(accept, "image/webp"):
+		return media.FormatWebP
+	case strings.Contains(accept, "image/"):
+		return media.FormatJPEG
+	}
+	return ""
 }
