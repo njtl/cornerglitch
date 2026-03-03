@@ -1059,6 +1059,7 @@ func generateHiddenAPILinks(rng *rand.Rand) string {
 
 // generateMediaEmbeds creates embedded media elements (<img>, <audio>, <video>)
 // pointing to /media/ paths for scanner discovery and media chaos testing.
+// Covers all 18 supported media formats across images, audio, video, and streaming.
 func generateMediaEmbeds(rng *rand.Rand, path string) string {
 	seed := pathSeed(path)
 	name := fmt.Sprintf("asset-%x", seed&0xFFFFFFFF)
@@ -1066,37 +1067,118 @@ func generateMediaEmbeds(rng *rand.Rand, path string) string {
 	var sb strings.Builder
 	sb.WriteString(`<section class="media-content" style="margin-top:20px">`)
 
-	// Always include an image
-	imgExts := []string{"png", "jpg", "gif", "webp", "svg"}
+	// Always include a primary image
+	imgExts := []string{"png", "jpg", "gif", "webp", "svg", "bmp", "ico", "tiff"}
 	ext := imgExts[rng.Intn(len(imgExts))]
 	sb.WriteString(fmt.Sprintf(`<img src="/media/image/%s.%s" alt="Content image" loading="lazy" style="max-width:100%%;border-radius:8px;margin-bottom:12px">`, name, ext))
 
-	// 50% chance for a second image in a different format
+	// 60% chance for additional images in different formats (gallery-style)
+	if rng.Intn(5) < 3 {
+		numExtra := rng.Intn(3) + 1
+		sb.WriteString(`<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">`)
+		for i := 0; i < numExtra; i++ {
+			ext2 := imgExts[rng.Intn(len(imgExts))]
+			sb.WriteString(fmt.Sprintf(`<img src="/media/image/%s-thumb-%d.%s" alt="Thumbnail %d" loading="lazy" style="max-width:200px;border-radius:4px">`, name, i, ext2, i))
+		}
+		sb.WriteString(`</div>`)
+	}
+
+	// 50% chance to include audio with multiple source formats
 	if rng.Intn(2) == 0 {
-		ext2 := imgExts[rng.Intn(len(imgExts))]
-		sb.WriteString(fmt.Sprintf(`<img src="/media/image/%s-thumb.%s" alt="Thumbnail" loading="lazy" style="max-width:200px;border-radius:4px;margin:8px">`, name, ext2))
-	}
-
-	// 40% chance to include audio
-	if rng.Intn(5) < 2 {
-		audioExts := []string{"wav", "mp3", "ogg"}
+		audioExts := []string{"wav", "mp3", "ogg", "flac"}
 		aext := audioExts[rng.Intn(len(audioExts))]
-		sb.WriteString(fmt.Sprintf(`<audio controls preload="metadata" style="width:100%%;margin:12px 0"><source src="/media/audio/%s.%s" type="audio/%s">Your browser does not support audio.</audio>`, name, aext, aext))
+		sb.WriteString(fmt.Sprintf(`<audio controls preload="metadata" style="width:100%%;margin:12px 0">`, ))
+		sb.WriteString(fmt.Sprintf(`<source src="/media/audio/%s.%s" type="audio/%s">`, name, aext, aext))
+		// Add fallback format
+		aext2 := audioExts[rng.Intn(len(audioExts))]
+		sb.WriteString(fmt.Sprintf(`<source src="/media/audio/%s.%s" type="audio/%s">`, name, aext2, aext2))
+		sb.WriteString(`Your browser does not support audio.</audio>`)
 	}
 
-	// 30% chance to include video
-	if rng.Intn(10) < 3 {
-		videoExts := []string{"mp4", "webm"}
-		vext := videoExts[rng.Intn(len(videoExts))]
-		ctype := "video/" + vext
-		sb.WriteString(fmt.Sprintf(`<video controls preload="metadata" style="max-width:100%%;border-radius:8px;margin:12px 0"><source src="/media/video/%s.%s" type="%s">Your browser does not support video.</video>`, name, vext, ctype))
+	// 40% chance to include video with multiple source formats
+	if rng.Intn(5) < 2 {
+		videoFormats := []struct{ ext, mime string }{
+			{"mp4", "video/mp4"}, {"webm", "video/webm"}, {"avi", "video/x-msvideo"},
+		}
+		vf := videoFormats[rng.Intn(len(videoFormats))]
+		sb.WriteString(fmt.Sprintf(`<video controls preload="metadata" poster="/media/image/%s-poster.jpg" style="max-width:100%%;border-radius:8px;margin:12px 0">`, name))
+		sb.WriteString(fmt.Sprintf(`<source src="/media/video/%s.%s" type="%s">`, name, vf.ext, vf.mime))
+		// Add fallback
+		vf2 := videoFormats[rng.Intn(len(videoFormats))]
+		sb.WriteString(fmt.Sprintf(`<source src="/media/video/%s.%s" type="%s">`, name, vf2.ext, vf2.mime))
+		sb.WriteString(`Your browser does not support video.</video>`)
 	}
 
-	// Hidden prefetch hints for scanner discovery
+	// 25% chance for HLS/DASH streaming player
+	if rng.Intn(4) == 0 {
+		if rng.Intn(2) == 0 {
+			sb.WriteString(fmt.Sprintf(`<video controls style="max-width:100%%;margin:12px 0" data-hls="/media/stream/%s/playlist.m3u8">`, name))
+			sb.WriteString(fmt.Sprintf(`<source src="/media/stream/%s/playlist.m3u8" type="application/x-mpegURL">`, name))
+			sb.WriteString(`</video>`)
+		} else {
+			sb.WriteString(fmt.Sprintf(`<video controls style="max-width:100%%;margin:12px 0" data-dash="/media/stream/%s/manifest.mpd">`, name))
+			sb.WriteString(fmt.Sprintf(`<source src="/media/stream/%s/manifest.mpd" type="application/dash+xml">`, name))
+			sb.WriteString(`</video>`)
+		}
+	}
+
+	// 20% chance for download links to various formats
+	if rng.Intn(5) == 0 {
+		sb.WriteString(`<div style="margin:12px 0;font-size:0.85em">`)
+		sb.WriteString(`<strong>Downloads:</strong> `)
+		dlFormats := []struct{ ext, label string }{
+			{"png", "PNG"}, {"jpg", "JPEG"}, {"gif", "GIF"}, {"webp", "WebP"},
+			{"svg", "SVG"}, {"bmp", "BMP"}, {"tiff", "TIFF"}, {"ico", "ICO"},
+			{"wav", "WAV"}, {"mp3", "MP3"}, {"ogg", "OGG"}, {"flac", "FLAC"},
+			{"mp4", "MP4"}, {"webm", "WebM"}, {"avi", "AVI"}, {"ts", "MPEG-TS"},
+		}
+		for i, dl := range dlFormats {
+			if i > 0 {
+				sb.WriteString(" | ")
+			}
+			cat := "files"
+			if i < 8 {
+				cat = "image"
+			} else if i < 12 {
+				cat = "audio"
+			} else {
+				cat = "video"
+			}
+			sb.WriteString(fmt.Sprintf(`<a href="/media/%s/%s.%s" download>%s</a>`, cat, name, dl.ext, dl.label))
+		}
+		sb.WriteString(`</div>`)
+	}
+
+	// Hidden prefetch/preload hints for scanner discovery of ALL formats
+	// Images
 	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.png">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.jpg">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.gif">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.webp">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.svg">`, name))
 	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.bmp">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.ico">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/image/%s.tiff">`, name))
+	// Audio
 	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/audio/%s.wav">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/audio/%s.mp3">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/audio/%s.ogg">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/audio/%s.flac">`, name))
+	// Video
 	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/video/%s.mp4">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/video/%s.webm">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/video/%s.avi">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/video/%s.ts">`, name))
+	// Streaming
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/stream/%s/playlist.m3u8">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/stream/%s/manifest.mpd">`, name))
+	// Streaming with stream flag
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/stream/%s.mp4?stream=true">`, name))
+	sb.WriteString(fmt.Sprintf(`<link rel="prefetch" href="/media/stream/%s.mp3?stream=true">`, name))
+
+	// Hidden anchor tags for scanner link discovery
+	sb.WriteString(fmt.Sprintf(`<a href="/media/download/%s.zip" style="position:absolute;left:-9999px">Download archive</a>`, name))
+	sb.WriteString(fmt.Sprintf(`<a href="/uploads/%s/original.png" style="position:absolute;left:-9999px">Original</a>`, name))
 
 	sb.WriteString(`</section>`)
 	return sb.String()
