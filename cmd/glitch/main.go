@@ -153,9 +153,8 @@ func main() {
 		dashboard.LoadStateFile()
 	}
 
-	// Restore scan history from DB if available.
+	// Restore built-in scan history from DB if available.
 	dashboard.LoadBuiltinScanHistory()
-	dashboard.LoadExternalScanHistory()
 
 	collector := metrics.NewCollector()
 	dashboard.RestoreMetrics(collector)
