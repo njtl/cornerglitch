@@ -1699,7 +1699,7 @@ func LoadExternalScanHistory() {
 
 		// Also restore as a comparison history entry for the history tab.
 		entry := scaneval.HistoryEntry{
-			ID:        rec.CreatedAt.Format("20060102-150405"),
+			ID:        fmt.Sprintf("db-%d", rec.ID),
 			Timestamp: rec.CreatedAt.UTC().Format(time.RFC3339),
 			Scanner:   scannerName,
 			Grade:     rec.Grade,
