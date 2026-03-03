@@ -856,10 +856,12 @@ func adminAPIBlockingPost(w http.ResponseWriter, r *http.Request, s *Server) {
 	}
 	if req.Chance != nil {
 		s.adapt.SetBlockChance(*req.Chance)
+		globalConfig.Set("block_chance", *req.Chance)
 		audit.Log("admin", "blocking.config_change", "blocking.chance", oldChance, *req.Chance, nil)
 	}
 	if req.DurationSec != nil {
 		s.adapt.SetBlockDuration(time.Duration(*req.DurationSec) * time.Second)
+		globalConfig.Set("block_duration_sec", float64(*req.DurationSec))
 		audit.Log("admin", "blocking.config_change", "blocking.duration_sec", int(oldDuration.Seconds()), *req.DurationSec, nil)
 	}
 

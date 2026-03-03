@@ -28,6 +28,9 @@ func NewServer(collector *metrics.Collector, fp *fingerprint.Engine, adapt *adap
 		adapt:     adapt,
 	}
 
+	// Store global reference and sync any pending blocking config.
+	SetAdaptive(adapt)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin", http.StatusFound)
