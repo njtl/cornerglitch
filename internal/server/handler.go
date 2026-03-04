@@ -18,6 +18,7 @@ import (
 	"github.com/glitchWebServer/internal/analytics"
 	"github.com/glitchWebServer/internal/api"
 	"github.com/glitchWebServer/internal/apichaos"
+	"github.com/glitchWebServer/internal/budgettrap"
 	"github.com/glitchWebServer/internal/botdetect"
 	"github.com/glitchWebServer/internal/captcha"
 	"github.com/glitchWebServer/internal/cdn"
@@ -122,6 +123,7 @@ type Handler struct {
 	apiChaosEng          *apichaos.Engine
 	mediaGen             *media.Generator
 	mediaChaosEng        *mediachaos.Engine
+	budgetTrap           *budgettrap.Engine
 	flags                *dashboard.FeatureFlags
 	config               *dashboard.AdminConfig
 	apiChaosConfig       *dashboard.APIChaosConfig
@@ -160,6 +162,7 @@ func NewHandler(
 	apiChaosEng *apichaos.Engine,
 	mediaGen *media.Generator,
 	mediaChaosEng *mediachaos.Engine,
+	budgetTrap *budgettrap.Engine,
 ) *Handler {
 	return &Handler{
 		collector:      collector,
@@ -192,6 +195,7 @@ func NewHandler(
 		apiChaosEng:      apiChaosEng,
 		mediaGen:         mediaGen,
 		mediaChaosEng:    mediaChaosEng,
+		budgetTrap:       budgetTrap,
 		flags:            dashboard.GetFeatureFlags(),
 		config:           dashboard.GetAdminConfig(),
 		apiChaosConfig:   dashboard.GetAPIChaosConfig(),
@@ -343,6 +347,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		color = cyan
 	case responseType == "api_chaos":
 		color = purple
+	case responseType == "tarpit" || responseType == "pagination_trap" ||
+		responseType == "streaming_bait" || responseType == "breadcrumbs" ||
+		responseType == "expansion":
+		color = purple
 	}
 
 	log.Printf("%s[%s]%s %s %s %d %s (client=%s class=%s mode=%s)",
@@ -471,6 +479,17 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.honey != nil && h.flags.IsHoneypotEnabled() && h.honey.ShouldHandle(r.URL.Path) {
 		status := h.honey.ServeHTTP(w, r)
 		return status, "honeypot"
+	}
+
+	// Budget traps: escalating traps for high-volume clients
+	if h.budgetTrap != nil && h.flags.IsBudgetTrapsEnabled() {
+		if cp := h.collector.GetClientProfile(clientID); cp != nil {
+			snap := cp.Snapshot()
+			if h.budgetTrap.ShouldHandle(clientID, snap.TotalRequests) {
+				status, rt := h.budgetTrap.Apply(w, r, clientID, snap.TotalRequests)
+				return status, rt
+			}
+		}
 	}
 
 	// Captcha challenge: intercept requests that should be challenged
@@ -790,6 +809,14 @@ func (h *Handler) syncConfigToSubsystems() {
 			for cat, enabled := range snap {
 				h.apiChaosEng.SetCategoryEnabled(apichaos.ChaosCategory(cat), enabled)
 			}
+		}
+	}
+
+	// Sync budget trap settings
+	if h.budgetTrap != nil {
+		h.budgetTrap.SetEnabled(h.flags.IsBudgetTrapsEnabled())
+		if thresh, ok := cfg["budget_trap_threshold"].(int); ok {
+			h.budgetTrap.SetThreshold(int64(thresh))
 		}
 	}
 
