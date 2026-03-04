@@ -127,6 +127,7 @@ make db-psql                                # connect to PostgreSQL with psql
 - Bot detection with multi-signal scoring, JS traps, cookie traps, and CAPTCHA challenges
 - Honeypot system with hundreds of known scanner paths and realistic lure responses
 - Budget-draining traps -- graduated tarpits, fake vulnerability breadcrumbs, infinite pagination, progressive content expansion, streaming bait, and WebSocket honeypots that escalate based on per-client request volume
+- MCP (Model Context Protocol) honeypot server -- fake tools (credential harvesters, data harvesters, budget drains), poisoned resources (fake .env, SSH keys, DB dumps, K8s secrets), and trap prompts with injection attacks, rug pulls, and cross-server exfiltration lures
 - Multiple content formats, visual themes, and framework emulation (Rails, Django, Express, Spring, Laravel, and more)
 - REST API emulation (users, products, CMS, forms, infrastructure), GraphQL, Swagger/OpenAPI
 - OAuth2/SSO flows, CDN emulation, search engine, email/webmail simulation, i18n, health/actuator endpoints, WebSocket streams, analytics tracking, privacy/consent

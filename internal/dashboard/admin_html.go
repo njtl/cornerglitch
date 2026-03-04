@@ -2544,7 +2544,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     spider: 'Spider / Crawl Data',
     api_chaos: 'API Chaos',
     media_chaos: 'Media Chaos',
-    budget_traps: 'Budget Traps'
+    budget_traps: 'Budget Traps',
+    mcp: 'MCP Honeypot'
   };
 
   const HTTP_ERROR_TYPES = [
@@ -2587,7 +2588,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     spider: 'Serves robots.txt, sitemap.xml, favicon.ico and other crawler data files with configurable error injection',
     api_chaos: 'Injects chaos into API responses: random pagination, field omission, type mutation, and timing jitter',
     media_chaos: 'Corrupts media responses: broken images, truncated audio/video, cache poisoning, and delivery failures',
-    budget_traps: 'Escalating traps for high-volume clients: tar pits, fake breadcrumbs, infinite pagination, and streaming bait'
+    budget_traps: 'Escalating traps for high-volume clients: tar pits, fake breadcrumbs, infinite pagination, and streaming bait',
+    mcp: 'Fake MCP (Model Context Protocol) server with honeypot tools, poisoned resources, and trap prompts for testing AI agent security'
   };
 
   const SLIDER_TIPS = {
