@@ -58,8 +58,8 @@ func TestNewHandlerRegistersAllEndpoints(t *testing.T) {
 
 func TestNewHandlerEndpointCount(t *testing.T) {
 	h := NewHandler()
-	if got := len(h.endpoints); got != 5 {
-		t.Errorf("expected 5 endpoints, got %d", got)
+	if got := len(h.endpoints); got != 8 {
+		t.Errorf("expected 8 endpoints, got %d", got)
 	}
 }
 

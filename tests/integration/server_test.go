@@ -34,6 +34,7 @@ import (
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/media"
 	"github.com/glitchWebServer/internal/mediachaos"
+	"github.com/glitchWebServer/internal/budgettrap"
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/server"
@@ -76,7 +77,7 @@ func newTestHandler() *server.Handler {
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(),
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(),
 	)
 }
 
@@ -115,7 +116,7 @@ func newTestHandlerNoChaos() *server.Handler {
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), nil,
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), nil, budgettrap.NewEngine(),
 	)
 }
 

@@ -35,6 +35,7 @@ import (
 	"github.com/glitchWebServer/internal/i18n"
 	"github.com/glitchWebServer/internal/jstrap"
 	"github.com/glitchWebServer/internal/labyrinth"
+	"github.com/glitchWebServer/internal/budgettrap"
 	"github.com/glitchWebServer/internal/media"
 	"github.com/glitchWebServer/internal/mediachaos"
 	"github.com/glitchWebServer/internal/metrics"
@@ -197,8 +198,9 @@ func main() {
 	apiChaosEng := apichaos.New()
 	mediaGen := media.New()
 	mediaChaosEng := mediachaos.New()
+	budgetTrapEng := budgettrap.NewEngine()
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng, mediaGen, mediaChaosEng)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng, mediaGen, mediaChaosEng, budgetTrapEng)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)
