@@ -315,3 +315,4 @@ New agents can be created in `~/.claude/agents/<name>.md` — follow the existin
 - `docs/PRD-selftest.md` — Self-test pipeline PRD
 - `docs/scanner_redesign.md` — Scanner subsystem redesign notes
 - `docs/ui_refactoring_plan.md` — Admin panel UI refactoring plan
+- `docs/real-world-findings.md` — Real-world scanner behavior findings from live deployment, documenting scanner weaknesses and budget-draining mechanisms

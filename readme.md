@@ -293,6 +293,10 @@ make k8s-deploy     # deploy to Kubernetes
 
 The server, scanner, and proxy are separate binaries built from `cmd/`. All internal logic lives under `internal/` organized by subsystem. The server has dozens of subsystems including error generation, page rendering, vulnerability emulation, fingerprinting, adaptive behavior, bot detection, honeypot, API emulation, OAuth, CDN, search, email, WebSocket, traffic recording, API chaos engine, media chaos engine (procedural generation and corruption of images, audio, video, and streaming formats), and a full admin dashboard with live metrics. The proxy adds an interception pipeline with chaos, WAF, corruption, and replay modules. The scanner adds attack, evasion, resilience, and crawl modules with multi-scanner evaluation. See `docs/PLAN.md` for the full architecture plan and `docs/` for component-level PRDs.
 
+### Real-World Scanner Behavior
+
+Glitch has been tested against real-world scanners on a public internet host. Documented findings include crawlers tar-pitted for hours by slow-drip media downloads, `.env` scanners defeated by escalating bot detection, Nmap-style probes neutralized by keepalive abuse, and AI scrapers stuck in infinite sitemap polling loops. These observations inform the server's anti-scanner design and identify exploitable weaknesses in common scanner architectures (no download limits, no honeypot detection, no connection pool management, no content deduplication, no adaptive strategy). See [`docs/real-world-findings.md`](docs/real-world-findings.md) for detailed case studies and budget-draining mechanism ideas.
+
 ---
 
 ## Contributing
