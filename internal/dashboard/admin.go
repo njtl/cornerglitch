@@ -216,6 +216,7 @@ type flagValues struct {
 	spider         bool
 	apiChaos       bool
 	mediaChaos     bool
+	budgetTraps    bool
 }
 
 // FeatureFlags holds boolean toggles for each server subsystem.
@@ -254,6 +255,7 @@ func NewFeatureFlags() *FeatureFlags {
 		spider:         true,
 		apiChaos:       true,
 		mediaChaos:     true,
+		budgetTraps:    true,
 	})
 	return f
 }
@@ -354,6 +356,10 @@ func (f *FeatureFlags) IsMediaChaosEnabled() bool {
 	return f.v.Load().(*flagValues).mediaChaos
 }
 
+func (f *FeatureFlags) IsBudgetTrapsEnabled() bool {
+	return f.v.Load().(*flagValues).budgetTraps
+}
+
 // Set toggles a named feature. Returns false if the name is unknown.
 // Uses copy-on-write: copies the current flagValues, modifies, then stores atomically.
 func (f *FeatureFlags) Set(name string, enabled bool) bool {
@@ -410,6 +416,8 @@ func (f *FeatureFlags) Set(name string, enabled bool) bool {
 		nv.apiChaos = enabled
 	case "media_chaos":
 		nv.mediaChaos = enabled
+	case "budget_traps":
+		nv.budgetTraps = enabled
 	default:
 		return false
 	}
@@ -446,6 +454,7 @@ func (f *FeatureFlags) Snapshot() map[string]bool {
 		"spider":          v.spider,
 		"api_chaos":       v.apiChaos,
 		"media_chaos":     v.mediaChaos,
+		"budget_traps":    v.budgetTraps,
 	}
 }
 
@@ -495,6 +504,9 @@ type AdminConfig struct {
 	MediaChaosSlowMinMs         int     // min delay for slow delivery (ms)
 	MediaChaosSlowMaxMs         int     // max delay for slow delivery (ms)
 	MediaChaosInfiniteMaxBytes  int64   // safety cap for infinite streams
+
+	// Budget trap controls
+	BudgetTrapThreshold int // request count before budget traps activate per client
 }
 
 // NewAdminConfig returns an AdminConfig with sensible defaults.
@@ -530,6 +542,7 @@ func NewAdminConfig() *AdminConfig {
 		MediaChaosSlowMinMs:         10,
 		MediaChaosSlowMaxMs:         1000,
 		MediaChaosInfiniteMaxBytes:  104857600, // 100MB
+		BudgetTrapThreshold:         10,
 	}
 }
 
@@ -566,6 +579,7 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"media_chaos_slow_min_ms":           c.MediaChaosSlowMinMs,
 		"media_chaos_slow_max_ms":           c.MediaChaosSlowMaxMs,
 		"media_chaos_infinite_max_bytes":    c.MediaChaosInfiniteMaxBytes,
+		"budget_trap_threshold":             c.BudgetTrapThreshold,
 	}
 }
 
@@ -767,6 +781,15 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 			v = 10737418240
 		}
 		c.MediaChaosInfiniteMaxBytes = v
+	case "budget_trap_threshold":
+		v := int(value)
+		if v < 1 {
+			v = 1
+		}
+		if v > 10000 {
+			v = 10000
+		}
+		c.BudgetTrapThreshold = v
 	default:
 		return false
 	}
@@ -2338,6 +2361,7 @@ func (f *FeatureFlags) SetAll(enabled bool) {
 	nv.spider = enabled
 	nv.apiChaos = enabled
 	nv.mediaChaos = enabled
+	nv.budgetTraps = enabled
 	f.v.Store(&nv)
 }
 

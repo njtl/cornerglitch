@@ -33,6 +33,7 @@ import (
 	"github.com/glitchWebServer/internal/privacy"
 	"github.com/glitchWebServer/internal/media"
 	"github.com/glitchWebServer/internal/mediachaos"
+	"github.com/glitchWebServer/internal/budgettrap"
 	"github.com/glitchWebServer/internal/recorder"
 	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/server"
@@ -98,7 +99,7 @@ func setupBehaviorHandler(t *testing.T) http.Handler {
 			behaviorCollector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 			honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 			wsH, rec, searchH, emailH, healthH, i18nH,
-			headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(),
+			headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(),
 		)
 	})
 	return behaviorHandler
@@ -237,11 +238,13 @@ func TestBehavior_HealthFlagDisabled(t *testing.T) {
 	handler := setupBehaviorHandler(t)
 	resetAll(t)
 
-	// Disable error injection to get clean results
+	// Disable error injection and budget traps to get clean results
 	dashboard.GetFeatureFlags().Set("error_inject", false)
 	defer dashboard.GetFeatureFlags().Set("error_inject", true)
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	defer dashboard.GetFeatureFlags().Set("labyrinth", true)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
+	defer dashboard.GetFeatureFlags().Set("budget_traps", true)
 
 	// Health enabled → /health should return 200 with health JSON
 	status, body := behaviorRequest(t, handler, "/health")
@@ -339,10 +342,13 @@ func TestBehavior_VulnFlagDisabled(t *testing.T) {
 		strings.Contains(body, "OWASP")
 
 	// Disable vuln feature flag AND labyrinth (to prevent fallthrough to labyrinth)
+	// Also disable budget_traps to prevent interception from accumulated request counts
 	dashboard.GetFeatureFlags().Set("vuln", false)
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	defer dashboard.GetFeatureFlags().Set("vuln", true)
 	defer dashboard.GetFeatureFlags().Set("labyrinth", true)
+	defer dashboard.GetFeatureFlags().Set("budget_traps", true)
 
 	// Path should now fall through — no vuln content
 	_, body2 := behaviorRequest(t, handler, "/vuln/a01/")
