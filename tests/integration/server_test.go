@@ -77,7 +77,7 @@ func newTestHandler() *server.Handler {
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(),
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(), nil,
 	)
 }
 
@@ -116,7 +116,7 @@ func newTestHandlerNoChaos() *server.Handler {
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), nil, budgettrap.NewEngine(),
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), nil, budgettrap.NewEngine(), nil,
 	)
 }
 
