@@ -217,6 +217,7 @@ type flagValues struct {
 	apiChaos       bool
 	mediaChaos     bool
 	budgetTraps    bool
+	mcp            bool
 }
 
 // FeatureFlags holds boolean toggles for each server subsystem.
@@ -256,6 +257,7 @@ func NewFeatureFlags() *FeatureFlags {
 		apiChaos:       true,
 		mediaChaos:     true,
 		budgetTraps:    true,
+		mcp:            true,
 	})
 	return f
 }
@@ -360,6 +362,10 @@ func (f *FeatureFlags) IsBudgetTrapsEnabled() bool {
 	return f.v.Load().(*flagValues).budgetTraps
 }
 
+func (f *FeatureFlags) IsMCPEnabled() bool {
+	return f.v.Load().(*flagValues).mcp
+}
+
 // Set toggles a named feature. Returns false if the name is unknown.
 // Uses copy-on-write: copies the current flagValues, modifies, then stores atomically.
 func (f *FeatureFlags) Set(name string, enabled bool) bool {
@@ -418,6 +424,8 @@ func (f *FeatureFlags) Set(name string, enabled bool) bool {
 		nv.mediaChaos = enabled
 	case "budget_traps":
 		nv.budgetTraps = enabled
+	case "mcp":
+		nv.mcp = enabled
 	default:
 		return false
 	}
@@ -455,6 +463,7 @@ func (f *FeatureFlags) Snapshot() map[string]bool {
 		"api_chaos":       v.apiChaos,
 		"media_chaos":     v.mediaChaos,
 		"budget_traps":    v.budgetTraps,
+		"mcp":             v.mcp,
 	}
 }
 
@@ -2362,6 +2371,7 @@ func (f *FeatureFlags) SetAll(enabled bool) {
 	nv.apiChaos = enabled
 	nv.mediaChaos = enabled
 	nv.budgetTraps = enabled
+	nv.mcp = enabled
 	f.v.Store(&nv)
 }
 
