@@ -59,6 +59,7 @@ func disableConfounders(t *testing.T) {
 	flags.Set("labyrinth", false)
 	flags.Set("random_blocking", false)
 	flags.Set("captcha", false)
+	flags.Set("budget_traps", false)
 }
 
 // setExclusiveErrorWeight sets a single error type to weight 1.0, all others to 0.
@@ -384,6 +385,7 @@ func TestTraffic_FeatureFlag_Labyrinth(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("error_inject", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	defer resetAll(t)
 
 	_, body1 := behaviorRequest(t, handler, "/articles/deep/nested/path/explore")
@@ -403,6 +405,7 @@ func TestTraffic_FeatureFlag_ErrorInject(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	dashboard.GetAdminConfig().Set("error_rate_multiplier", 5.0)
 	defer resetAll(t)
 
@@ -480,6 +483,7 @@ func TestTraffic_FeatureFlag_Captcha(t *testing.T) {
 	}
 
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	captchaCount2 := 0
 	for i := 0; i < 50; i++ {
 		_, body := behaviorRequest(t, handler, fmt.Sprintf("/page2-%d", i))
@@ -518,6 +522,7 @@ func TestTraffic_Config_ErrorRateMultiplier(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	defer resetAll(t)
 
 	dashboard.GetAdminConfig().Set("error_rate_multiplier", 0.0)
@@ -629,6 +634,7 @@ func TestTraffic_Config_MaxLabyrinthDepth(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("error_inject", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	defer resetAll(t)
 
 	dashboard.GetAdminConfig().Set("max_labyrinth_depth", 2)
@@ -646,6 +652,7 @@ func TestTraffic_Config_LabyrinthLinkDensity(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("error_inject", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	defer resetAll(t)
 
 	// Use multiple paths and average to account for RNG variation
@@ -794,6 +801,7 @@ func testHTTPErrorType(t *testing.T, handler http.Handler, errType string, expec
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	dashboard.GetFeatureFlags().Set("error_inject", true)
 	setExclusiveErrorWeight(t, errType)
 	defer resetAll(t)
@@ -830,6 +838,7 @@ func TestTraffic_ErrorType_429RateLimit(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	setExclusiveErrorWeight(t, "429_rate_limit")
 	defer resetAll(t)
 
@@ -852,6 +861,7 @@ func TestTraffic_ErrorType_WrongContentType(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	setExclusiveErrorWeight(t, "wrong_content_type")
 	defer resetAll(t)
 
@@ -869,6 +879,7 @@ func TestTraffic_ErrorType_EmptyBody(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	setExclusiveErrorWeight(t, "empty_body")
 	defer resetAll(t)
 
@@ -887,6 +898,7 @@ func TestTraffic_ErrorType_GarbageBody(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	setExclusiveErrorWeight(t, "garbage_body")
 	defer resetAll(t)
 
@@ -903,6 +915,7 @@ func TestTraffic_ErrorType_HugeHeaders(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	setExclusiveErrorWeight(t, "huge_headers")
 	defer resetAll(t)
 
@@ -924,6 +937,7 @@ func TestTraffic_ErrorType_PartialBody(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	setExclusiveErrorWeight(t, "partial_body")
 	defer resetAll(t)
 
@@ -955,6 +969,7 @@ func TestTraffic_ErrorType_H2UpgradeReject(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	dashboard.GetAdminConfig().Set("protocol_glitch_enabled", 1)
 	setExclusiveErrorWeight(t, "h2_upgrade_reject")
 	defer resetAll(t)
@@ -972,6 +987,7 @@ func TestTraffic_ErrorType_FalseServerPush(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	dashboard.GetAdminConfig().Set("protocol_glitch_enabled", 1)
 	setExclusiveErrorWeight(t, "false_server_push")
 	defer resetAll(t)
@@ -988,6 +1004,7 @@ func TestTraffic_ErrorType_BothCLAndTE(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	dashboard.GetAdminConfig().Set("protocol_glitch_enabled", 1)
 	setExclusiveErrorWeight(t, "both_cl_and_te")
 	defer resetAll(t)
@@ -1004,6 +1021,7 @@ func TestTraffic_ErrorType_FalseCompression(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	dashboard.GetAdminConfig().Set("protocol_glitch_enabled", 1)
 	setExclusiveErrorWeight(t, "false_compression")
 	defer resetAll(t)
@@ -1018,6 +1036,7 @@ func TestTraffic_ErrorType_MultiEncodings(t *testing.T) {
 	dashboard.GetFeatureFlags().Set("labyrinth", false)
 	dashboard.GetFeatureFlags().Set("random_blocking", false)
 	dashboard.GetFeatureFlags().Set("captcha", false)
+	dashboard.GetFeatureFlags().Set("budget_traps", false)
 	dashboard.GetAdminConfig().Set("protocol_glitch_enabled", 1)
 	setExclusiveErrorWeight(t, "multi_encodings")
 	defer resetAll(t)
