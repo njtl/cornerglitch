@@ -2541,7 +2541,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     websocket: 'WebSocket',
     privacy: 'Privacy/Consent',
     health: 'Health Endpoints',
-    spider: 'Spider / Crawl Data'
+    spider: 'Spider / Crawl Data',
+    api_chaos: 'API Chaos',
+    media_chaos: 'Media Chaos',
+    budget_traps: 'Budget Traps'
   };
 
   const HTTP_ERROR_TYPES = [
@@ -2581,7 +2584,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     websocket: 'Provides WebSocket upgrade endpoints with test payloads',
     privacy: 'Serves GDPR/privacy consent banners and cookie notices',
     health: 'Exposes health check and status endpoints',
-    spider: 'Serves robots.txt, sitemap.xml, favicon.ico and other crawler data files with configurable error injection'
+    spider: 'Serves robots.txt, sitemap.xml, favicon.ico and other crawler data files with configurable error injection',
+    api_chaos: 'Injects chaos into API responses: random pagination, field omission, type mutation, and timing jitter',
+    media_chaos: 'Corrupts media responses: broken images, truncated audio/video, cache poisoning, and delivery failures',
+    budget_traps: 'Escalating traps for high-volume clients: tar pits, fake breadcrumbs, infinite pagination, and streaming bait'
   };
 
   const SLIDER_TIPS = {
@@ -2605,7 +2611,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     proxy_corrupt_prob: 'Probability of corrupting proxied response data (0=none, 1=always)',
     proxy_drop_prob: 'Probability of silently dropping proxied requests (0=none, 1=always)',
     proxy_reset_prob: 'Probability of sending TCP RST instead of response (0=none, 1=always)',
-    protocol_glitch_level: 'Severity of HTTP protocol-level glitches (0=disabled, 1=subtle, 2=moderate, 3=aggressive, 4=chaos)'
+    protocol_glitch_level: 'Severity of HTTP protocol-level glitches (0=disabled, 1=subtle, 2=moderate, 3=aggressive, 4=chaos)',
+    budget_trap_threshold: 'Request count before budget-draining traps activate for a client'
   };
 
   const ERROR_TIPS = {
@@ -2699,7 +2706,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         slider('cookie_trap_frequency', 'Cookie Trap Frequency', cfg.cookie_trap_frequency || 3, 0, 20, 1) +
         slider('js_trap_difficulty', 'JS Trap Difficulty', cfg.js_trap_difficulty || 2, 0, 5, 1) +
         slider('bot_score_threshold', 'Bot Score Threshold', cfg.bot_score_threshold, 0, 100, 1) +
-        slider('content_cache_ttl_sec', 'Content Cache TTL (sec)', cfg.content_cache_ttl_sec || 60, 0, 3600, 10);
+        slider('content_cache_ttl_sec', 'Content Cache TTL (sec)', cfg.content_cache_ttl_sec || 60, 0, 3600, 10) +
+        slider('budget_trap_threshold', 'Budget Trap Threshold', cfg.budget_trap_threshold || 10, 1, 10000, 1);
 
       // Dropdowns
       if (cfg.honeypot_response_style) {
