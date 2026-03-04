@@ -71,7 +71,7 @@ func resetFeatureFlags(t *testing.T) {
 		"random_blocking": true, "framework_emul": true, "search": true,
 		"email": true, "i18n": true, "recorder": true,
 		"websocket": true, "privacy": true, "health": true, "spider": true,
-		"api_chaos": true, "media_chaos": true,
+		"api_chaos": true, "media_chaos": true, "budget_traps": true,
 	}
 	for name, enabled := range defaults {
 		flags.Set(name, enabled)

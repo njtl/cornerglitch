@@ -69,6 +69,23 @@ func NewHandler() *Handler {
 		run:         h.runMetrics,
 	}
 
+	// Honeypot endpoints — budget-draining traps that look like real data streams.
+	h.endpoints["/ws/live-data"] = wsEndpoint{
+		name:        "Live Data Stream",
+		description: "Aggregated real-time data feed (market, metrics, alerts)",
+		run:         h.runHoneypot,
+	}
+	h.endpoints["/ws/events"] = wsEndpoint{
+		name:        "Event Stream",
+		description: "Server-sent event stream for real-time updates",
+		run:         h.runHoneypot,
+	}
+	h.endpoints["/ws/stream"] = wsEndpoint{
+		name:        "Data Stream",
+		description: "Streaming data endpoint for live dashboards",
+		run:         h.runHoneypot,
+	}
+
 	return h
 }
 

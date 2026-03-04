@@ -113,6 +113,7 @@ internal/
   spider/                        Spider data generation for crawl discovery
   media/                         Procedural media generation (images, audio, video, streaming)
   mediachaos/                    Media chaos engine (corruption, delivery chaos, cache poisoning)
+  budgettrap/                    Budget-draining traps (tarpit, breadcrumbs, pagination, expansion, streaming bait)
   storage/                       PostgreSQL persistence with insert-only versioning and migrations
 
   # Scanner subsystems
@@ -169,6 +170,7 @@ tests/
 - **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag. Settings auto-save to `.glitch-state.json` on every change and auto-load on startup (unless `-config` flag is used). With PostgreSQL enabled (`GLITCH_DB_URL` or `-db-url`), config is also persisted to the database and restored from DB on startup (falling back to state file if DB is unavailable).
 - **PostgreSQL persistence** is optional — the server works without a database (file-only mode). When enabled, uses insert-only versioning (no UPDATE/DELETE on config data) with auto-incrementing version numbers. Views provide "current state" via `DISTINCT ON`. Schema is managed by embedded SQL migrations (`internal/storage/migrations/`). Tables: `config_versions` (versioned config snapshots), `scan_history` (append-only scan results), `metrics_snapshots` (periodic metrics), `client_profiles` (versioned per-client state), `request_log` (sampled request log), `schema_migrations` (migration tracking).
 - **Recorder is an operational flag** — `FeatureFlags.SetAll()` excludes `recorder` because traffic recording is an operational setting, not a chaos feature. Nightmare mode does not start/stop recording.
+- **Budget traps** are per-client escalating mechanisms that activate after a configurable request threshold. Traps include graduated tarpits (3 levels), fake vulnerability breadcrumbs (headers + HTML comments), infinite pagination, progressive content expansion (exponential link growth), streaming bait (slow chunked responses), and WebSocket honeypots (3-phase degradation). Controlled via `budget_traps` feature flag and `budget_trap_threshold` config.
 - **Every subsystem is controllable** — all feature toggles and config parameters are wired to their actual subsystems.
 - **Avoid hard numbers in docs** — use qualitative language since counts change as the project evolves.
 - **Keep docs in sync** — any change to the project (new feature, refactor, bug fix, config change) must update both `CLAUDE.md` and `readme.md` to reflect the current state. This applies to user requests too: if the user asks for a change, update both files as part of the work.
