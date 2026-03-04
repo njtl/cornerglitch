@@ -45,6 +45,7 @@ import (
 	"github.com/glitchWebServer/internal/search"
 	"github.com/glitchWebServer/internal/spider"
 	"github.com/glitchWebServer/internal/vuln"
+	"github.com/glitchWebServer/internal/mcp"
 	"github.com/glitchWebServer/internal/websocket"
 )
 
@@ -124,6 +125,7 @@ type Handler struct {
 	mediaGen             *media.Generator
 	mediaChaosEng        *mediachaos.Engine
 	budgetTrap           *budgettrap.Engine
+	mcpServer            *mcp.Server
 	flags                *dashboard.FeatureFlags
 	config               *dashboard.AdminConfig
 	apiChaosConfig       *dashboard.APIChaosConfig
@@ -163,6 +165,7 @@ func NewHandler(
 	mediaGen *media.Generator,
 	mediaChaosEng *mediachaos.Engine,
 	budgetTrap *budgettrap.Engine,
+	mcpServer *mcp.Server,
 ) *Handler {
 	return &Handler{
 		collector:      collector,
@@ -196,6 +199,7 @@ func NewHandler(
 		mediaGen:         mediaGen,
 		mediaChaosEng:    mediaChaosEng,
 		budgetTrap:       budgetTrap,
+		mcpServer:        mcpServer,
 		flags:            dashboard.GetFeatureFlags(),
 		config:           dashboard.GetAdminConfig(),
 		apiChaosConfig:   dashboard.GetAPIChaosConfig(),
@@ -364,6 +368,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 	if h.wsH != nil && h.flags.IsWebSocketEnabled() && h.wsH.ShouldHandle(r.URL.Path) {
 		status := h.wsH.ServeHTTP(w, r)
 		return status, "websocket"
+	}
+
+	// MCP (Model Context Protocol) honeypot endpoint
+	if h.mcpServer != nil && h.flags.IsMCPEnabled() && h.mcpServer.ShouldHandle(r.URL.Path) {
+		status := h.mcpServer.ServeHTTP(w, r)
+		return status, "mcp"
 	}
 
 	// Health/status/debug endpoints
