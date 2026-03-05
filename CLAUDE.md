@@ -239,7 +239,7 @@ Integration tests must not be flaky between local and CI. Common causes of local
 ```bash
 go build ./...                   # compile all binaries
 go vet ./...                     # static analysis
-go test ./... -count=1 -timeout 300s  # all unit tests (with timeout matching CI)
+go test ./... -count=1 -timeout 600s  # all unit tests (with timeout matching CI)
 ```
 
 ### Acceptance Tests (require running server)

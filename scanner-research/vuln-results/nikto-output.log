@@ -1,0 +1,15 @@
+- Nikto v2.1.5
+---------------------------------------------------------------------------
++ ERROR: Host maximum execution time of 180 seconds reached
++ Target IP:          127.0.0.1
++ Target Hostname:    localhost
++ Target Port:        8765
++ Start Time:         2026-03-05 14:40:01 (GMT0)
+---------------------------------------------------------------------------
++ Server: cloudflare
++ The anti-clickjacking X-Frame-Options header is not present.
++ ERROR: Host maximum execution time of 180 seconds reached
++ Scan terminated:  4 error(s) and 1 item(s) reported on remote host
++ End Time:           2026-03-05 14:43:19 (GMT0) (198 seconds)
+---------------------------------------------------------------------------
++ 1 host(s) tested
