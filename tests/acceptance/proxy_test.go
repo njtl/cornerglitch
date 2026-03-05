@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -812,24 +813,27 @@ func TestProxy_Behavioral_ServerStillResponds(t *testing.T) {
 	requireServer(t)
 	requireAdmin(t)
 
-	// In any proxy mode, the main server should still respond
+	// In any proxy mode, the main server should still respond.
+	// Use internal health path to avoid error injection timeouts.
+	healthPath := "/health"
+	if secret := os.Getenv("GLITCH_HEALTH_SECRET"); secret != "" {
+		healthPath = "/_internal/" + secret + "/healthz"
+	}
 	modes := []string{"transparent", "waf", "chaos", "gateway"}
 	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
 			setProxyMode(t, mode)
 
-			// Retry a few times since chaos/error injection is probabilistic
 			var lastErr error
 			for i := 0; i < 5; i++ {
 				cl := &http.Client{Timeout: 10 * time.Second}
-				resp, err := cl.Get(serverURL + "/health")
+				resp, err := cl.Get(serverURL + healthPath)
 				if err != nil {
 					lastErr = err
 					time.Sleep(100 * time.Millisecond)
 					continue
 				}
 				resp.Body.Close()
-				// Any 2xx or even 5xx means the server is responding
 				if resp.StatusCode > 0 {
 					lastErr = nil
 					break
@@ -1132,6 +1136,11 @@ func TestProxy_ServerRequestsWithProxyModes(t *testing.T) {
 	// Test that server endpoints still work across proxy mode changes.
 	// The proxy is in-process so it doesn't intercept server traffic,
 	// but mode changes should not break the server.
+	// Use internal health path to avoid error injection timeouts.
+	healthPath2 := "/health"
+	if secret := os.Getenv("GLITCH_HEALTH_SECRET"); secret != "" {
+		healthPath2 = "/_internal/" + secret + "/healthz"
+	}
 
 	modes := []string{"transparent", "waf", "chaos", "gateway", "nightmare", "mirror"}
 
@@ -1139,11 +1148,10 @@ func TestProxy_ServerRequestsWithProxyModes(t *testing.T) {
 		t.Run(fmt.Sprintf("server_health_in_%s_mode", mode), func(t *testing.T) {
 			setProxyMode(t, mode)
 
-			// Server health endpoint should always respond
 			var success bool
 			for retry := 0; retry < 5; retry++ {
 				cl := &http.Client{Timeout: 10 * time.Second}
-				resp, err := cl.Get(serverURL + "/health")
+				resp, err := cl.Get(serverURL + healthPath2)
 				if err != nil {
 					time.Sleep(200 * time.Millisecond)
 					continue
@@ -1156,7 +1164,7 @@ func TestProxy_ServerRequestsWithProxyModes(t *testing.T) {
 				time.Sleep(200 * time.Millisecond)
 			}
 			if !success {
-				t.Errorf("server /health not responding in %s proxy mode", mode)
+				t.Errorf("server health not responding in %s proxy mode", mode)
 			}
 		})
 	}
