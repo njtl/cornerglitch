@@ -1612,6 +1612,14 @@ type AdminMCPHandler interface {
 	ServeHTTP(w http.ResponseWriter, r *http.Request) int
 }
 
+// MCPScanResult represents an MCP security scan result.
+type MCPScanResult interface{}
+
+// MCPScannerProvider can scan external MCP servers.
+type MCPScannerProvider interface {
+	Scan(targetURL string) MCPScanResult
+}
+
 // ---------------------------------------------------------------------------
 // Singleton holders — used by the admin API handlers
 // ---------------------------------------------------------------------------
@@ -1629,6 +1637,7 @@ var (
 	globalAdaptive     *adaptive.Engine
 	globalMCP          MCPProvider
 	globalAdminMCP     AdminMCPHandler
+	globalMCPScanner   MCPScannerProvider
 
 	// Pending blocking/overrides config — stored by ImportConfig before adaptive engine exists.
 	pendingBlocking   map[string]interface{}
@@ -1678,6 +1687,12 @@ func SetAdminMCPHandler(h AdminMCPHandler) { globalAdminMCP = h }
 
 // GetAdminMCPHandler returns the admin MCP handler.
 func GetAdminMCPHandler() AdminMCPHandler { return globalAdminMCP }
+
+// SetMCPScanner sets the MCP scanner provider.
+func SetMCPScanner(s MCPScannerProvider) { globalMCPScanner = s }
+
+// GetMCPScanner returns the MCP scanner provider.
+func GetMCPScanner() MCPScannerProvider { return globalMCPScanner }
 
 // proxyRuntimeState holds proxy running state for deferred auto-start.
 type proxyRuntimeState struct {

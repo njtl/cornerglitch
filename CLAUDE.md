@@ -114,7 +114,11 @@ internal/
   media/                         Procedural media generation (images, audio, video, streaming)
   mediachaos/                    Media chaos engine (corruption, delivery chaos, cache poisoning)
   budgettrap/                    Budget-draining traps (tarpit, breadcrumbs, pagination, expansion, streaming bait)
-  mcp/                           Fake MCP (Model Context Protocol) server — honeypot tools, poisoned resources, trap prompts
+  mcp/                           MCP (Model Context Protocol) subsystem — honeypot server, agent fingerprinting, SSE transport, outbound scanner, admin tools
+    mcp/server.go                MCP honeypot server (Streamable HTTP transport, JSON-RPC 2.0)
+    mcp/fingerprint.go           Client fingerprinting (classify Claude, GPT, Cursor, Windsurf; behavioral signals)
+    mcp/scanner.go               Outbound MCP scanner (tests external MCP servers for injection, rug pulls, exfiltration)
+    mcp/admin_tools.go           Authenticated admin MCP endpoint (toggle features, get metrics, nightmare control)
   storage/                       PostgreSQL persistence with insert-only versioning and migrations
 
   # Scanner subsystems
@@ -130,6 +134,7 @@ internal/
 
   # Proxy subsystems
   proxy/                         Core proxy + interception pipeline
+    proxy/mcp_interceptor.go     MCP traffic interception (tool injection, resource poisoning, result modification)
     chaos/                       Chaos modules (latency, corruption, connection, rewrite)
     waf/                         WAF modules (signatures, ratelimit, geoblock, botblock)
     modes/                       Mode implementations (transparent, waf, chaos, nightmare, mirror)
@@ -171,7 +176,7 @@ tests/
 - **Config is fully serializable** — export/import via admin API, or load from file with `-config` flag. Settings auto-save to `.glitch-state.json` on every change and auto-load on startup (unless `-config` flag is used). With PostgreSQL enabled (`GLITCH_DB_URL` or `-db-url`), config is also persisted to the database and restored from DB on startup (falling back to state file if DB is unavailable).
 - **PostgreSQL persistence** is optional — the server works without a database (file-only mode). When enabled, uses insert-only versioning (no UPDATE/DELETE on config data) with auto-incrementing version numbers. Views provide "current state" via `DISTINCT ON`. Schema is managed by embedded SQL migrations (`internal/storage/migrations/`). Tables: `config_versions` (versioned config snapshots), `scan_history` (append-only scan results), `metrics_snapshots` (periodic metrics), `client_profiles` (versioned per-client state), `request_log` (sampled request log), `schema_migrations` (migration tracking).
 - **Recorder is an operational flag** — `FeatureFlags.SetAll()` excludes `recorder` because traffic recording is an operational setting, not a chaos feature. Nightmare mode does not start/stop recording.
-- **MCP honeypot** at `/mcp` implements Streamable HTTP transport (JSON-RPC 2.0 over POST, SSE via GET, session close via DELETE). Exposes honeypot tools (credential harvesters, data harvesters, budget drains), poisoned resources (fake .env, SSH keys, DB dumps, K8s secrets), and trap prompts (injection via `<IMPORTANT>` blocks, rug pulls, cross-server exfiltration). Controlled via `mcp` feature flag. Session management via `Mcp-Session-Id` header.
+- **MCP subsystem** at `/mcp` implements Streamable HTTP transport (JSON-RPC 2.0 over POST, SSE via GET, session close via DELETE). Includes: (1) **Honeypot server** — fake tools (credential harvesters, data harvesters, budget drains), poisoned resources (fake .env, SSH keys, DB dumps, K8s secrets), trap prompts (injection via `<IMPORTANT>` blocks, rug pulls, cross-server exfiltration); (2) **Agent fingerprinting** — classifies MCP clients (Claude, GPT, Cursor, Windsurf) by clientInfo and behavioral signals (credential access, tool sequences, injection susceptibility), risk scoring 0-100; (3) **SSE transport** — event channels, `tools/listChanged` and `resources/listChanged` notifications, heartbeat keepalive, `Last-Event-ID` reconnection; (4) **Outbound scanner** (`internal/mcp/scanner.go`) — connects to external MCP servers, analyzes tool descriptions for injection patterns, detects credential harvesting, path traversal, rug pulls (hash-based tool description change detection), tests canary payloads for data exfiltration; (5) **Admin tools** at `/admin/mcp` — authenticated MCP endpoint with server management tools (toggle_feature, get_metrics, set_error_profile, nightmare_toggle, get_mcp_stats, list_sessions); (6) **Dashboard integration** — MCP section in Server tab (stats cards, events table, per-tool breakdown), MCP Scanner sub-tab in Scanner tab; (7) **Proxy interception** (`internal/proxy/mcp_interceptor.go`) — detects MCP traffic in transit, injects tools, poisons resources, modifies results, tracks sessions. Controlled via `mcp` feature flag. Session management via `Mcp-Session-Id` header.
 - **Budget traps** are per-client escalating mechanisms that activate after a configurable request threshold. Traps include graduated tarpits (3 levels), fake vulnerability breadcrumbs (headers + HTML comments), infinite pagination, progressive content expansion (exponential link growth), streaming bait (slow chunked responses), and WebSocket honeypots (3-phase degradation). Controlled via `budget_traps` feature flag and `budget_trap_threshold` config.
 - **Every subsystem is controllable** — all feature toggles and config parameters are wired to their actual subsystems.
 - **Avoid hard numbers in docs** — use qualitative language since counts change as the project evolves.
@@ -317,6 +322,7 @@ New agents can be created in `~/.claude/agents/<name>.md` — follow the existin
 - `docs/PRD-proxy.md` — Proxy component PRD
 - `docs/PRD-nightmare.md` — Nightmare mode PRD
 - `docs/PRD-selftest.md` — Self-test pipeline PRD
+- `docs/PRD-mcp.md` — MCP honeypot and AI agent security testing PRD
 - `docs/scanner_redesign.md` — Scanner subsystem redesign notes
 - `docs/ui_refactoring_plan.md` — Admin panel UI refactoring plan
 - `docs/real-world-findings.md` — Real-world scanner behavior findings from live deployment, documenting scanner weaknesses and budget-draining mechanisms

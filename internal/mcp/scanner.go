@@ -104,6 +104,12 @@ func (sc *Scanner) Scan(targetURL string) *ScanReport {
 		}
 	}
 
+	// Step 4.5: Canary testing — call tools with canary values
+	if len(tools) > 0 {
+		canaryFindings := sc.testCanaryPayloads(targetURL, sid, tools)
+		report.Findings = append(report.Findings, canaryFindings...)
+	}
+
 	// Step 5: Rug pull detection — re-list tools and compare
 	if len(tools) > 0 {
 		tools2, err := sc.listTools(targetURL, sid)
@@ -233,6 +239,72 @@ func (sc *Scanner) listPrompts(url, sid string) ([]map[string]interface{}, error
 		}
 	}
 	return prompts, nil
+}
+
+// testCanaryPayloads calls tools with unique canary values to detect data exfiltration.
+func (sc *Scanner) testCanaryPayloads(url, sid string, tools []map[string]interface{}) []ScanFinding {
+	var findings []ScanFinding
+	canary := "GLITCH_CANARY_" + fmt.Sprintf("%x", time.Now().UnixNano()%0xFFFFFF)
+
+	for _, t := range tools {
+		name, _ := t["name"].(string)
+		if name == "" {
+			continue
+		}
+		// Only test tools that accept string parameters
+		schema, _ := t["inputSchema"].(map[string]interface{})
+		if schema == nil {
+			continue
+		}
+		props, _ := schema["properties"].(map[string]interface{})
+		if len(props) == 0 {
+			continue
+		}
+
+		// Build arguments with canary value for first string param
+		args := make(map[string]interface{})
+		for pName, pDef := range props {
+			if pm, ok := pDef.(map[string]interface{}); ok {
+				if pm["type"] == "string" {
+					args[pName] = canary
+					break
+				}
+			}
+		}
+		if len(args) == 0 {
+			continue
+		}
+
+		argsJSON, _ := json.Marshal(args)
+		req := map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      100,
+			"method":  "tools/call",
+			"params": map[string]interface{}{
+				"name":      name,
+				"arguments": json.RawMessage(argsJSON),
+			},
+		}
+
+		resp, err := sc.rpcCall(url, sid, req)
+		if err != nil {
+			continue
+		}
+
+		// Check if canary appears in the response (which it shouldn't normally)
+		respBytes, _ := json.Marshal(resp)
+		if strings.Contains(string(respBytes), canary) {
+			findings = append(findings, ScanFinding{
+				Severity:    "medium",
+				Category:    "exfiltration",
+				Title:       fmt.Sprintf("Canary reflected in tool '%s' response", name),
+				Description: "Tool echoes back input data, which could be used for data exfiltration verification",
+				Tool:        name,
+				Evidence:    canary,
+			})
+		}
+	}
+	return findings
 }
 
 // deleteSession sends DELETE to close the session.
