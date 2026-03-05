@@ -167,13 +167,17 @@ func (e *Engine) TLSConfig() *tls.Config {
 	return cfg
 }
 
-// getCertificate selects a certificate based on chaos level.
+// getCertificate selects a certificate based on chaos level and SNI.
 func (e *Engine) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	e.mu.RLock()
 	level := e.level
 	e.mu.RUnlock()
 
 	if level < LevelCertChaos {
+		// SNI-based chaos at lower levels: if SNI doesn't match hostname, serve wrong cert
+		if level >= LevelDowngrade && hello.ServerName != "" && hello.ServerName != e.hostname {
+			return &e.wrongHost, nil
+		}
 		return &e.validCert, nil
 	}
 
@@ -182,8 +186,14 @@ func (e *Engine) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 	count := e.requestCount
 	e.mu.Unlock()
 
-	// Rotate through chaos certs
-	switch count % 4 {
+	// Rotate through chaos certs, but also consider SNI
+	idx := count % 4
+	if hello.ServerName != "" && hello.ServerName != e.hostname && hello.ServerName != "localhost" {
+		// SNI mismatch: always serve wrong cert to amplify confusion
+		idx = 2 // wrongHost
+	}
+
+	switch idx {
 	case 0:
 		return &e.validCert, nil
 	case 1:

@@ -18,7 +18,7 @@ import (
 func main() {
 	// CLI flags.
 	target := flag.String("target", "", "Target URL (required)")
-	profile := flag.String("profile", "aggressive", "Scan profile: compliance, aggressive, stealth, nightmare")
+	profile := flag.String("profile", "aggressive", "Scan profile: compliance, aggressive, stealth, nightmare, destroyer")
 	concurrency := flag.Int("concurrency", 0, "Number of concurrent workers (default from profile)")
 	rate := flag.Int("rate", 0, "Max requests/second (default from profile)")
 	timeout := flag.Int("timeout", 10, "Per-request timeout in seconds")
