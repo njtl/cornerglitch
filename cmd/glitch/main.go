@@ -38,6 +38,7 @@ import (
 	"github.com/glitchWebServer/internal/jstrap"
 	"github.com/glitchWebServer/internal/labyrinth"
 	"github.com/glitchWebServer/internal/budgettrap"
+	"github.com/glitchWebServer/internal/tlschaos"
 	mcpkg "github.com/glitchWebServer/internal/mcp"
 	"github.com/glitchWebServer/internal/media"
 	"github.com/glitchWebServer/internal/mediachaos"
@@ -109,6 +110,9 @@ func main() {
 
 	port := flag.Int("port", 8765, "Server port")
 	dashPort := flag.Int("dash-port", 8766, "Dashboard/metrics port")
+	tlsPort := flag.Int("tls-port", 8767, "TLS/HTTPS port (0 to disable)")
+	tlsCert := flag.String("cert", "", "TLS certificate file (env: GLITCH_TLS_CERT)")
+	tlsKey := flag.String("key", "", "TLS key file (env: GLITCH_TLS_KEY)")
 	configFile := flag.String("config", "", "Path to config JSON file to import on startup")
 	adminPass := flag.String("admin-password", "", "Admin panel password (env: GLITCH_ADMIN_PASSWORD)")
 	dbURL := flag.String("db-url", "", "PostgreSQL connection URL (env: GLITCH_DB_URL)")
@@ -312,7 +316,43 @@ func main() {
 		}
 	}()
 
-	audit.LogSystem("system.start", "system.lifecycle", map[string]interface{}{"port": *port, "dash_port": *dashPort})
+	// TLS/HTTPS listener (HTTP/2 auto-enabled by Go stdlib over TLS).
+	var tlsSrv *http.Server
+	if *tlsPort > 0 {
+		certPath := *tlsCert
+		if certPath == "" {
+			certPath = os.Getenv("GLITCH_TLS_CERT")
+		}
+		keyPath := *tlsKey
+		if keyPath == "" {
+			keyPath = os.Getenv("GLITCH_TLS_KEY")
+		}
+
+		tlsEngine, tlsErr := tlschaos.NewEngine(certPath, keyPath, "localhost")
+		if tlsErr != nil {
+			log.Printf("\033[31m[glitch]\033[0m TLS engine error: %v (TLS listener disabled)", tlsErr)
+		} else {
+			dashboard.SetTLSChaosEngine(tlsEngine)
+
+			tlsSrv = &http.Server{
+				Addr:         fmt.Sprintf(":%d", *tlsPort),
+				Handler:      mux,
+				TLSConfig:    tlsEngine.TLSConfig(),
+				ReadTimeout:  30 * time.Second,
+				WriteTimeout: 60 * time.Second,
+				IdleTimeout:  120 * time.Second,
+			}
+			go func() {
+				log.Printf("\033[36m[glitch]\033[0m TLS/HTTPS listening on :%d (HTTP/2 enabled)", *tlsPort)
+				// ListenAndServeTLS with empty cert/key since TLSConfig has GetCertificate
+				if err := tlsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+					log.Printf("\033[31m[glitch]\033[0m TLS server error: %v", err)
+				}
+			}()
+		}
+	}
+
+	audit.LogSystem("system.start", "system.lifecycle", map[string]interface{}{"port": *port, "dash_port": *dashPort, "tls_port": *tlsPort})
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -332,6 +372,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)
+	if tlsSrv != nil {
+		tlsSrv.Shutdown(ctx)
+	}
 	dashSrv.Shutdown(ctx)
 	botDet.Stop()
 	contentEng.Stop()

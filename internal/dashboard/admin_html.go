@@ -2671,6 +2671,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     proxy_drop_prob: 'Probability of silently dropping proxied requests (0=none, 1=always)',
     proxy_reset_prob: 'Probability of sending TCP RST instead of response (0=none, 1=always)',
     protocol_glitch_level: 'Severity of HTTP protocol-level glitches (0=disabled, 1=subtle, 2=moderate, 3=aggressive, 4=chaos)',
+    tls_chaos_level: 'TLS chaos level (0=clean TLS 1.3, 1=version downgrade, 2=weak ciphers, 3=cert chaos, 4=nightmare)',
     budget_trap_threshold: 'Request count before budget-draining traps activate for a client'
   };
 
@@ -2739,6 +2740,25 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           '</div>' +
           '<label class="toggle-sw">' +
           '<input type="checkbox" ' + (cfg.protocol_glitch_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'protocol_glitch_enabled\', this.checked ? 1 : 0)">' +
+          '<div class="toggle-track"></div>' +
+          '<div class="toggle-knob"></div>' +
+          '</label></div>' +
+        slider('tls_chaos_level', 'TLS Chaos Level (0-4)', cfg.tls_chaos_level || 0, 0, 4, 1) +
+        '<div class="toggle-row" style="margin-top:8px">' +
+          '<div class="toggle-name has-tip">TLS Chaos Enabled' +
+            '<span class="tip-icon">?</span><span class="tip-box">Enable TLS chaos (version downgrade, weak ciphers, cert rotation, ALPN lies)</span>' +
+          '</div>' +
+          '<label class="toggle-sw">' +
+          '<input type="checkbox" ' + (cfg.tls_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'tls_chaos_enabled\', this.checked ? 1 : 0)">' +
+          '<div class="toggle-track"></div>' +
+          '<div class="toggle-knob"></div>' +
+          '</label></div>' +
+        '<div class="toggle-row" style="margin-top:8px">' +
+          '<div class="toggle-name has-tip">HSTS Chaos Enabled' +
+            '<span class="tip-icon">?</span><span class="tip-box">Inject random Strict-Transport-Security headers (max-age variations, conflicting directives)</span>' +
+          '</div>' +
+          '<label class="toggle-sw">' +
+          '<input type="checkbox" ' + (cfg.hsts_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'hsts_chaos_enabled\', this.checked ? 1 : 0)">' +
           '<div class="toggle-track"></div>' +
           '<div class="toggle-knob"></div>' +
           '</label></div>';
