@@ -13,6 +13,13 @@ import (
 // timeNow is a package-level function for testability.
 var timeNow = time.Now
 
+// sseClient represents a connected SSE listener.
+type sseClient struct {
+	sessionID string
+	events    chan []byte // serialized SSE events
+	done      chan struct{}
+}
+
 // Server implements a fake MCP (Model Context Protocol) server.
 // It exposes honeypot tools, poisoned resources, and trap prompts
 // for testing MCP client security behavior.
@@ -24,6 +31,10 @@ type Server struct {
 
 	mu       sync.RWMutex
 	eventLog []EventRecord // recent events for dashboard
+
+	sseMu   sync.Mutex
+	sseClients map[string][]*sseClient // sessionID -> clients
+	lastEventID uint64
 }
 
 // EventRecord captures an MCP interaction for monitoring.
@@ -39,10 +50,11 @@ type EventRecord struct {
 // NewServer creates a new MCP honeypot server.
 func NewServer() *Server {
 	return &Server{
-		tools:     NewToolRegistry(),
-		resources: NewResourceRegistry(),
-		prompts:   NewPromptRegistry(),
-		sessions:  NewSessionStore(),
+		tools:      NewToolRegistry(),
+		resources:  NewResourceRegistry(),
+		prompts:    NewPromptRegistry(),
+		sessions:   NewSessionStore(),
+		sseClients: make(map[string][]*sseClient),
 	}
 }
 
@@ -126,13 +138,48 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) int {
 	w.Header().Set("Mcp-Session-Id", sid)
 	w.WriteHeader(http.StatusOK)
 
+	// Register this SSE client
+	client := &sseClient{
+		sessionID: sid,
+		events:    make(chan []byte, 64),
+		done:      make(chan struct{}),
+	}
+	s.addSSEClient(sid, client)
+	defer s.removeSSEClient(sid, client)
+
 	// Send an initial keepalive event
-	fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\n")
+	s.sseMu.Lock()
+	eid := s.lastEventID
+	s.sseMu.Unlock()
+	fmt.Fprintf(w, "id: %d\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\n", eid)
 	flusher.Flush()
 
-	// Hold the connection open until client disconnects
-	<-r.Context().Done()
-	return http.StatusOK
+	// Handle Last-Event-ID for reconnection
+	if lastID := r.Header.Get("Last-Event-ID"); lastID != "" {
+		// Client is reconnecting — send a fresh initialized notification
+		fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/reconnected\"}\n\n")
+		flusher.Flush()
+	}
+
+	// Heartbeat ticker
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	// Stream events until client disconnects
+	for {
+		select {
+		case <-r.Context().Done():
+			return http.StatusOK
+		case <-client.done:
+			return http.StatusOK
+		case data := <-client.events:
+			w.Write(data)
+			flusher.Flush()
+		case <-heartbeat.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+		}
+	}
 }
 
 // handleDelete closes an MCP session.
@@ -255,6 +302,7 @@ func (s *Server) handleToolsCall(req *Request, httpReq *http.Request) *Response 
 	// Record the tool call
 	sid := httpReq.Header.Get("Mcp-Session-Id")
 	s.sessions.RecordToolCall(sid, params.Name)
+	s.sessions.RecordFingerprint(sid, func(fp *Fingerprint) { fp.RecordToolCall(params.Name) })
 	s.recordEvent(EventRecord{
 		SessionID: sid,
 		Method:    "tools/call",
@@ -296,6 +344,7 @@ func (s *Server) handleResourcesRead(req *Request, httpReq *http.Request) *Respo
 	}
 
 	sid := httpReq.Header.Get("Mcp-Session-Id")
+	s.sessions.RecordFingerprint(sid, func(fp *Fingerprint) { fp.RecordResourceRead(params.URI) })
 	s.recordEvent(EventRecord{
 		SessionID: sid,
 		Method:    "resources/read",
@@ -365,6 +414,83 @@ func (s *Server) writeJSON(w http.ResponseWriter, resp *Response, statusCode int
 	return statusCode
 }
 
+// addSSEClient registers a new SSE client for a session.
+func (s *Server) addSSEClient(sid string, c *sseClient) {
+	s.sseMu.Lock()
+	defer s.sseMu.Unlock()
+	s.sseClients[sid] = append(s.sseClients[sid], c)
+}
+
+// removeSSEClient unregisters an SSE client.
+func (s *Server) removeSSEClient(sid string, c *sseClient) {
+	s.sseMu.Lock()
+	defer s.sseMu.Unlock()
+	clients := s.sseClients[sid]
+	for i, cl := range clients {
+		if cl == c {
+			s.sseClients[sid] = append(clients[:i], clients[i+1:]...)
+			break
+		}
+	}
+	if len(s.sseClients[sid]) == 0 {
+		delete(s.sseClients, sid)
+	}
+}
+
+// broadcastSSE sends a JSON-RPC notification to all SSE clients for a session.
+// If sid is empty, broadcasts to all sessions.
+func (s *Server) broadcastSSE(sid string, method string, params interface{}) {
+	msg := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  method,
+	}
+	if params != nil {
+		msg["params"] = params
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	s.sseMu.Lock()
+	s.lastEventID++
+	eid := s.lastEventID
+	s.sseMu.Unlock()
+
+	sseData := []byte(fmt.Sprintf("id: %d\nevent: message\ndata: %s\n\n", eid, data))
+
+	s.sseMu.Lock()
+	defer s.sseMu.Unlock()
+
+	if sid != "" {
+		for _, c := range s.sseClients[sid] {
+			select {
+			case c.events <- sseData:
+			default: // drop if buffer full
+			}
+		}
+	} else {
+		for _, clients := range s.sseClients {
+			for _, c := range clients {
+				select {
+				case c.events <- sseData:
+				default:
+				}
+			}
+		}
+	}
+}
+
+// BroadcastToolsChanged sends a tools/listChanged notification to all SSE clients.
+func (s *Server) BroadcastToolsChanged() {
+	s.broadcastSSE("", "notifications/tools/listChanged", nil)
+}
+
+// BroadcastResourcesChanged sends a resources/listChanged notification to all SSE clients.
+func (s *Server) BroadcastResourcesChanged() {
+	s.broadcastSSE("", "notifications/resources/listChanged", nil)
+}
+
 // recordEvent appends an event to the log (capped at 1000).
 func (s *Server) recordEvent(ev EventRecord) {
 	ev.Timestamp = timeNow().Unix()
@@ -388,6 +514,16 @@ func (s *Server) Events() []EventRecord {
 // Sessions returns all active sessions.
 func (s *Server) Sessions() []*Session {
 	return s.sessions.All()
+}
+
+// SessionsAny returns all active sessions as interface{} for dashboard provider.
+func (s *Server) SessionsAny() interface{} {
+	return s.sessions.All()
+}
+
+// EventsAny returns recent events as interface{} for dashboard provider.
+func (s *Server) EventsAny() interface{} {
+	return s.Events()
 }
 
 // Stats returns summary statistics.
