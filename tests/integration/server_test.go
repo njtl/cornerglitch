@@ -28,6 +28,7 @@ import (
 	"github.com/glitchWebServer/internal/i18n"
 	"github.com/glitchWebServer/internal/jstrap"
 	"github.com/glitchWebServer/internal/labyrinth"
+	"github.com/glitchWebServer/internal/mcp"
 	"github.com/glitchWebServer/internal/metrics"
 	"github.com/glitchWebServer/internal/oauth"
 	"github.com/glitchWebServer/internal/pages"
@@ -900,5 +901,229 @@ func TestMediaChaos_HandlerDisabledDoesNotServeMedia(t *testing.T) {
 	gotCT := rr.Header().Get("Content-Type")
 	if strings.HasPrefix(gotCT, "image/png") {
 		t.Error("media content served when media_chaos is disabled")
+	}
+}
+
+// --- MCP Integration Tests ---
+
+// newTestHandlerWithMCP creates a handler with MCP server enabled.
+func newTestHandlerWithMCP() (*server.Handler, *mcp.Server) {
+	collector := metrics.NewCollector()
+	fp := fingerprint.NewEngine()
+	adapt := adaptive.NewEngine(collector, fp)
+	errGen := errors.NewGenerator()
+	pageGen := pages.NewGenerator()
+	lab := labyrinth.NewLabyrinth()
+	contentEng := content.NewEngine()
+	apiRouter := api.NewRouter()
+	honey := honeypot.NewHoneypot()
+	fw := framework.NewEmulator()
+	captchaEng := captcha.NewEngine()
+	vulnH := vuln.NewHandler()
+	analytix := analytics.NewEngine()
+	cdnEng := cdn.NewEngine()
+	oauthH := oauth.NewHandler()
+	privacyH := privacy.NewHandler()
+	wsH := websocket.NewHandler()
+	rec := recorder.NewRecorder("/tmp/glitch-test-captures")
+	searchH := search.NewHandler()
+	emailH := email.NewHandler()
+	healthH := health.NewHandler(time.Now())
+	i18nH := i18n.NewHandler()
+	headerEng := headers.NewEngine()
+	cookieT := cookies.NewTracker()
+	jsEng := jstrap.NewEngine()
+	botDet := botdetect.NewDetector()
+	spiderH := spider.NewHandler(nil)
+	mcpServer := mcp.NewServer()
+
+	h := server.NewHandler(
+		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
+		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
+		wsH, rec, searchH, emailH, healthH, i18nH,
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(), mcpServer,
+	)
+	return h, mcpServer
+}
+
+func TestIntegration_MCP_FullHandshake(t *testing.T) {
+	h, _ := newTestHandlerWithMCP()
+	dashboard.GetFeatureFlags().Set("mcp", true)
+
+	// Step 1: Initialize
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"integration-test","version":"1.0"}}}`
+	rr := doRequest(h, "POST", "/mcp", initBody, nil)
+	if rr.Code != 200 {
+		t.Fatalf("initialize: status = %d, want 200", rr.Code)
+	}
+
+	var initResp map[string]interface{}
+	json.Unmarshal(rr.Body.Bytes(), &initResp)
+	result, ok := initResp["result"].(map[string]interface{})
+	if !ok {
+		t.Fatal("initialize: no result in response")
+	}
+	serverInfo, ok := result["serverInfo"].(map[string]interface{})
+	if !ok {
+		t.Fatal("initialize: no serverInfo in result")
+	}
+	if serverInfo["name"] != "glitch-mcp" {
+		t.Errorf("server name = %v, want glitch-mcp", serverInfo["name"])
+	}
+
+	sid := rr.Header().Get("Mcp-Session-Id")
+	if sid == "" {
+		t.Fatal("initialize: no Mcp-Session-Id in response")
+	}
+
+	// Step 2: List tools
+	toolsBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	rr2 := doRequest(h, "POST", "/mcp", toolsBody, map[string]string{"Mcp-Session-Id": sid})
+	if rr2.Code != 200 {
+		t.Fatalf("tools/list: status = %d", rr2.Code)
+	}
+	var toolsResp map[string]interface{}
+	json.Unmarshal(rr2.Body.Bytes(), &toolsResp)
+	toolsResult := toolsResp["result"].(map[string]interface{})
+	tools := toolsResult["tools"].([]interface{})
+	if len(tools) == 0 {
+		t.Error("tools/list: no tools returned")
+	}
+
+	// Step 3: Call a honeypot tool
+	callBody := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_aws_credentials","arguments":{}}}`
+	rr3 := doRequest(h, "POST", "/mcp", callBody, map[string]string{"Mcp-Session-Id": sid})
+	if rr3.Code != 200 {
+		t.Fatalf("tools/call: status = %d", rr3.Code)
+	}
+	var callResp map[string]interface{}
+	json.Unmarshal(rr3.Body.Bytes(), &callResp)
+	if callResp["error"] != nil {
+		t.Errorf("tools/call: unexpected error: %v", callResp["error"])
+	}
+
+	// Step 4: Delete session
+	rr4 := doRequest(h, "DELETE", "/mcp", "", map[string]string{"Mcp-Session-Id": sid})
+	if rr4.Code != 200 {
+		t.Errorf("DELETE: status = %d", rr4.Code)
+	}
+}
+
+func TestIntegration_MCP_FeatureFlagDisables(t *testing.T) {
+	h, _ := newTestHandlerWithMCP()
+
+	// Enable MCP first
+	dashboard.GetFeatureFlags().Set("mcp", true)
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test"}}}`
+	rr := doRequest(h, "POST", "/mcp", initBody, nil)
+	if rr.Code != 200 {
+		t.Fatalf("MCP enabled: status = %d, want 200", rr.Code)
+	}
+
+	// Disable MCP
+	dashboard.GetFeatureFlags().Set("mcp", false)
+	rr2 := doRequest(h, "POST", "/mcp", initBody, nil)
+	// When disabled, /mcp should fall through to normal handler (not MCP)
+	// The response should NOT be a valid MCP JSON-RPC response
+	var resp map[string]interface{}
+	json.Unmarshal(rr2.Body.Bytes(), &resp)
+	if _, hasResult := resp["result"]; hasResult {
+		if result, ok := resp["result"].(map[string]interface{}); ok {
+			if _, hasServer := result["serverInfo"]; hasServer {
+				t.Error("MCP should not serve when feature flag is disabled")
+			}
+		}
+	}
+
+	// Re-enable for other tests
+	dashboard.GetFeatureFlags().Set("mcp", true)
+}
+
+func TestIntegration_MCP_DoesNotInterfere(t *testing.T) {
+	h, _ := newTestHandlerWithMCP()
+	dashboard.GetFeatureFlags().Set("mcp", true)
+
+	// Health endpoint should still work
+	rr := doRequest(h, "GET", "/health", "", nil)
+	if rr.Code != 200 {
+		t.Errorf("health: status = %d, want 200", rr.Code)
+	}
+
+	// API endpoint should still work
+	rr2 := doRequest(h, "GET", "/api/v1/users", "", nil)
+	if rr2.Code == 0 {
+		t.Error("API endpoint returned 0 status")
+	}
+
+	// Vuln endpoint should still work
+	rr3 := doRequest(h, "GET", "/vuln/a01/login", "", nil)
+	if rr3.Code == 0 {
+		t.Error("vuln endpoint returned 0 status")
+	}
+}
+
+func TestIntegration_MCP_ScannerSelfTest(t *testing.T) {
+	h, _ := newTestHandlerWithMCP()
+	dashboard.GetFeatureFlags().Set("mcp", true)
+
+	// Start a test server with the full handler
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	// Use MCP scanner to scan the test server's MCP endpoint
+	scanner := mcp.NewScanner()
+	report := scanner.Scan(ts.URL + "/mcp")
+
+	if report.Error != "" {
+		t.Fatalf("scan error: %s", report.Error)
+	}
+	if report.ServerName != "glitch-mcp" {
+		t.Errorf("server name = %q, want %q", report.ServerName, "glitch-mcp")
+	}
+	if report.ToolCount == 0 {
+		t.Error("scanner should find tools")
+	}
+	if report.ResourceCount == 0 {
+		t.Error("scanner should find resources")
+	}
+	if report.PromptCount == 0 {
+		t.Error("scanner should find prompts")
+	}
+	if len(report.Findings) == 0 {
+		t.Error("scanner should find security issues in honeypot")
+	}
+	if report.RiskScore == 0 {
+		t.Error("risk score should be non-zero for honeypot server")
+	}
+
+	// Check specific finding categories
+	categories := make(map[string]bool)
+	for _, f := range report.Findings {
+		categories[f.Category] = true
+	}
+	if !categories["injection"] {
+		t.Error("scanner should detect injection patterns")
+	}
+	if !categories["credential"] {
+		t.Error("scanner should detect credential harvesting")
+	}
+}
+
+func TestIntegration_MCP_ToggleInFeatureFlags(t *testing.T) {
+	// Verify MCP is in the feature flags
+	flags := dashboard.GetFeatureFlags()
+	snap := flags.Snapshot()
+	if _, exists := snap["mcp"]; !exists {
+		t.Error("mcp not found in feature flags snapshot")
+	}
+
+	// Toggle and verify
+	flags.Set("mcp", false)
+	if flags.IsMCPEnabled() {
+		t.Error("MCP should be disabled after Set(mcp, false)")
+	}
+	flags.Set("mcp", true)
+	if !flags.IsMCPEnabled() {
+		t.Error("MCP should be enabled after Set(mcp, true)")
 	}
 }
