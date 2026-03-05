@@ -85,6 +85,13 @@ func loadEnvFile(path string) {
 	}
 }
 
+// mcpScannerAdapter adapts the MCP scanner to the dashboard's MCPScannerProvider interface.
+type mcpScannerAdapter struct{}
+
+func (mcpScannerAdapter) Scan(target string) dashboard.MCPScanResult {
+	return mcpkg.NewScanner().Scan(target)
+}
+
 func main() {
 	// Auto-load .env file (won't override existing env vars).
 	loadEnvFile(".env")
@@ -221,6 +228,9 @@ func main() {
 		},
 	})
 	dashboard.SetAdminMCPHandler(adminMCP)
+	dashboard.SetMCPScanner(mcpScannerAdapter{})
+
+
 
 	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng, mediaGen, mediaChaosEng, budgetTrapEng, mcpServer)
 

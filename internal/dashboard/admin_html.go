@@ -1207,6 +1207,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <button class="scanner-subtab-btn active" onclick="switchScannerSubtab('eval')">Evaluate External</button>
     <button class="scanner-subtab-btn" onclick="switchScannerSubtab('builtin')">Built-in Scanner</button>
     <button class="scanner-subtab-btn" onclick="switchScannerSubtab('replay')">PCAP Replay</button>
+    <button class="scanner-subtab-btn" onclick="switchScannerSubtab('mcpscan')">MCP Scanner</button>
   </div>
 
   <!-- ====== Sub-tab A: Evaluate External Scanners ====== -->
@@ -1574,6 +1575,24 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
 
   </div>
+
+  <!-- ====== Sub-tab D: MCP Scanner ====== -->
+  <div id="scanner-mcpscan-panel" style="display:none">
+    <div class="section">
+      <h2>// MCP Security Scanner</h2>
+      <p style="color:#666;font-size:0.8em;margin-bottom:12px">Scan external MCP servers for security issues: injection patterns, credential harvesting, rug pulls, suspicious resources.</p>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <input type="text" id="mcp-scan-target" placeholder="MCP server URL (e.g. http://localhost:8765/mcp)" style="flex:1;background:#111;border:1px solid #333;color:#fff;padding:8px 12px;border-radius:6px;font-family:inherit;font-size:0.85em">
+        <button class="cfg-btn" onclick="runMCPScan()" id="mcp-scan-btn" style="padding:8px 20px">Scan</button>
+      </div>
+      <div id="mcp-scan-status" style="color:#888;font-size:0.8em;margin-bottom:12px;display:none"></div>
+      <div id="mcp-scan-results" style="display:none">
+        <div class="grid" id="mcp-scan-summary" style="margin-bottom:14px"></div>
+        <div id="mcp-scan-findings"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ==================== PROXY TAB ==================== -->
@@ -4143,12 +4162,71 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     document.getElementById('scanner-builtin-panel').style.display = tab === 'builtin' ? '' : 'none';
     var replayPanel = document.getElementById('scanner-replay-panel');
     if (replayPanel) replayPanel.style.display = tab === 'replay' ? '' : 'none';
+    var mcpPanel = document.getElementById('scanner-mcpscan-panel');
+    if (mcpPanel) mcpPanel.style.display = tab === 'mcpscan' ? '' : 'none';
     document.querySelectorAll('.scanner-subtab-btn').forEach(function(b) { b.classList.remove('active'); });
     if (event && event.target) event.target.classList.add('active');
     else document.querySelectorAll('.scanner-subtab-btn').forEach(function(b) { if (b.textContent.toLowerCase().indexOf(tab) >= 0) b.classList.add('active'); });
     if (tab === 'eval') refreshScannerTab();
     else if (tab === 'builtin') refreshBuiltinScanner();
     else if (tab === 'replay') refreshReplay();
+  };
+
+  // ------ MCP Scanner ------
+  window.runMCPScan = async function() {
+    var target = document.getElementById('mcp-scan-target').value.trim();
+    if (!target) { toast('Enter a target URL'); return; }
+    var btn = document.getElementById('mcp-scan-btn');
+    var status = document.getElementById('mcp-scan-status');
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    status.style.display = '';
+    status.textContent = 'Scanning ' + target + '...';
+    status.style.color = '#ffaa00';
+    try {
+      var result = await api('/admin/api/mcp/scan', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({target: target})
+      });
+      var resultsEl = document.getElementById('mcp-scan-results');
+      resultsEl.style.display = '';
+      var summary = document.getElementById('mcp-scan-summary');
+      var riskColor = result.risk_score >= 70 ? '#ff4444' : (result.risk_score >= 40 ? '#ffaa00' : '#00ff88');
+      summary.innerHTML =
+        '<div class="card"><div class="label">Risk Score</div><div class="value" style="color:' + riskColor + '">' + (result.risk_score||0) + '/100</div></div>' +
+        '<div class="card"><div class="label">Server</div><div class="value v-info" style="font-size:0.85em">' + esc(result.server_name||'unknown') + '</div></div>' +
+        '<div class="card"><div class="label">Tools</div><div class="value">' + (result.tool_count||0) + '</div></div>' +
+        '<div class="card"><div class="label">Resources</div><div class="value">' + (result.resource_count||0) + '</div></div>' +
+        '<div class="card"><div class="label">Prompts</div><div class="value">' + (result.prompt_count||0) + '</div></div>' +
+        '<div class="card"><div class="label">Rug Pull</div><div class="value" style="color:' + (result.rug_pull ? '#ff4444' : '#00ff88') + '">' + (result.rug_pull ? 'DETECTED' : 'None') + '</div></div>';
+
+      var findings = result.findings || [];
+      var findingsEl = document.getElementById('mcp-scan-findings');
+      if (findings.length === 0) {
+        findingsEl.innerHTML = '<p style="color:#00ff88;font-size:0.85em">No security issues found.</p>';
+      } else {
+        var sevColors = {critical:'#ff4444',high:'#ff6600',medium:'#ffaa00',low:'#888',info:'#00ccff'};
+        findingsEl.innerHTML = '<table style="width:100%%;font-size:0.78em;border-collapse:collapse">' +
+          '<thead><tr style="color:#888;border-bottom:1px solid #333"><th style="padding:4px;text-align:left">Severity</th><th style="padding:4px;text-align:left">Category</th><th style="padding:4px;text-align:left">Title</th><th style="padding:4px;text-align:left">Target</th></tr></thead><tbody>' +
+          findings.map(function(f) {
+            var target = f.tool || f.resource || f.prompt || '';
+            return '<tr style="border-bottom:1px solid #222">' +
+              '<td style="padding:3px 4px;color:' + (sevColors[f.severity]||'#888') + ';font-weight:bold">' + esc(f.severity||'') + '</td>' +
+              '<td style="padding:3px 4px;color:#ccc">' + esc(f.category||'') + '</td>' +
+              '<td style="padding:3px 4px;color:#fff">' + esc(f.title||'') + '</td>' +
+              '<td style="padding:3px 4px;color:#00ccaa;font-size:0.9em">' + esc(target) + '</td></tr>';
+          }).join('') + '</tbody></table>';
+      }
+      status.textContent = 'Scan completed in ' + (result.duration_ms||0) + 'ms — ' + findings.length + ' findings';
+      status.style.color = '#00ff88';
+    } catch(e) {
+      status.textContent = 'Scan failed: ' + e.message;
+      status.style.color = '#ff4444';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Scan';
+    }
   };
 
   window.selectBuiltinProfile = function(el, profile) {

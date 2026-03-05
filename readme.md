@@ -127,7 +127,7 @@ make db-psql                                # connect to PostgreSQL with psql
 - Bot detection with multi-signal scoring, JS traps, cookie traps, and CAPTCHA challenges
 - Honeypot system with hundreds of known scanner paths and realistic lure responses
 - Budget-draining traps -- graduated tarpits, fake vulnerability breadcrumbs, infinite pagination, progressive content expansion, streaming bait, and WebSocket honeypots that escalate based on per-client request volume
-- MCP (Model Context Protocol) honeypot server -- fake tools (credential harvesters, data harvesters, budget drains), poisoned resources (fake .env, SSH keys, DB dumps, K8s secrets), and trap prompts with injection attacks, rug pulls, and cross-server exfiltration lures
+- MCP (Model Context Protocol) honeypot server -- fake tools (credential harvesters, data harvesters, budget drains), poisoned resources (fake .env, SSH keys, DB dumps, K8s secrets), and trap prompts with injection attacks, rug pulls, and cross-server exfiltration lures. Agent fingerprinting classifies MCP clients (Claude, GPT, Cursor, Windsurf) by behavioral signals. SSE transport with event notifications and heartbeat keepalive. Authenticated admin MCP endpoint at `/admin/mcp` for server management via AI agents (toggle features, get metrics, nightmare control). Dashboard integration with stats cards, event log, and per-tool breakdown
 - Multiple content formats, visual themes, and framework emulation (Rails, Django, Express, Spring, Laravel, and more)
 - REST API emulation (users, products, CMS, forms, infrastructure), GraphQL, Swagger/OpenAPI
 - OAuth2/SSO flows, CDN emulation, search engine, email/webmail simulation, i18n, health/actuator endpoints, WebSocket streams, analytics tracking, privacy/consent
@@ -147,6 +147,7 @@ make db-psql                                # connect to PostgreSQL with psql
 - Configurable profiles: compliance, aggressive, stealth, nightmare
 - Scanner evaluation: compare results against expected vulnerability surface, classify false negatives (crawled vs not-crawled), multi-scanner comparison with accuracy scoring
 - Supported external scanners: nuclei, httpx, ffuf, nikto, nmap, wapiti -- launched and parsed automatically from the admin panel
+- MCP scanner -- connects to external MCP servers and tests for security issues: injection patterns in tool descriptions, credential harvesting, path traversal in resources, rug pull detection (tool description changes), canary payload exfiltration testing. Risk scoring and structured JSON reports via dashboard
 
 ### Glitch Proxy (middleware emulator)
 
@@ -154,6 +155,7 @@ make db-psql                                # connect to PostgreSQL with psql
 - Chaos injection: latency spikes, body corruption, connection resets, header rewriting
 - WAF mode with signature-based blocking and rate limiting
 - PCAP replay: load recorded traffic and replay through the proxy pipeline
+- MCP traffic interception -- detects MCP JSON-RPC traffic in transit, injects honeypot tools, poisons resource content, modifies tool results, tracks sessions
 - Configurable modes: transparent, WAF, chaos, gateway, nightmare, mirror (copies server settings)
 
 ---
@@ -163,6 +165,22 @@ make db-psql                                # connect to PostgreSQL with psql
 Run all three components at maximum adversarial settings simultaneously. The scanner floods with malformed requests and attack payloads. The proxy corrupts traffic in both directions. The server responds with broken HTTP, TCP resets, and infinite response bodies. A service passes nightmare testing if it does not crash, does not corrupt state, recovers to normal operation afterward, and maintains health check responses throughout. This is sustained, multi-vector adversarial testing -- not a single probe, but an ongoing assault from every direction at once.
 
 Nightmare mode is per-subsystem -- you can activate it independently for server, scanner, and proxy from the admin panel. Server nightmare snapshots all current config and applies extreme values, restoring on deactivate.
+
+---
+
+## MCP (Model Context Protocol) Security Testing
+
+Glitch includes a full MCP subsystem for testing AI agent security. The MCP honeypot server at `/mcp` implements Streamable HTTP transport (JSON-RPC 2.0 over POST, SSE via GET, session management via DELETE) and exposes fake tools, poisoned resources, and trap prompts designed to detect unsafe agent behaviors.
+
+**Honeypot categories**: credential harvesters (fake AWS/GCP/Azure keys), data harvesters (system info, file listing), budget drains (large model calls), poisoned resources (fake `.env`, SSH keys, database dumps, Kubernetes secrets), and trap prompts (injection via `<IMPORTANT>` blocks, rug pulls, cross-server exfiltration lures).
+
+**Agent fingerprinting**: MCP clients are classified by their `clientInfo` handshake (Claude, GPT, Cursor, Windsurf, custom, unknown) and monitored for behavioral signals -- credential access patterns, tool call sequences, resource read patterns, and injection susceptibility. Each session gets a risk score (0-100).
+
+**MCP scanner**: An outbound scanner that connects to external MCP servers and tests their security posture -- analyzes tool descriptions for injection patterns, detects credential harvesting, checks for path traversal in resource URIs, performs rug pull detection (hashes tool descriptions and detects changes), and tests canary payloads for data exfiltration. Available from the Scanner tab in the dashboard.
+
+**Admin MCP tools**: An authenticated MCP endpoint at `/admin/mcp` exposes server management tools (toggle features, get metrics, set error profiles, nightmare control, MCP stats, session listing) for authorized AI agents.
+
+**Proxy MCP interception**: The proxy detects MCP traffic in transit and can inject additional tools, poison resource content, modify tool results, and track sessions -- testing how agents handle man-in-the-middle scenarios.
 
 ---
 
