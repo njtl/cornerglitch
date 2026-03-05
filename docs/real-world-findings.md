@@ -205,25 +205,25 @@ Throughout all tests: **zero crashes, zero panics, zero memory leaks**. Memory: 
 Extended testing with 16 tools, longer timeouts, and new tools. **Sprint goal: crash the scanners reproducibly.**
 
 ### CT-11: ZAP OOM Crash (ZAP v2.17.0)
-With 512MB memory limit: internal proxy **crashed** during full active scan. 6 passive scan rules auto-disabled (10+ alerts each from framework emulation). HTTPConnectionPool error: proxy port died. With unlimited memory: grew to **1.4 GB** in 21 minutes, "unhealthy" status, zero output files. Root cause: labyrinth generates infinite URLs for spider, each page triggers alert floods from header corruption and cookie traps.
+With 512MB memory limit: internal proxy **crashed** during full active scan. 6 passive scan rules auto-disabled (10+ alerts each from framework emulation). HTTPConnectionPool error: proxy port died. With unlimited memory: grew to **1.4 GB** in 21 minutes, "unhealthy" status, zero output files. **Root cause (validated)**: Full nightmare feature set combined — labyrinth generates infinite URLs, each page has API endpoints, honeypot paths, media URLs, and vuln pages with form data. Every discovered URL stored in JVM heap. At 512MB limit: reached 502MB/512MB (98.13%) within ~60 seconds, container status "unhealthy". At 128MB limit: OOMKilled=true. Labyrinth alone only reaches 27MB stable — needs the full feature set to exhaust memory.
 
 ### CT-12: Feroxbuster Complete Denial (feroxbuster v2.13.1)
-**5 out of 5 connection attempts failed.** "Could not connect to any target provided." Feroxbuster's canary request consistently killed by chaos-level header corruption (null byte in header) or delays. Scanner cannot even start. No retry mechanism for initial connection check.
+**5 out of 5 connection attempts failed.** "Could not connect to any target provided." **Root cause (validated)**: `header_corrupt=true` (level 4) alone is sufficient. Feroxbuster sends a canary request to verify connectivity. The hijacked response with null bytes (`corruption.go:328`), mixed HTTP versions, and 1xx informational responses causes Rust's `hyper` HTTP parser to reject the response. Feroxbuster treats canary failure as "target unreachable" and aborts. `error_inject` alone does NOT kill feroxbuster.
 
 ### CT-13: Commix Infinite Hang (commix v4.2.dev10)
-Stuck at "Testing connection to the target URL" for **12+ minutes**. 0% CPU — not processing, just waiting. Initial chaos response (100 Continue + 102 Processing + null byte header chain) causes Python HTTP client to enter infinite wait. Had to be killed manually.
+Stuck at "Testing connection to the target URL" for **12+ minutes**. 0% CPU — not processing, just waiting. **Root cause (validated)**: `header_corrupt=true` (level 4) alone is sufficient. The hijacked response with null bytes (`corruption.go:328`) causes Python's urllib HTTP parser to enter a state it never exits (no timeout on response parsing). `error_inject` alone does NOT cause the hang — commix works fine and even finds a "vulnerability" (file-based command injection via path-based content generation).
 
 ### CT-14: Arjun Silent Hang (arjun v2.2.7)
-**Zero output** after 5 minutes. No errors, no findings, no progress. Silent hang. Random status codes and varying response bodies prevent Arjun from establishing any baseline for parameter comparison. Tool gives no indication of failure.
+**Zero output** after 5 minutes. No errors, no findings, no progress. Silent hang. **Root cause (validated, revised)**: Glitch's **deterministic content generation** from path seeds — NO features needed. Arjun's parameter detection compares responses with/without test parameters to detect reflection. Glitch generates identical pages regardless of URL parameters (content seeded from path via SHA-256). Arjun cannot establish a baseline. With `--stable` mode, enters infinite retry loop. It IS making requests (~996 in 15s) but never produces output. Nightmare delays compound this by making each comparison request take 500-10000ms instead of <10ms.
 
 ### CT-15: Gobuster Transport Error (gobuster v3.8.2)
 Go's `net/http` MIME parser breaks on `X-Chaos: before\x00after` — null byte in header value (`internal/headers/corruption.go:328`). Error: "malformed MIME header line." With `--force`: only 3 paths found. Without: immediate abort on wildcard detection timeout.
 
 ### CT-16: WhatWeb Plugin Crashes (whatweb v0.5.5, aggression 4)
-17 plugin errors: 9x Ruby `NilClass` exceptions (decompressing nil body when Content-Encoding says gzip but body isn't), 6x "incorrect header check" (gzip decode failures), 1x EOF (connection reset). Multiple plugins crash per scan.
+**Root cause (validated)**: `header_corrupt=true` (level 4) alone is sufficient. At aggression 4, actual error count is **151 plugin errors** (not 17 as initially reported): 95x `force_encoding for nil:NilClass` (null bytes cause Ruby's HTTP parser to return nil, plugins call `.force_encoding` on nil), 44x `incorrect header check` (corrupted Content-Encoding headers cause Zlib decompression failures), 11x `no implicit conversion of nil into String` (nil body passed to String operations). `framework_emul` alone causes 0 errors; `error_inject` alone causes WhatWeb to hang but no plugin errors.
 
 ### CT-17: Nmap Complete HTTP Script Stall (nmap v7.94SVN)
-**Zero output** in 5 minutes with 9 HTTP scripts. Not even port state reported. Delays (500-10000ms per probe) combined with retries mean script execution time exceeds any timeout. All scripts stalled simultaneously.
+**Zero output** in 5 minutes with 9 HTTP scripts. Not even port state reported. **Root cause (validated)**: `header_corrupt=true` combined with `-sV` (service version detection). Nmap's service detection sends probes expecting parseable HTTP headers/banners. The hijacked connection with null bytes and mixed HTTP versions causes nmap's service detection engine to hang indefinitely. Key detail: without `-sV`, nmap NSE scripts complete in <2 seconds even with `header_corrupt` on — the stall is specifically in service version detection, not script execution.
 
 ### CT-18: Extended nuclei (nuclei v3.7.0, 10 min)
 10 minutes, 0 findings. Template matching completely defeated. No crashes, no memory issues — just total ineffectiveness.
@@ -289,3 +289,28 @@ WhatWeb survived (non-fatal plugin errors) but produced corrupted results.
 3. **Gzip bomb causes memory spikes** — 10KB payload expands to 10MB. Multiple bombs in a scan session cause cumulative memory growth that can trigger OOM in memory-constrained environments (Docker, CI).
 4. **Chunk overflow crashes transport layers** — the `FFFFFFFFFFFFFFFF` chunk size is rejected by HTTP parsers, causing IncompleteRead (Python), transport errors (Go), and EOF (Ruby).
 5. **Scanners that don't parse response bodies (Nikto) are immune** — but they miss all content-based vulnerabilities, making them ineffective as security scanners.
+
+---
+
+## QA-Validated Root Cause Analysis (2026-03-05)
+
+All scanner crash findings were independently validated with feature isolation testing. Each finding was reproduced with minimal feature configurations to identify the true root cause.
+
+### The Nuclear Weapon: `header_corrupt` (corruption.go:328)
+
+A single null byte in `X-Chaos: before\x00after`, written via HTTP hijacking to bypass Go's built-in header validation, crashes or hangs **5 out of 7** scanners tested:
+
+| Scanner | Language | Effect | Mechanism |
+|---------|----------|--------|-----------|
+| Gobuster | Go | Transport error on every request | `net/http` stdlib rejects null bytes in MIME headers |
+| Feroxbuster | Rust | 100% connection failure, scan aborts | `hyper` HTTP parser rejects corrupted response |
+| Commix | Python | Infinite hang at connection test, 0% CPU | `urllib` parser enters unrecoverable state |
+| WhatWeb | Ruby | 151 plugin errors (aggression 4) | nil reference from corrupted headers/body |
+| Nmap | C | Infinite stall with `-sV` flag | Service detection can't parse response |
+
+### Other Root Causes
+
+| Scanner | Root Cause | Minimal Config |
+|---------|-----------|----------------|
+| Arjun | Deterministic content generation (SHA-256 path seeding) | **No features needed** — hangs with all features OFF |
+| ZAP | Full nightmare feature set overwhelming JVM heap | All features combined (labyrinth alone = 27MB stable) |
