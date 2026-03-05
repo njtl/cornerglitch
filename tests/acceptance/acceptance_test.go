@@ -18,6 +18,12 @@ const (
 	adminURL  = "http://localhost:8766"
 )
 
+func init() {
+	// Set a global HTTP client timeout so slow error types (slow_drip, slow_headers)
+	// don't cause acceptance tests to hang indefinitely on CI.
+	http.DefaultClient.Timeout = 30 * time.Second
+}
+
 // adminPassword is the password for the admin panel. Defaults to "admin".
 var adminPassword = func() string {
 	if p := os.Getenv("GLITCH_ADMIN_PASSWORD"); p != "" {
