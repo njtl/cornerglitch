@@ -5,6 +5,8 @@ package selftest
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,9 +33,10 @@ type Pipeline struct {
 	ReportFile string
 	Verbose    bool
 
-	serverPort int
-	proxyPort  int
-	dashPort   int
+	serverPort   int
+	proxyPort    int
+	dashPort     int
+	healthSecret string // UUID for real internal health check
 
 	serverCmd *exec.Cmd
 	proxyCmd  *exec.Cmd
@@ -124,9 +127,10 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineReport, error) {
 		return nil, fmt.Errorf("starting server: %w", err)
 	}
 
-	// Step 4: Wait for server health.
+	// Step 4: Wait for server health via internal secret endpoint.
 	serverURL := fmt.Sprintf("http://localhost:%d", p.serverPort)
-	if err := p.waitForHealth(ctx, serverURL+"/health/live", 15*time.Second); err != nil {
+	healthURL := fmt.Sprintf("%s/_internal/%s/healthz", serverURL, p.healthSecret)
+	if err := p.waitForHealth(ctx, healthURL, 15*time.Second); err != nil {
 		return nil, fmt.Errorf("server health check: %w", err)
 	}
 	p.logger.Printf("server is healthy at %s", serverURL)
@@ -252,8 +256,14 @@ func (p *Pipeline) startServer(ctx context.Context) error {
 		fmt.Sprintf("-dash-port=%d", p.dashPort),
 	}
 
+	// Generate a health secret for the internal health endpoint.
+	b := make([]byte, 16)
+	rand.Read(b)
+	p.healthSecret = hex.EncodeToString(b)
+
 	p.serverCmd = exec.CommandContext(ctx, binPath, args...)
 	p.serverCmd.Dir = p.projectRoot()
+	p.serverCmd.Env = append(os.Environ(), "GLITCH_HEALTH_SECRET="+p.healthSecret)
 
 	if p.Verbose {
 		p.serverCmd.Stdout = os.Stderr

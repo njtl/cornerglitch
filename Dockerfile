@@ -21,11 +21,12 @@ USER glitch
 COPY --from=builder /glitch /glitch
 
 ENV GLITCH_CONFIG=""
+ENV GLITCH_HEALTH_SECRET="docker-healthcheck-secret"
 
 EXPOSE 8765 8766
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8765/health/live || exit 1
+    CMD curl -f http://localhost:8765/_internal/${GLITCH_HEALTH_SECRET}/healthz || exit 1
 
 ENTRYPOINT ["/glitch"]
 CMD []
