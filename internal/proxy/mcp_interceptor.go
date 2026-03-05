@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -206,7 +207,7 @@ func (m *MCPInterceptor) InterceptResponse(resp *http.Response) (*http.Response,
 
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	resp.ContentLength = int64(len(body))
-	resp.Header.Set("Content-Length", string(rune(len(body))))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
 	return resp, nil
 }
 

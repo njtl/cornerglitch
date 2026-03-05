@@ -1,0 +1,1 @@
+{"categories":{"auth_chaos":true,"data_edge_cases":true,"encoding_chaos":true,"error_formats":true,"malformed_json":true,"redirect_chaos":true,"slow_partial":true,"wrong_format":true,"wrong_headers":true,"wrong_status":true},"enabled":true,"probability":38}

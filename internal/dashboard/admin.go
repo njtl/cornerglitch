@@ -1605,6 +1605,7 @@ type MCPProvider interface {
 	Stats() map[string]interface{}
 	SessionsAny() interface{}
 	EventsAny() interface{}
+	NotifyListsChanged()
 }
 
 // AdminMCPHandler handles authenticated MCP requests on the admin endpoint.
@@ -2440,6 +2441,22 @@ var globalNightmare = &NightmareState{}
 // GetNightmareState returns the global NightmareState instance.
 func GetNightmareState() *NightmareState {
 	return globalNightmare
+}
+
+// Mu returns the mutex for external callers that need to hold the lock
+// while modifying multiple nightmare fields atomically.
+func (n *NightmareState) Mu() *sync.RWMutex {
+	return &n.mu
+}
+
+// ApplyServerNightmare exports the server nightmare activation logic.
+func ApplyServerNightmare() {
+	applyServerNightmare()
+}
+
+// RestoreServerNightmare exports the server nightmare restoration logic.
+func RestoreServerNightmare() {
+	restoreServerNightmare()
 }
 
 // Snapshot returns a map of nightmare subsystem -> active status.

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glitch Admin — Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;}
+.login-box{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:32px;width:100%;max-width:360px;}
+h1{font-size:1.4em;color:#58a6ff;margin-bottom:8px;}
+p{color:#8b949e;font-size:0.9em;margin-bottom:24px;}
+label{display:block;font-size:0.85em;color:#8b949e;margin-bottom:6px;}
+input[type=password]{width:100%;padding:10px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:1em;margin-bottom:16px;}
+input[type=password]:focus{outline:none;border-color:#58a6ff;}
+button{width:100%;padding:10px;background:#238636;color:#fff;border:none;border-radius:6px;font-size:1em;cursor:pointer;font-weight:600;}
+button:hover{background:#2ea043;}
+</style>
+</head>
+<body>
+<div class="login-box">
+<h1>Glitch Admin</h1>
+<p>Enter the admin password to continue.</p>
+
+<form method="POST" action="/admin/login">
+<label for="password">Password</label>
+<input type="password" id="password" name="password" autofocus required>
+<button type="submit">Sign In</button>
+</form>
+</div>
+</body>
+</html>
