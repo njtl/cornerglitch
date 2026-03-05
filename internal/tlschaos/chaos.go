@@ -161,7 +161,6 @@ func (e *Engine) TLSConfig() *tls.Config {
 		cfg.CipherSuites = weakCipherSuites()
 		cfg.NextProtos = []string{"h2", "http/1.1", "spdy/3.1", "h2c"} // ALPN lies
 		// Don't set Certificates — use getCertificate for cert chaos rotation
-		cfg.Renegotiation = tls.RenegotiateOnceAsClient
 	}
 
 	return cfg
@@ -218,6 +217,8 @@ func (e *Engine) getConfigForClient(hello *tls.ClientHelloInfo) (*tls.Config, er
 
 	// In nightmare mode, vary config per client
 	cfg := e.TLSConfig()
+	// Prevent recursive GetConfigForClient calls
+	cfg.GetConfigForClient = nil
 
 	// Check if client supports only modern TLS
 	hasModernOnly := true
@@ -253,7 +254,9 @@ func (e *Engine) SaveCert(certPath, keyPath string) error {
 	}
 	defer certOut.Close()
 	for _, c := range cert.Certificate {
-		pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: c})
+		if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: c}); err != nil {
+			return fmt.Errorf("encoding certificate: %w", err)
+		}
 	}
 
 	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
@@ -270,7 +273,9 @@ func (e *Engine) SaveCert(certPath, keyPath string) error {
 	if err != nil {
 		return err
 	}
-	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: b})
+	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: b}); err != nil {
+		return fmt.Errorf("encoding private key: %w", err)
+	}
 
 	return nil
 }

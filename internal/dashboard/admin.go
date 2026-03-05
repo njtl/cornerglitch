@@ -754,7 +754,10 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 		c.ProtocolGlitchLevel = v
 	case "tls_chaos_enabled":
 		c.TLSChaosEnabled = value != 0
-		if e := globalTLSEngine; e != nil {
+		globalTLSEngineMu.RLock()
+		e := globalTLSEngine
+		globalTLSEngineMu.RUnlock()
+		if e != nil {
 			if c.TLSChaosEnabled {
 				e.SetLevel(c.TLSChaosLevel)
 			} else {
@@ -771,7 +774,10 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 		}
 		c.TLSChaosLevel = v
 		if c.TLSChaosEnabled {
-			if e := globalTLSEngine; e != nil {
+			globalTLSEngineMu.RLock()
+			e := globalTLSEngine
+			globalTLSEngineMu.RUnlock()
+			if e != nil {
 				e.SetLevel(v)
 			}
 		}
@@ -1675,6 +1681,7 @@ var (
 	globalRecorder     *recorder.Recorder
 	globalAdaptive     *adaptive.Engine
 	globalTLSEngine    TLSChaosEngine
+	globalTLSEngineMu  sync.RWMutex
 	globalMCP          MCPProvider
 	globalAdminMCP     AdminMCPHandler
 	globalMCPScanner   MCPScannerProvider
@@ -2018,11 +2025,15 @@ type TLSChaosEngine interface {
 
 // SetTLSChaosEngine sets the global TLS chaos engine.
 func SetTLSChaosEngine(e TLSChaosEngine) {
+	globalTLSEngineMu.Lock()
+	defer globalTLSEngineMu.Unlock()
 	globalTLSEngine = e
 }
 
 // GetTLSChaosEngine returns the global TLS chaos engine.
 func GetTLSChaosEngine() TLSChaosEngine {
+	globalTLSEngineMu.RLock()
+	defer globalTLSEngineMu.RUnlock()
 	return globalTLSEngine
 }
 
