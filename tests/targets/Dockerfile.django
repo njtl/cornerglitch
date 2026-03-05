@@ -1,0 +1,35 @@
+FROM python:3.12-alpine
+WORKDIR /app
+RUN pip install --no-cache-dir django && \
+    django-admin startproject target . && \
+    python manage.py migrate --run-syncdb
+# Add a minimal views.py and wire URLs
+RUN cat > target/views.py <<'PYEOF'
+from django.http import HttpResponse
+
+def index(request):
+    return HttpResponse('<html><body><h1>Django Target</h1><p>Default config, no hardening.</p></body></html>')
+
+def health(request):
+    return HttpResponse('ok', content_type='text/plain')
+
+def login(request):
+    if request.method == 'POST':
+        data = request.body.decode('utf-8', errors='replace')
+        return HttpResponse(f'<html><body><h1>Login received</h1><pre>{data}</pre></body></html>')
+    return HttpResponse('Method Not Allowed', status=405)
+PYEOF
+RUN cat > target/urls.py <<'PYEOF'
+from django.urls import path
+from target import views
+
+urlpatterns = [
+    path('', views.index),
+    path('health', views.health),
+    path('login', views.login),
+]
+PYEOF
+# Allow all hosts (default = no hardening)
+RUN sed -i "s/ALLOWED_HOSTS = \[\]/ALLOWED_HOSTS = ['*']/" target/settings.py
+EXPOSE 8000
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
