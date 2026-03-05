@@ -18,11 +18,6 @@ const (
 	adminURL  = "http://localhost:8766"
 )
 
-func init() {
-	// Set a global HTTP client timeout so slow error types (slow_drip, slow_headers)
-	// don't cause acceptance tests to hang indefinitely on CI.
-	http.DefaultClient.Timeout = 30 * time.Second
-}
 
 // adminPassword is the password for the admin panel. Defaults to "admin".
 var adminPassword = func() string {
@@ -34,11 +29,17 @@ var adminPassword = func() string {
 
 func requireServer(t *testing.T) {
 	t.Helper()
-	// /health is now subject to error injection, so retry a few times.
-	// We just need to confirm the server is listening — any response is fine.
+	// Use the internal health endpoint if GLITCH_HEALTH_SECRET is set (CI).
+	// This bypasses the main handler entirely, avoiding fingerprinting/adaptive
+	// engine accumulation that could block the test client.
+	// Fall back to /health with retries if no secret is configured.
+	healthURL := serverURL + "/health"
+	if secret := os.Getenv("GLITCH_HEALTH_SECRET"); secret != "" {
+		healthURL = serverURL + "/_internal/" + secret + "/healthz"
+	}
 	var lastErr error
 	for i := 0; i < 5; i++ {
-		resp, err := http.Get(serverURL + "/health")
+		resp, err := http.Get(healthURL)
 		if err != nil {
 			lastErr = err
 			time.Sleep(200 * time.Millisecond)
