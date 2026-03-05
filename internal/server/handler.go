@@ -555,7 +555,16 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 		}
 		// Apply error rate multiplier from admin config
 		cfg := h.config.Get()
-		if mult, ok := cfg["error_rate_multiplier"].(float64); ok && mult != 1.0 {
+		rawMult := cfg["error_rate_multiplier"]
+		// Try both int and float64 since config may store as either type
+		var mult float64
+		var multOk bool
+		if fv, ok := rawMult.(float64); ok {
+			mult, multOk = fv, true
+		} else if iv, ok := rawMult.(int); ok {
+			mult, multOk = float64(iv), true
+		}
+		if multOk && mult != 1.0 {
 			scaled := errors.ErrorProfile{Weights: make(map[errors.ErrorType]float64)}
 			var totalNonNone float64
 			for k, v := range profile.Weights {
@@ -580,7 +589,16 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 		// Check protocol glitch admin config — re-roll if disabled
 		if errors.IsProtocolGlitch(errType) {
 			pgCfg := h.config.Get()
-			pgEnabled, _ := pgCfg["protocol_glitch_enabled"].(bool)
+			pgRaw := pgCfg["protocol_glitch_enabled"]
+			var pgEnabled bool
+			switch v := pgRaw.(type) {
+			case bool:
+				pgEnabled = v
+			case int:
+				pgEnabled = v != 0
+			case float64:
+				pgEnabled = v != 0
+			}
 			if !pgEnabled {
 				// Protocol glitches disabled: re-roll up to 5 times for a non-protocol type
 				for i := 0; i < 5; i++ {
@@ -700,11 +718,13 @@ func (h *Handler) errTypeToStatus(errType errors.ErrorType) int {
 	case errors.ErrHTTP10Chunked, errors.ErrHTTP11NoLength, errors.ErrProtocolDowngrade,
 		errors.ErrMixedVersions, errors.ErrInfoNoFinal, errors.ErrFalseH2Preface,
 		errors.ErrDuplicateStatus, errors.ErrHeaderNullBytes, errors.ErrMissingCRLF,
-		errors.ErrHeaderObsFold:
+		errors.ErrHeaderObsFold,
+		errors.ErrChunkOverflow, errors.ErrInfiniteChunked:
 		return 0
 	case errors.ErrH2UpgradeReject, errors.ErrH2BadStreamID, errors.ErrH2PriorityLoop,
 		errors.ErrFalseServerPush, errors.ErrBothCLAndTE, errors.ErrFalseCompression,
-		errors.ErrMultiEncodings, errors.ErrKeepAliveUpgrade:
+		errors.ErrMultiEncodings, errors.ErrKeepAliveUpgrade,
+		errors.ErrGzipBomb, errors.ErrXMLBomb, errors.ErrJSONDepthBomb:
 		return 200
 	default:
 		return 200

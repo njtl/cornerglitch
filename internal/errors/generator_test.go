@@ -159,6 +159,7 @@ func TestIsProtocolGlitch(t *testing.T) {
 		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
 		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
 		ErrKeepAliveUpgrade,
+		ErrGzipBomb, ErrInfiniteChunked, ErrChunkOverflow, ErrXMLBomb, ErrJSONDepthBomb,
 	}
 	for _, et := range protocolTypes {
 		if !IsProtocolGlitch(et) {
@@ -272,6 +273,7 @@ func TestApply_ProtocolHijackerFallback(t *testing.T) {
 		ErrHTTP10Chunked, ErrHTTP11NoLength, ErrProtocolDowngrade,
 		ErrMixedVersions, ErrInfoNoFinal, ErrFalseH2Preface,
 		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
+		ErrChunkOverflow, ErrInfiniteChunked,
 	}
 
 	g := NewGenerator()
@@ -300,6 +302,8 @@ func TestApply_AllProtocolGlitchesHandled(t *testing.T) {
 		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
 		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
 		ErrKeepAliveUpgrade,
+		ErrGzipBomb, ErrChunkOverflow, ErrXMLBomb, ErrJSONDepthBomb,
+		// ErrInfiniteChunked excluded — it sleeps for up to 5 min
 	}
 
 	g := NewGenerator()
@@ -325,6 +329,7 @@ func TestDefaultProfile_ContainsAllProtocolGlitches(t *testing.T) {
 		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
 		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
 		ErrKeepAliveUpgrade,
+		ErrGzipBomb, ErrInfiniteChunked, ErrChunkOverflow, ErrXMLBomb, ErrJSONDepthBomb,
 	}
 	for _, et := range allProtocol {
 		w, ok := profile.Weights[et]
@@ -347,6 +352,7 @@ func TestAggressiveProfile_ContainsAllProtocolGlitches(t *testing.T) {
 		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
 		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
 		ErrKeepAliveUpgrade,
+		ErrGzipBomb, ErrInfiniteChunked, ErrChunkOverflow, ErrXMLBomb, ErrJSONDepthBomb,
 	}
 	for _, et := range allProtocol {
 		w, ok := profile.Weights[et]
