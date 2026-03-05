@@ -1,0 +1,1 @@
+http://localhost:8765/vuln/a03/sqli?id=1 (GET)  # /home/user4fab3efa/.local/bin/sqlmap -u http://localhost:8765/vuln/a03/sqli?id=1 --batch --level=3 --risk=2 --timeout=10 --retries=2 --threads=3 --output-dir=sqlmap-sqli-results

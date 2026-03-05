@@ -1,0 +1,48 @@
+
+     __    __            _ _   _ _____
+    / / /\ \ \__ _ _ __ (_) |_(_)___ /
+    \ \/  \/ / _` | '_ \| | __| | |_ \
+     \  /\  / (_| | |_) | | |_| |___) |
+      \/  \/ \__,_| .__/|_|\__|_|____/
+                  |_|                 
+Wapiti 3.2.10 (wapiti-scanner.github.io)
+Potential full path disclosure in http://localhost:8765/: /api/v1/users/me
+Sensitive data (cookie in the response) was sent over an unencrypted HTTP connection to http://localhost:8765/. The server did not enforce HTTPS.
+X-Frame-Options is not set on http://localhost:8765/
+Secure flag is not set on the cookie: '_glitch_sid' set at 'http://localhost:8765/'
+HttpOnly flag is not set on the cookie '_glitch_fp' set at 'http://localhost:8765/'
+Secure flag is not set on the cookie: '_glitch_fp' set at 'http://localhost:8765/'
+HttpOnly flag is not set on the cookie '_glitch_trap' set at 'http://localhost:8765/'
+Secure flag is not set on the cookie: '_glitch_trap' set at 'http://localhost:8765/'
+HttpOnly flag is not set on the cookie '_glitch_xd' set at 'http://localhost:8765/'
+Secure flag is not set on the cookie: '_glitch_xd' set at 'http://localhost:8765/'
+HttpOnly flag is not set on the cookie '_glitch_sec' set at 'http://localhost:8765/'
+HttpOnly flag is not set on the cookie '_glitch_ss' set at 'http://localhost:8765/'
+Secure flag is not set on the cookie: '_glitch_ss' set at 'http://localhost:8765/'
+CSP is not set for URL: http://localhost:8765/
+[*] Saving scan state, please wait...
+This scan has been saved in the file /home/user4fab3efa/.wapiti/scans/localhost_8765_page_4eaeeef4.db
+[*] Wapiti found 1 URLs and forms during the scan
+
+[*] Launching module upload
+
+[*] Launching module sql
+
+[*] Launching module exec
+
+[*] Launching module ssl
+sslscan is not installed or not found in PATH, module will be skipped
+
+[*] Launching module file
+
+[*] Launching module ssrf
+[*] Asking endpoint URL https://wapiti3.ovh/get_ssrf.php?session_id=e4ybtt for results, please wait...
+
+[*] Launching module xss
+
+[*] Launching module redirect
+
+[*] Launching module permanentxss
+
+[*] Generating report...
+A report has been generated in the file wapiti-report

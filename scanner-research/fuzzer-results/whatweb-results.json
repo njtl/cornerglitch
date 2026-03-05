@@ -1,0 +1,3 @@
+[
+{"target":"http://localhost:8765","http_status":200,"request_config":{"headers":{"User-Agent":"WhatWeb/0.5.5"}},"plugins":{"Cookies":{"string":["_detect","_glitch_fp","_glitch_sec","_glitch_sid","_glitch_ss","_glitch_trap","_glitch_xd","_track","sid"]},"HTML5":{},"HTTPServer":{"string":["cloudflare"]},"HttpOnly":{"string":["_detect","_glitch_sid","sid"]},"IP":{"string":["::1"]},"Open-Graph-Protocol":{"version":["article"]},"Title":{"string":["Loading..."]},"UncommonHeaders":{"string":["cf-cache-status,cf-ray,cf-request-id,content-security-policy,x-chaos-drip,x-content-type-options,x-drupal-cache,x-nginx-cache,x-redirect-hint,x-robots-tag"]},"Warning":{"string":["299 - \"Chaos mode active\""]},"WWW-Authenticate":{"string":["also-fake","fake"],"module":["Basic"]}}}
+]

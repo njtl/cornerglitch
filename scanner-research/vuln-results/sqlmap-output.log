@@ -1,0 +1,19 @@
+        ___
+       __H__
+ ___ ___[']_____ ___ ___  {1.10.2#pip}
+|_ -| . [(]     | .'| . |
+|___|_  ["]_|_|_|__,|  _|
+      |_|V...       |_|   https://sqlmap.org
+
+[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program
+
+[*] starting @ 14:39:57 /2026-03-05/
+
+(B)0[?1049h[1;24r[m[4l[24;1H[?1049l[?1l>[14:39:57] [WARNING] using '/home/user4fab3efa/glitchWebServer/scanner-research/vuln-results/sqlmap-results' as the output directory
+[14:39:57] [INFO] testing connection to the target URL
+you have not declared cookie(s), while server wants to set its own ('_session_id=9d4fb5541ed...1d6f66646d;_glitch_sid=5f75029d886...3733da1722;_glitch_fp=2819338813f...e311ecad3e;_glitch_trap=127f354b96c...683245ace3;_glitch_sec=a2824b0e85d...70ab16c68a;sid=6d38fd51;_glitch_ss=093c9d44294...32b18bc923'). Do you want to use those [Y/n] Y
+[14:40:06] [INFO] searching for forms
+[14:40:13] [CRITICAL] can't parse forms as the page content appears to be blank
+
+[*] ending @ 14:40:13 /2026-03-05/
+

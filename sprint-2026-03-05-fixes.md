@@ -181,7 +181,7 @@ sprint spec called for a regression test.
 - ✅ **10.2** `go vet ./...` clean
 - ✅ **10.3** `go test ./... -count=1 -timeout 300s` all pass
 - ✅ **10.4** Update sprint-2026-03-05.md to correct items that were mis-marked
-- ⬜ **10.5** Commit, push, PR, CI green, merge
+- ✅ **10.5** Commit, push, PR #45, CI green, merged to master
 
 ---
 
@@ -199,8 +199,8 @@ sprint spec called for a regression test.
 | 7. QA screenshots | 3 | 3 ✅ |
 | 8. QA findings verification | 3 | 3 ✅ |
 | 9. MCP regression test | 1 | 1 ✅ |
-| 10. Final verification | 5 | 4 ✅ / 1 ⬜ |
-| **TOTAL** | **39** | **38 ✅ / 1 ⬜** |
+| 10. Final verification | 5 | 5 ✅ |
+| **TOTAL** | **39** | **39 ✅** |
 
 ---
 

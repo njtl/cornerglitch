@@ -1,0 +1,119 @@
+[1m[31mERROR Opening: http://localhost:8765/misc/CVS/Tag - Can't convert to UTF-8 undefined method `force_encoding' for nil:NilClass[0m
+[1m[31mERROR: Plugin Drupal failed for http://localhost:8765. no implicit conversion of nil into String[0m
+WhatWeb report for [1m[34mhttp://localhost:8765[0m
+Status    : 200 OK
+Title     : [1m[33mLoading...[0m
+IP        : <Unknown>
+Country   : [1m[31m<Unknown>[0m
+
+Summary   : [1mCookies[0m[[0m[22m_detect,_glitch_fp,_glitch_sec,_glitch_sid,_glitch_ss,_glitch_trap,_glitch_xd,_track,sid[0m], [1mHTML5[0m, [1mHTTPServer[0m[[1m[36mcloudflare[0m], [1mHttpOnly[0m[[0m[22m_detect,_glitch_sid,sid[0m], [1mOpen-Graph-Protocol[0m[[1m[32marticle[0m], [1mUncommonHeaders[0m[[0m[22mcf-cache-status,cf-ray,cf-request-id,content-security-policy,x-chaos-drip,x-content-type-options,x-drupal-cache,x-nginx-cache,x-redirect-hint,x-robots-tag[0m], [1mWarning[0m[[0m[22m299 - "Chaos mode active"[0m], [1mWWW-Authenticate[0m[[0m[22malso-fake,fake[0m][[1m[35mBasic[0m]
+
+Detected Plugins:
+[ [1mCookies[0m ]
+	Display the names of cookies in the HTTP headers. The 
+	values are not returned to save on space. 
+
+	String       : [1m[36m_glitch_sid[0m
+	String       : [1m[36m_glitch_fp[0m
+	String       : [1m[36m_glitch_trap[0m
+	String       : [1m[36m_glitch_xd[0m
+	String       : [1m[36m_glitch_sec[0m
+	String       : [1m[36m_glitch_ss[0m
+	String       : [1m[36msid[0m
+	String       : [1m[36m_track[0m
+	String       : [1m[36m_detect[0m
+
+[ [1mHTML5[0m ]
+	HTML version 5, detected by the doctype declaration 
+
+
+[ [1mHTTPServer[0m ]
+	HTTP server header string. This plugin also attempts to 
+	identify the operating system from the server header. 
+
+	String       : [1m[36mcloudflare[0m (from server string)
+
+[ [1mHttpOnly[0m ]
+	If the HttpOnly flag is included in the HTTP set-cookie 
+	response header and the browser supports it then the cookie 
+	cannot be accessed through client side script - More Info: 
+	http://en.wikipedia.org/wiki/HTTP_cookie 
+
+	String       : [1m[36m_detect,_glitch_sid,sid[0m
+
+[ [1mOpen-Graph-Protocol[0m ]
+	The Open Graph protocol enables you to integrate your Web 
+	pages into the social graph. It is currently designed for 
+	Web pages representing profiles of real-world things . 
+	things like movies, sports teams, celebrities, and 
+	restaurants. Including Open Graph tags on your Web page, 
+	makes your page equivalent to a Facebook Page. 
+
+	Version      : [1m[32marticle[0m
+
+[ [1mUncommonHeaders[0m ]
+	Uncommon HTTP server headers. The blacklist includes all 
+	the standard headers and many non standard but common ones. 
+	Interesting but fairly common headers should have their own 
+	plugins, eg. x-powered-by, server and x-aspnet-version. 
+	Info about headers can be found at www.http-stats.com 
+
+	String       : [1m[36mcf-cache-status,cf-ray,cf-request-id,content-security-policy,x-chaos-drip,x-content-type-options,x-drupal-cache,x-nginx-cache,x-redirect-hint,x-robots-tag[0m (from headers)
+
+[ [1mWWW-Authenticate[0m ]
+	This plugin identifies the WWW-Authenticate HTTP header and 
+	extracts the authentication method and realm. 
+
+	Module       : [1m[35mBasic[0m
+	String       : [1m[36malso-fake,fake[0m
+
+[ [1mWarning[0m ]
+	The warning header contains additional information about 
+	the status of a response that might not be reflected by the 
+	response status code. According to RFC2616 section 14.46, 
+	if a cache returns a stale response, either because of a 
+	max-stale directive on a request, or because the cache is 
+	configured to override the expiration time of a response, 
+	the cache MUST attach a Warning header to the stale 
+	response, using Warning 110 (Response is stale). 
+
+	String       : [1m[36m299 - "Chaos mode active"[0m
+	Website     : http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.46
+
+HTTP Headers:
+	HTTP/1.1 200 OK
+	Accept-Ranges: bytes
+	Age: 68191
+	Cache-Control: public, max-age=31536000, immutable
+	Cf-Cache-Status: HIT
+	Cf-Ray: 9d6c9059a0cfdbff-IAD
+	Cf-Request-Id: caf7307b0beb13514d87db390faf2661
+	Content-Disposition: attachment; filename="response.html"
+	Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'
+	Content-Type: text/html; charset=utf-8
+	Etag: W/"837ec7ce4f23a5c9-1772721713173252953"
+	Server: cloudflare
+	Set-Cookie: _glitch_sid=f1925df83f948ae5a34c514dc4d1ce48ba775bc73c9ab496d9ffa23ccf38431b; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax
+	Set-Cookie: _glitch_fp=2f56f7edc9eef3f3fd38a65ef03ddbefb8ee86e7bc4bab2186061418878d5e7b; Path=/; Max-Age=86400
+	Set-Cookie: _glitch_trap=eed3aa2a190f2c86d6a451fa6315dac80fbd3c996d39c4c9bf5dbf6ba03a10da; Path=/; Expires=Fri, 05 Mar 2027 14:41:53 GMT
+	Set-Cookie: _glitch_xd=3ea18f6ca3041ab3b441e0deb0283885fec1355e36abd83316f93df0da84c49f; Path=/; Domain=invalid-domain.test; Max-Age=86400
+	Set-Cookie: _glitch_sec=4118dfe6a9bc21e7f78187d70e49bac4e56d796b393a5b265a4560b0a767108d; Path=/; Max-Age=86400; Secure
+	Set-Cookie: _glitch_ss=c90ec33f4fb70edacec9e7e3b6cf93548bffb5aa701bf92bd0c9253f152041b5; Path=/external/callback; Max-Age=86400; SameSite=Strict
+	Set-Cookie: sid=3e06d681; Path=/; HttpOnly; SameSite=Lax
+	Set-Cookie: _track=990d44a4; Max-Age=0; Expires=Fri, 05 Mar 2027 14:41:53 GMT; Path=/
+	Set-Cookie: _detect=fa6c8bef; Domain=.different-domain.com; Path=/; Secure; HttpOnly
+	Vary: Accept, Accept-Encoding, Accept-Language, User-Agent, Cookie, X-Forwarded-For, X-Requested-With, Origin, Referer
+	Warning: 299 - "Chaos mode active"
+	Www-Authenticate: Basic realm="fake"
+	Www-Authenticate: Bearer realm="also-fake"
+	X-Chaos-Drip: true
+	X-Content-Type-Options: nosniff
+	X-Drupal-Cache: HIT
+	X-Nginx-Cache: HIT
+	X-Redirect-Hint: /
+	X-Redirect-Hint: /honeypot-trap?src=header-dup
+	X-Robots-Tag: noindex, nofollow, noarchive, nosnippet
+	Date: Thu, 05 Mar 2026 14:41:53 GMT
+	Connection: close
+	Transfer-Encoding: chunked
+	
