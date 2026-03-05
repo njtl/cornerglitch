@@ -1074,6 +1074,44 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- ====== MCP Honeypot ====== -->
+  <div class="srv-section" id="srv-mcp">
+    <div class="srv-section-header" onclick="toggleServerSection('mcp')">
+      <span class="srv-title">MCP Honeypot</span>
+      <span class="srv-arrow">&#9654;</span>
+    </div>
+    <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Fake MCP server with honeypot tools, poisoned resources, and trap prompts for testing AI agent security.</p>
+      <div class="grid" id="mcp-stats" style="margin-bottom:14px">
+        <div class="card"><div class="label">Sessions</div><div class="value" id="mcp-sessions-count">0</div></div>
+        <div class="card"><div class="label">Tool Calls</div><div class="value" id="mcp-tool-calls">0</div></div>
+        <div class="card"><div class="label">Honeypot Hits</div><div class="value v-warn" id="mcp-honeypot-calls">0</div></div>
+        <div class="card"><div class="label">Tools</div><div class="value v-info" id="mcp-tools-count">0</div></div>
+        <div class="card"><div class="label">Resources</div><div class="value v-info" id="mcp-resources-count">0</div></div>
+        <div class="card"><div class="label">Prompts</div><div class="value v-info" id="mcp-prompts-count">0</div></div>
+      </div>
+      <div style="margin-bottom:8px">
+        <span style="color:#00ccaa;font-size:0.8em;font-weight:bold">Per-Tool Call Counts</span>
+        <div id="mcp-tool-breakdown" style="margin-top:6px;font-size:0.78em;color:#888">No tool calls yet</div>
+      </div>
+      <div style="margin-top:12px">
+        <span style="color:#00ccaa;font-size:0.8em;font-weight:bold">Recent Events</span>
+        <div style="margin-top:6px;max-height:200px;overflow-y:auto">
+          <table style="width:100%%;font-size:0.75em;border-collapse:collapse" id="mcp-events-table">
+            <thead><tr style="color:#888;text-align:left;border-bottom:1px solid #333">
+              <th style="padding:4px">Time</th>
+              <th style="padding:4px">Method</th>
+              <th style="padding:4px">Tool/URI</th>
+              <th style="padding:4px">Category</th>
+              <th style="padding:4px">Session</th>
+            </tr></thead>
+            <tbody id="mcp-events-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ====== Vulnerabilities ====== -->
   <div class="srv-section" id="srv-vulns">
     <div class="srv-section-header" onclick="toggleServerSection('vulns')">
@@ -3269,6 +3307,72 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     } catch(e) {}
   }
 
+  // ------ MCP Honeypot ------
+  async function refreshMCP() {
+    try {
+      var stats = await api('/admin/api/mcp/stats');
+      var el = function(id) { return document.getElementById(id); };
+      if (el('mcp-sessions-count')) el('mcp-sessions-count').textContent = stats.active_sessions || 0;
+      if (el('mcp-tool-calls')) el('mcp-tool-calls').textContent = stats.total_tool_calls || 0;
+      if (el('mcp-honeypot-calls')) el('mcp-honeypot-calls').textContent = stats.honeypot_calls || 0;
+      if (el('mcp-tools-count')) el('mcp-tools-count').textContent = stats.tools_registered || 0;
+      if (el('mcp-resources-count')) el('mcp-resources-count').textContent = stats.resources_exposed || 0;
+      if (el('mcp-prompts-count')) el('mcp-prompts-count').textContent = stats.prompts_registered || 0;
+    } catch(e) {}
+
+    // Per-tool call breakdown from sessions
+    try {
+      var sessData = await api('/admin/api/mcp/sessions');
+      var sessions = sessData.sessions || [];
+      var toolCounts = {};
+      sessions.forEach(function(s) {
+        if (s.tool_calls) {
+          Object.keys(s.tool_calls).forEach(function(t) {
+            toolCounts[t] = (toolCounts[t] || 0) + s.tool_calls[t];
+          });
+        }
+      });
+      var bd = document.getElementById('mcp-tool-breakdown');
+      if (bd) {
+        var keys = Object.keys(toolCounts).sort(function(a,b){ return toolCounts[b]-toolCounts[a]; });
+        if (keys.length === 0) {
+          bd.innerHTML = '<span style="color:#555">No tool calls yet</span>';
+        } else {
+          bd.innerHTML = keys.map(function(k) {
+            return '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #222">' +
+              '<span style="color:#ccc">' + esc(k) + '</span>' +
+              '<span style="color:#ff6600;font-weight:bold">' + toolCounts[k] + '</span></div>';
+          }).join('');
+        }
+      }
+    } catch(e) {}
+
+    // Recent events
+    try {
+      var evData = await api('/admin/api/mcp/events?limit=20');
+      var events = evData.events || [];
+      var tbody = document.getElementById('mcp-events-body');
+      if (tbody) {
+        if (events.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="color:#555;padding:8px;text-align:center">No events yet</td></tr>';
+        } else {
+          tbody.innerHTML = events.map(function(ev) {
+            var t = new Date(ev.timestamp * 1000);
+            var ts = ('0'+t.getHours()).slice(-2) + ':' + ('0'+t.getMinutes()).slice(-2) + ':' + ('0'+t.getSeconds()).slice(-2);
+            var catColor = ev.category === 'honeypot' ? '#ff4444' : (ev.category === 'legit' ? '#00ff88' : '#888');
+            return '<tr style="border-bottom:1px solid #222">' +
+              '<td style="padding:3px 4px;color:#888">' + ts + '</td>' +
+              '<td style="padding:3px 4px;color:#ccc">' + esc(ev.method||'') + '</td>' +
+              '<td style="padding:3px 4px;color:#00ccaa">' + esc(ev.tool_name||'') + '</td>' +
+              '<td style="padding:3px 4px;color:' + catColor + '">' + esc(ev.category||'') + '</td>' +
+              '<td style="padding:3px 4px;color:#666;font-size:0.9em">' + esc((ev.session_id||'').substring(0,8)) + '</td>' +
+              '</tr>';
+          }).join('');
+        }
+      }
+    } catch(e) {}
+  }
+
   window.filterVulns = function() {
     var q = document.getElementById('vuln-filter').value.toLowerCase().trim();
     if (!q) {
@@ -5337,6 +5441,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       else if (id === 'srv-sessions') await refreshSessions();
       else if (id === 'srv-apichaos') await refreshAPIChaos();
       else if (id === 'srv-mediachaos') await refreshMediaChaos();
+      else if (id === 'srv-mcp') await refreshMCP();
       // srv-log and srv-traffic moved to dashboard
       else if (id === 'srv-recording') await refreshRecorderUI();
     }

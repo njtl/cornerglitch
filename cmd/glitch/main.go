@@ -201,6 +201,26 @@ func main() {
 	mediaChaosEng := mediachaos.New()
 	budgetTrapEng := budgettrap.NewEngine()
 	mcpServer := mcpkg.NewServer()
+	dashboard.SetMCPProvider(mcpServer)
+
+	// Admin MCP server with authenticated tools
+	adminMCP := mcpkg.NewAdminServer(&mcpkg.AdminToolHandler{
+		ToggleFeature: func(name string, enabled bool) error {
+			if !dashboard.GetFeatureFlags().Set(name, enabled) {
+				return fmt.Errorf("unknown feature: %s", name)
+			}
+			return nil
+		},
+		GetMetrics: func() map[string]interface{} {
+			return map[string]interface{}{
+				"total_requests": collector.TotalRequests.Load(),
+				"total_errors":   collector.TotalErrors.Load(),
+				"uptime_seconds": int(collector.Uptime().Seconds()),
+				"unique_clients": len(collector.GetAllClientProfiles()),
+			}
+		},
+	})
+	dashboard.SetAdminMCPHandler(adminMCP)
 
 	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng, mediaGen, mediaChaosEng, budgetTrapEng, mcpServer)
 

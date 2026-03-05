@@ -382,6 +382,20 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
 	})
+
+	// MCP honeypot routes
+	mux.HandleFunc("/admin/api/mcp/stats", func(w http.ResponseWriter, r *http.Request) {
+		adminMCPStats(w, r)
+	})
+	mux.HandleFunc("/admin/api/mcp/sessions", func(w http.ResponseWriter, r *http.Request) {
+		adminMCPSessions(w, r)
+	})
+	mux.HandleFunc("/admin/api/mcp/events", func(w http.ResponseWriter, r *http.Request) {
+		adminMCPEvents(w, r)
+	})
+	mux.HandleFunc("/admin/mcp", func(w http.ResponseWriter, r *http.Request) {
+		adminMCPEndpoint(w, r)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -2965,4 +2979,106 @@ func adminMediaChaosAll(w http.ResponseWriter, r *http.Request) {
 	audit.Log("admin", "config.change", "media_chaos.categories.all", nil, body.Enabled, nil)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
+// ---------------------------------------------------------------------------
+// MCP Honeypot API handlers
+// ---------------------------------------------------------------------------
+
+// adminMCPStats returns MCP summary statistics.
+func adminMCPStats(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	p := GetMCPProvider()
+	if p == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"active_sessions":    0,
+			"total_tool_calls":   0,
+			"honeypot_calls":     0,
+			"tools_registered":   0,
+			"resources_exposed":  0,
+			"prompts_registered": 0,
+		})
+		return
+	}
+	json.NewEncoder(w).Encode(p.Stats())
+}
+
+// adminMCPSessions returns active MCP sessions.
+func adminMCPSessions(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	p := GetMCPProvider()
+	if p == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"sessions": []interface{}{}})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"sessions": p.SessionsAny()})
+}
+
+// adminMCPEvents returns MCP event log with pagination.
+func adminMCPEvents(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	p := GetMCPProvider()
+	if p == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"events": []interface{}{}, "total": 0})
+		return
+	}
+
+	limit, offset := parsePagination(r)
+
+	events, ok := p.EventsAny().([]interface{})
+	if !ok {
+		// Try to convert from concrete slice via JSON round-trip
+		raw, err := json.Marshal(p.EventsAny())
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"events": []interface{}{}, "total": 0})
+			return
+		}
+		json.Unmarshal(raw, &events)
+	}
+
+	total := len(events)
+	// Reverse to show newest first
+	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+		events[i], events[j] = events[j], events[i]
+	}
+	// Apply pagination
+	if offset >= len(events) {
+		events = []interface{}{}
+	} else {
+		end := offset + limit
+		if end > len(events) {
+			end = len(events)
+		}
+		events = events[offset:end]
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"events": events,
+		"total":  total,
+	})
+}
+
+// adminMCPEndpoint forwards authenticated MCP requests to the admin MCP server.
+func adminMCPEndpoint(w http.ResponseWriter, r *http.Request) {
+	h := GetAdminMCPHandler()
+	if h == nil {
+		http.Error(w, `{"error":"admin MCP not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	h.ServeHTTP(w, r)
 }

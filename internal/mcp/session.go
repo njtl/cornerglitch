@@ -9,12 +9,13 @@ import (
 
 // Session tracks an MCP client session.
 type Session struct {
-	ID        string
-	ClientInfo map[string]interface{} // From initialize clientInfo
-	Created   time.Time
-	LastSeen  time.Time
-	Requests  int
-	ToolCalls map[string]int // tool name -> call count
+	ID          string                 `json:"id"`
+	ClientInfo  map[string]interface{} `json:"client_info"`
+	Created     time.Time              `json:"created"`
+	LastSeen    time.Time              `json:"last_seen"`
+	Requests    int                    `json:"requests"`
+	ToolCalls   map[string]int         `json:"tool_calls"`
+	Fingerprint *Fingerprint           `json:"fingerprint,omitempty"`
 }
 
 // SessionStore manages MCP sessions.
@@ -36,11 +37,12 @@ func (s *SessionStore) Create(clientInfo map[string]interface{}) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[id] = &Session{
-		ID:         id,
-		ClientInfo: clientInfo,
-		Created:    time.Now(),
-		LastSeen:   time.Now(),
-		ToolCalls:  make(map[string]int),
+		ID:          id,
+		ClientInfo:  clientInfo,
+		Created:     time.Now(),
+		LastSeen:    time.Now(),
+		ToolCalls:   make(map[string]int),
+		Fingerprint: NewFingerprint(clientInfo),
 	}
 	return id
 }
@@ -64,6 +66,15 @@ func (s *SessionStore) RecordToolCall(sessionID, toolName string) {
 	defer s.mu.Unlock()
 	if sess, ok := s.sessions[sessionID]; ok {
 		sess.ToolCalls[toolName]++
+	}
+}
+
+// RecordFingerprint updates a session's fingerprint via a callback.
+func (s *SessionStore) RecordFingerprint(sessionID string, fn func(*Fingerprint)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess, ok := s.sessions[sessionID]; ok && sess.Fingerprint != nil {
+		fn(sess.Fingerprint)
 	}
 }
 

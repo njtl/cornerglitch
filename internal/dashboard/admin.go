@@ -1597,6 +1597,22 @@ func (pc *ProxyConfig) SetMirror(mc *MirrorConfig) {
 }
 
 // ---------------------------------------------------------------------------
+// MCP Provider interface — avoids import cycle with internal/mcp
+// ---------------------------------------------------------------------------
+
+// MCPProvider exposes MCP server stats, sessions, and events for the dashboard.
+type MCPProvider interface {
+	Stats() map[string]interface{}
+	SessionsAny() interface{}
+	EventsAny() interface{}
+}
+
+// AdminMCPHandler handles authenticated MCP requests on the admin endpoint.
+type AdminMCPHandler interface {
+	ServeHTTP(w http.ResponseWriter, r *http.Request) int
+}
+
+// ---------------------------------------------------------------------------
 // Singleton holders — used by the admin API handlers
 // ---------------------------------------------------------------------------
 
@@ -1611,6 +1627,8 @@ var (
 	globalProxyManager = NewProxyManager()
 	globalRecorder     *recorder.Recorder
 	globalAdaptive     *adaptive.Engine
+	globalMCP          MCPProvider
+	globalAdminMCP     AdminMCPHandler
 
 	// Pending blocking/overrides config — stored by ImportConfig before adaptive engine exists.
 	pendingBlocking   map[string]interface{}
@@ -1648,6 +1666,18 @@ func GetProxyConfig() *ProxyConfig { return globalProxyConfig }
 
 // GetProxyManager returns the global ProxyManager instance.
 func GetProxyManager() *ProxyManager { return globalProxyManager }
+
+// SetMCPProvider sets the global MCP provider for dashboard API access.
+func SetMCPProvider(p MCPProvider) { globalMCP = p }
+
+// GetMCPProvider returns the global MCP provider.
+func GetMCPProvider() MCPProvider { return globalMCP }
+
+// SetAdminMCPHandler sets the authenticated admin MCP handler.
+func SetAdminMCPHandler(h AdminMCPHandler) { globalAdminMCP = h }
+
+// GetAdminMCPHandler returns the admin MCP handler.
+func GetAdminMCPHandler() AdminMCPHandler { return globalAdminMCP }
 
 // proxyRuntimeState holds proxy running state for deferred auto-start.
 type proxyRuntimeState struct {
