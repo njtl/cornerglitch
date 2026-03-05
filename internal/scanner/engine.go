@@ -405,14 +405,14 @@ func (e *Engine) executeAll(ctx context.Context, requests []AttackRequest) error
 		concurrency = 10
 	}
 
-	// Rate limiter: one token per (1s / RateLimit).
+	// Rate limiter: one token per (1s / RateLimit). 0 means unlimited.
 	rateLimit := e.config.RateLimit
-	if rateLimit <= 0 {
-		rateLimit = 100
+	var ticker *time.Ticker
+	if rateLimit > 0 {
+		interval := time.Second / time.Duration(rateLimit)
+		ticker = time.NewTicker(interval)
+		defer ticker.Stop()
 	}
-	interval := time.Second / time.Duration(rateLimit)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 
 	work := make(chan AttackRequest, concurrency*2)
 	var wg sync.WaitGroup
@@ -436,13 +436,15 @@ func (e *Engine) executeAll(ctx context.Context, requests []AttackRequest) error
 
 	// Feed work channel with rate limiting.
 	for _, req := range requests {
-		select {
-		case <-ctx.Done():
-			close(work)
-			wg.Wait()
-			return ctx.Err()
-		case <-ticker.C:
-			// Rate-limit token acquired.
+		if ticker != nil {
+			select {
+			case <-ctx.Done():
+				close(work)
+				wg.Wait()
+				return ctx.Err()
+			case <-ticker.C:
+				// Rate-limit token acquired.
+			}
 		}
 
 		select {
