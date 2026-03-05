@@ -240,7 +240,12 @@ func TestAllModules(t *testing.T) {
 			}
 
 			reqs := mod.GenerateRequests("http://localhost:8765")
-			if len(reqs) == 0 {
+			// Raw TCP modules (like breakage) don't generate HTTP requests.
+			if _, isRaw := mod.(scanner.RawTCPModule); isRaw {
+				if len(reqs) != 0 {
+					t.Errorf("raw TCP module %q should generate 0 HTTP requests, got %d", mod.Name(), len(reqs))
+				}
+			} else if len(reqs) == 0 {
 				t.Errorf("module %q generated 0 requests", mod.Name())
 			}
 
@@ -335,7 +340,8 @@ func TestModuleRegistry(t *testing.T) {
 			if info.Category == "" {
 				t.Error("module info has empty category")
 			}
-			if info.Requests == 0 {
+			// Raw TCP modules (like breakage) report 0 HTTP requests.
+			if info.Requests == 0 && info.Name != "breakage" {
 				t.Errorf("module %q reports 0 requests", info.Name)
 			}
 		}

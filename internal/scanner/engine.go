@@ -210,7 +210,33 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 		return e.reporter.BuildReport(e.config, startedAt, completedAt), ctx.Err()
 	}
 
-	// ---- Phase 4: build report ----
+	// ---- Phase 4: raw TCP attack modules ----
+	if ctx.Err() == nil {
+		for _, mod := range e.modules {
+			if rawMod, ok := mod.(RawTCPModule); ok {
+				// Check if module is enabled.
+				if len(e.config.EnabledModules) > 0 {
+					enabled := false
+					for _, name := range e.config.EnabledModules {
+						if strings.EqualFold(name, mod.Name()) {
+							enabled = true
+							break
+						}
+					}
+					if !enabled {
+						continue
+					}
+				}
+				findings := rawMod.RunRawTCP(ctx, e.config.Target, e.config.Concurrency, e.config.Timeout)
+				for _, f := range findings {
+					e.reporter.AddFinding(f)
+					e.found.Add(1)
+				}
+			}
+		}
+	}
+
+	// ---- Phase 5: build report ----
 	e.phase.Store("done")
 	completedAt := time.Now()
 	report := e.reporter.BuildReport(e.config, startedAt, completedAt)
