@@ -103,6 +103,40 @@ else
     fail "Features API missing budget_traps"
 fi
 
+# Error Profiles
+echo ""
+echo "--- TC-004: Error Profiles ---"
+CONFIG_RESP=$(curl -s -b /tmp/glitch-qa-cookies.txt "$ADMIN_URL/admin/api/config" 2>/dev/null)
+if echo "$CONFIG_RESP" | grep -q "error_rate_multiplier"; then
+    pass "Config API returns error_rate_multiplier"
+else
+    fail "Config API missing error_rate_multiplier"
+fi
+# Set error_rate_multiplier via config API
+SET_RATE=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/glitch-qa-cookies.txt \
+    -X POST "$ADMIN_URL/admin/api/config" \
+    -H "Content-Type: application/json" \
+    -d '{"key":"error_rate_multiplier","value":2.0}' 2>/dev/null)
+if [ "$SET_RATE" = "200" ]; then
+    pass "Set error_rate_multiplier via config API"
+else
+    fail "Set error_rate_multiplier returned HTTP $SET_RATE"
+fi
+
+# Verify it was set
+CONFIG_AFTER=$(curl -s -b /tmp/glitch-qa-cookies.txt "$ADMIN_URL/admin/api/config" 2>/dev/null)
+if echo "$CONFIG_AFTER" | grep -q '"error_rate_multiplier"'; then
+    pass "error_rate_multiplier present in config after set"
+else
+    fail "error_rate_multiplier missing from config after set"
+fi
+
+# Reset back
+curl -s -o /dev/null -b /tmp/glitch-qa-cookies.txt \
+    -X POST "$ADMIN_URL/admin/api/config" \
+    -H "Content-Type: application/json" \
+    -d '{"key":"error_rate_multiplier","value":1.0}' 2>/dev/null
+
 # MCP Stats API
 echo ""
 echo "--- TC-005: MCP Dashboard ---"
@@ -130,6 +164,90 @@ if echo "$MCP_EVENTS" | grep -q "events"; then
     pass "MCP events API works"
 else
     fail "MCP events API broken"
+fi
+
+# Vulnerabilities
+echo ""
+echo "--- TC-006: Vulnerabilities ---"
+VULNS=$(curl -s -b /tmp/glitch-qa-cookies.txt "$ADMIN_URL/admin/api/vulns" 2>/dev/null)
+if echo "$VULNS" | grep -q "owasp"; then
+    pass "Vulns API returns owasp group"
+else
+    fail "Vulns API missing owasp group"
+fi
+if echo "$VULNS" | grep -q "api_security"; then
+    pass "Vulns API returns api_security group"
+else
+    fail "Vulns API missing api_security group"
+fi
+
+# Toggle a vuln group off and back on
+TOGGLE_OFF=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/glitch-qa-cookies.txt \
+    -X POST "$ADMIN_URL/admin/api/vulns/group" \
+    -H "Content-Type: application/json" \
+    -d '{"group":"owasp","enabled":false}' 2>/dev/null)
+if [ "$TOGGLE_OFF" = "200" ]; then
+    pass "Toggle owasp group off"
+else
+    fail "Toggle owasp group off returned HTTP $TOGGLE_OFF"
+fi
+
+TOGGLE_ON=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/glitch-qa-cookies.txt \
+    -X POST "$ADMIN_URL/admin/api/vulns/group" \
+    -H "Content-Type: application/json" \
+    -d '{"group":"owasp","enabled":true}' 2>/dev/null)
+if [ "$TOGGLE_ON" = "200" ]; then
+    pass "Toggle owasp group back on"
+else
+    fail "Toggle owasp group on returned HTTP $TOGGLE_ON"
+fi
+
+# Nightmare mode
+echo ""
+echo "--- TC-012: Nightmare Mode ---"
+NIGHTMARE_STATUS=$(curl -s -b /tmp/glitch-qa-cookies.txt "$ADMIN_URL/admin/api/nightmare" 2>/dev/null)
+if echo "$NIGHTMARE_STATUS" | grep -q '"server"'; then
+    pass "Nightmare API returns server field"
+else
+    fail "Nightmare API missing server field"
+fi
+
+# Activate server nightmare (API uses "mode" not "subsystem")
+ACTIVATE=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/glitch-qa-cookies.txt \
+    -X POST "$ADMIN_URL/admin/api/nightmare" \
+    -H "Content-Type: application/json" \
+    -d '{"mode":"server","enabled":true}' 2>/dev/null)
+if [ "$ACTIVATE" = "200" ]; then
+    pass "Activate server nightmare"
+else
+    fail "Activate server nightmare returned HTTP $ACTIVATE"
+fi
+
+# Verify active
+NIGHTMARE_ACTIVE=$(curl -s -b /tmp/glitch-qa-cookies.txt "$ADMIN_URL/admin/api/nightmare" 2>/dev/null)
+if echo "$NIGHTMARE_ACTIVE" | grep -q '"server":true'; then
+    pass "Server nightmare is active"
+else
+    fail "Server nightmare not reported as active"
+fi
+
+# Deactivate
+DEACTIVATE=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/glitch-qa-cookies.txt \
+    -X POST "$ADMIN_URL/admin/api/nightmare" \
+    -H "Content-Type: application/json" \
+    -d '{"mode":"server","enabled":false}' 2>/dev/null)
+if [ "$DEACTIVATE" = "200" ]; then
+    pass "Deactivate server nightmare"
+else
+    fail "Deactivate server nightmare returned HTTP $DEACTIVATE"
+fi
+
+# Verify deactivated
+NIGHTMARE_OFF=$(curl -s -b /tmp/glitch-qa-cookies.txt "$ADMIN_URL/admin/api/nightmare" 2>/dev/null)
+if echo "$NIGHTMARE_OFF" | grep -q '"server":false'; then
+    pass "Server nightmare is deactivated"
+else
+    fail "Server nightmare still active after deactivation"
 fi
 
 # MCP Endpoint

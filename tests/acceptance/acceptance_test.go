@@ -931,11 +931,20 @@ func TestSubsystem_CDNStaticAssets(t *testing.T) {
 func TestSubsystem_APIEndpoints(t *testing.T) {
 	requireServer(t)
 
-	resp, _ := http.Get(serverURL + "/api/v1/users")
-	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Errorf("API users: expected 200, got %d", resp.StatusCode)
+	// Retry because the server has probabilistic error injection
+	var lastStatus int
+	for i := 0; i < 5; i++ {
+		resp, err := http.Get(serverURL + "/api/v1/users")
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+		lastStatus = resp.StatusCode
+		if lastStatus == 200 {
+			return
+		}
 	}
+	t.Errorf("API users: expected 200, got %d after 5 retries", lastStatus)
 }
 
 func TestSubsystem_I18n(t *testing.T) {

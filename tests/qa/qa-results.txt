@@ -1,0 +1,59 @@
+=== QA Test Runner ===
+Base URL: http://localhost:8765
+Admin URL: http://localhost:8766
+
+--- TC-001: Admin Login ---
+  [0;32mPASS[0m Login with correct password
+  [0;32mPASS[0m Wrong password rejected
+
+--- TC-002: Dashboard Metrics ---
+  [0;32mPASS[0m Metrics API returns total_requests
+  [0;32mPASS[0m Metrics API returns uptime_seconds
+
+--- TC-003: Feature Toggles ---
+  [0;32mPASS[0m Features API returns labyrinth
+  [0;32mPASS[0m Features API returns mcp
+  [0;32mPASS[0m Features API returns api_chaos
+  [0;32mPASS[0m Features API returns budget_traps
+
+--- TC-004: Error Profiles ---
+  [0;32mPASS[0m Config API returns error_rate_multiplier
+  [0;32mPASS[0m Set error_rate_multiplier via config API
+  [0;32mPASS[0m error_rate_multiplier present in config after set
+
+--- TC-005: MCP Dashboard ---
+  [0;32mPASS[0m MCP stats returns tools_registered
+  [0;32mPASS[0m MCP stats returns resources_exposed
+  [0;32mPASS[0m MCP sessions API works
+  [0;32mPASS[0m MCP events API works
+
+--- TC-006: Vulnerabilities ---
+  [0;32mPASS[0m Vulns API returns owasp group
+  [0;32mPASS[0m Vulns API returns api_security group
+  [0;32mPASS[0m Toggle owasp group off
+  [0;32mPASS[0m Toggle owasp group back on
+
+--- TC-012: Nightmare Mode ---
+  [0;32mPASS[0m Nightmare API returns server field
+  [0;32mPASS[0m Activate server nightmare
+  [0;32mPASS[0m Server nightmare is active
+  [0;32mPASS[0m Deactivate server nightmare
+  [0;32mPASS[0m Server nightmare is deactivated
+
+--- TC-014: MCP Endpoint ---
+  [0;32mPASS[0m MCP initialize returns server info
+  [0;32mPASS[0m MCP returns session ID
+  [0;32mPASS[0m MCP tools/list returns honeypot tools
+  [0;32mPASS[0m MCP resources/list returns honeypot resources
+  [0;32mPASS[0m MCP prompts/list returns honeypot prompts
+  [0;32mPASS[0m MCP session deletion works
+
+--- TC-013: Config Persistence ---
+  [0;32mPASS[0m Config export works
+
+=== Summary ===
+  [0;32mPASS: 31[0m
+  [0;31mFAIL: 0[0m
+  [0;33mSKIP: 0[0m
+
+[0;32mQA PASSED[0m

@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -181,5 +182,52 @@ func TestMCPInterceptor_Stats(t *testing.T) {
 	}
 	if stats["mcp_requests"].(int64) != 0 {
 		t.Error("should start with 0 requests")
+	}
+}
+
+func TestMCPInterceptor_ContentLengthIsNumericString(t *testing.T) {
+	m := NewMCPInterceptor()
+
+	// Create a tools/call response with result to trigger modification
+	rpcResp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"result": map[string]interface{}{
+			"content": []interface{}{
+				map[string]interface{}{"type": "text", "text": "hello world"},
+			},
+		},
+	}
+	body, _ := json.Marshal(rpcResp)
+
+	resp := &http.Response{
+		Header:        http.Header{},
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+	resp.Header.Set("Content-Type", "application/json")
+	resp.Header.Set("Mcp-Session-Id", "test-cl")
+
+	result, err := m.InterceptResponse(resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Content-Length must be a valid numeric string
+	cl := result.Header.Get("Content-Length")
+	if cl == "" {
+		t.Fatal("Content-Length header missing")
+	}
+	// Parse as integer — must not fail
+	var n int
+	_, parseErr := fmt.Sscanf(cl, "%d", &n)
+	if parseErr != nil {
+		t.Errorf("Content-Length %q is not a valid integer: %v", cl, parseErr)
+	}
+
+	// Verify it matches actual body length
+	resultBody, _ := io.ReadAll(result.Body)
+	if n != len(resultBody) {
+		t.Errorf("Content-Length %d != actual body length %d", n, len(resultBody))
 	}
 }
