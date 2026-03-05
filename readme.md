@@ -130,7 +130,7 @@ make db-psql                                # connect to PostgreSQL with psql
 - MCP (Model Context Protocol) honeypot server -- fake tools (credential harvesters, data harvesters, budget drains), poisoned resources (fake .env, SSH keys, DB dumps, K8s secrets), and trap prompts with injection attacks, rug pulls, and cross-server exfiltration lures. Agent fingerprinting classifies MCP clients (Claude, GPT, Cursor, Windsurf) by behavioral signals. SSE transport with event notifications and heartbeat keepalive. Authenticated admin MCP endpoint at `/admin/mcp` for server management via AI agents (toggle features, get metrics, nightmare control). Dashboard integration with stats cards, event log, and per-tool breakdown
 - Multiple content formats, visual themes, and framework emulation (Rails, Django, Express, Spring, Laravel, and more)
 - REST API emulation (users, products, CMS, forms, infrastructure), GraphQL, Swagger/OpenAPI
-- OAuth2/SSO flows, CDN emulation, search engine, email/webmail simulation, i18n, health/actuator endpoints, WebSocket streams, analytics tracking, privacy/consent
+- OAuth2/SSO flows, CDN emulation, search engine, email/webmail simulation, i18n, emulated health/actuator endpoints (all subject to error injection), WebSocket streams, analytics tracking, privacy/consent
 - Traffic recording in JSONL and PCAP formats with replay support
 - Spider data generation for crawler discovery
 - Full admin panel with 5-tab layout (Dashboard, Server, Scanner, Proxy, Settings), three-column dashboard grouping by subsystem, clickable clients with detail/override, group-level preset buttons (All On/Off, Off/Low/Med/High/Max), per-mode nightmare toggles, feature flags, tunable parameters, and config import/export
@@ -165,6 +165,19 @@ make db-psql                                # connect to PostgreSQL with psql
 Run all three components at maximum adversarial settings simultaneously. The scanner floods with malformed requests and attack payloads. The proxy corrupts traffic in both directions. The server responds with broken HTTP, TCP resets, and infinite response bodies. A service passes nightmare testing if it does not crash, does not corrupt state, recovers to normal operation afterward, and maintains health check responses throughout. This is sustained, multi-vector adversarial testing -- not a single probe, but an ongoing assault from every direction at once.
 
 Nightmare mode is per-subsystem -- you can activate it independently for server, scanner, and proxy from the admin panel. Server nightmare snapshots all current config and applies extreme values, restoring on deactivate.
+
+---
+
+## Health Endpoints
+
+**The server has no real externally accessible health endpoints.** All public health-like paths (`/health`, `/health/live`, `/status`, `/ping`, `/actuator/health`, `/metrics`, `/debug/vars`, etc.) are emulated and subject to error injection like any other endpoint. They return realistic Spring Boot Actuator / Kubernetes health responses when no error is injected, but may return errors, timeouts, or corrupted responses at any time.
+
+For internal health checking (Docker, CI, selftest), a secret path `/_internal/<secret>/healthz` bypasses all chaos and always returns `{"status":"ok"}`. The secret is configured via:
+
+- `GLITCH_HEALTH_SECRET` environment variable (or `.env` file)
+- Auto-generated on startup if not set (printed to stderr)
+
+Docker Compose and the Dockerfile use this path for container health checks. The selftest pipeline generates its own secret per run.
 
 ---
 
@@ -243,7 +256,7 @@ docker-compose up                            # server + dashboard + PostgreSQL
 docker-compose up -d                         # detached mode
 ```
 
-Includes PostgreSQL 16 with health checks, named volumes for data persistence, and automatic `GLITCH_DB_URL` wiring. The server waits for PostgreSQL to be healthy before starting. Set `GLITCH_ADMIN_PASSWORD` in your `.env` or environment.
+Includes PostgreSQL 16 with health checks, named volumes for data persistence, and automatic `GLITCH_DB_URL` wiring. The server waits for PostgreSQL to be healthy before starting. Set `GLITCH_ADMIN_PASSWORD` in your `.env` or environment. Container health checks use the secret internal health endpoint (`/_internal/<secret>/healthz`) — configure via `GLITCH_HEALTH_SECRET` env var or use the default.
 
 ### Kubernetes
 

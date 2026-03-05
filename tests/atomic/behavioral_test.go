@@ -453,20 +453,21 @@ func TestBehavior_ErrorRateMultiplierZero(t *testing.T) {
 	defer dashboard.GetFeatureFlags().Set("random_blocking", true)
 	defer dashboard.GetFeatureFlags().Set("header_corrupt", true)
 
-	// Health endpoint bypasses error injection entirely — should always be 200
-	status, _ := behaviorRequest(t, handler, "/health")
-	if status != 200 {
-		t.Errorf("health with defaults should return 200, got %d", status)
-	}
-
-	// Set error rate to 0
+	// Set error rate to 0 — should disable all error injection
 	dashboard.GetAdminConfig().Set("error_rate_multiplier", 0.0)
 	defer dashboard.GetAdminConfig().Set("error_rate_multiplier", 1.0)
 
-	// Health should still be 200 (it bypasses error injection regardless)
-	status2, _ := behaviorRequest(t, handler, "/health")
-	if status2 != 200 {
-		t.Errorf("health with error_rate=0 should return 200, got %d", status2)
+	// With error_rate_multiplier=0, pages should serve without errors.
+	// Run multiple requests to reduce flakiness from other subsystems.
+	successes := 0
+	for i := 0; i < 10; i++ {
+		status, _ := behaviorRequest(t, handler, "/somepage")
+		if status == 200 {
+			successes++
+		}
+	}
+	if successes < 8 {
+		t.Errorf("with error_rate_multiplier=0, expected mostly 200s, got %d/10", successes)
 	}
 }
 

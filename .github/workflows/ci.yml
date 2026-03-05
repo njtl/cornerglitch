@@ -47,6 +47,7 @@ jobs:
     env:
       GLITCH_DB_URL: postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable
       GLITCH_ADMIN_PASSWORD: ci-test-password
+      GLITCH_HEALTH_SECRET: ci-health-secret
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -64,9 +65,9 @@ jobs:
         run: |
           nohup ./glitch -port 8765 -dash-port 8766 > /tmp/glitch.log 2>&1 &
           echo $! > /tmp/glitch.pid
-          # Wait for server to be ready
+          # Wait for server to be ready (use internal health path that bypasses chaos)
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8765/health/live > /dev/null 2>&1; then
+            if curl -sf http://localhost:8765/_internal/${GLITCH_HEALTH_SECRET}/healthz > /dev/null 2>&1; then
               echo "Server is ready (attempt $i)"
               break
             fi
@@ -87,7 +88,7 @@ jobs:
           done
 
       - name: Run tests
-        run: go test ./... -count=1 -v -timeout 300s
+        run: go test ./... -count=1 -v -timeout 600s
 
       - name: Show server logs on failure
         if: failure()

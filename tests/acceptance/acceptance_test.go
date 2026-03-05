@@ -18,6 +18,7 @@ const (
 	adminURL  = "http://localhost:8766"
 )
 
+
 // adminPassword is the password for the admin panel. Defaults to "admin".
 var adminPassword = func() string {
 	if p := os.Getenv("GLITCH_ADMIN_PASSWORD"); p != "" {
@@ -28,11 +29,26 @@ var adminPassword = func() string {
 
 func requireServer(t *testing.T) {
 	t.Helper()
-	resp, err := http.Get(serverURL + "/health")
-	if err != nil {
-		t.Skipf("Glitch server not running at %s: %v", serverURL, err)
+	// Use the internal health endpoint if GLITCH_HEALTH_SECRET is set (CI).
+	// This bypasses the main handler entirely, avoiding fingerprinting/adaptive
+	// engine accumulation that could block the test client.
+	// Fall back to /health with retries if no secret is configured.
+	healthURL := serverURL + "/health"
+	if secret := os.Getenv("GLITCH_HEALTH_SECRET"); secret != "" {
+		healthURL = serverURL + "/_internal/" + secret + "/healthz"
 	}
-	resp.Body.Close()
+	var lastErr error
+	for i := 0; i < 5; i++ {
+		resp, err := http.Get(healthURL)
+		if err != nil {
+			lastErr = err
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		resp.Body.Close()
+		return
+	}
+	t.Skipf("Glitch server not running at %s: %v", serverURL, lastErr)
 }
 
 func requireAdmin(t *testing.T) {
@@ -821,16 +837,24 @@ func TestScanner_CompareReflectsFeatureFlags(t *testing.T) {
 func TestSubsystem_HealthEndpoints(t *testing.T) {
 	requireServer(t)
 
+	// Health endpoints are now subject to error injection like all other
+	// public endpoints. Retry to get a successful response.
 	endpoints := []string{"/health", "/ping", "/status"}
 	for _, ep := range endpoints {
-		resp, err := http.Get(serverURL + ep)
-		if err != nil {
-			t.Errorf("GET %s: %v", ep, err)
-			continue
+		var got200 bool
+		for i := 0; i < 10; i++ {
+			resp, err := http.Get(serverURL + ep)
+			if err != nil {
+				continue
+			}
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				got200 = true
+				break
+			}
 		}
-		resp.Body.Close()
-		if resp.StatusCode != 200 {
-			t.Errorf("GET %s: expected 200, got %d", ep, resp.StatusCode)
+		if !got200 {
+			t.Errorf("GET %s: never got 200 in 10 tries", ep)
 		}
 	}
 }
