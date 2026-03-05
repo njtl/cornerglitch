@@ -363,48 +363,48 @@ glitch selftest --report report.json      # save report
 
 ## Implementation Phases
 
-### Phase 1: Foundation (this session)
-- [ ] Master plan document (this file)
-- [ ] PRDs for each component
-- [ ] New agent definitions (chaos-engineer, protocol-engineer)
-- [ ] Updated README (high-level, no hard numbers)
-- [ ] Updated CLAUDE.md files
-- [ ] Project renaming/branding where needed
+### Phase 1: Foundation
+- [x] Master plan document (this file)
+- [x] PRDs for each component (scanner, proxy, nightmare, selftest, audit-log)
+- [x] New agent definitions (chaos-engineer, protocol-engineer)
+- [x] Updated README (high-level, no hard numbers)
+- [x] Updated CLAUDE.md files
+- [x] Project renaming/branding where needed
 
 ### Phase 2: Scanner Core
-- [ ] Refactor glitch-crawler → glitch-scanner with new architecture
-- [ ] Scanner engine with module system
-- [ ] Attack modules for all 18 OWASP lists
-- [ ] Crawl engine with depth limiting and dedup
-- [ ] Resilience modules (error handling, timeout management)
-- [ ] JSON/HTML reporting
-- [ ] Scanner admin UI tab in dashboard
+- [x] Refactor glitch-crawler → glitch-scanner with new architecture
+- [x] Scanner engine with module system
+- [x] Attack modules for all OWASP lists (owasp, injection, fuzzing, protocol, auth, chaos)
+- [x] Crawl engine with depth limiting and dedup
+- [x] Resilience modules (error handling, timeout management)
+- [x] JSON/HTML reporting
+- [x] Scanner admin UI tab in dashboard (3 sub-tabs: Evaluate External, Built-in, PCAP Replay)
 
 ### Phase 3: Proxy Enhancement
-- [ ] Refactor glitch-proxy with interceptor pipeline
-- [ ] Chaos modules (latency, corruption, connection manipulation)
-- [ ] WAF mode with basic signature detection
-- [ ] Proxy admin UI tab in dashboard
-- [ ] Traffic recording integration
+- [x] Refactor glitch-proxy with interceptor pipeline
+- [x] Chaos modules (latency, corruption, connection manipulation)
+- [x] WAF mode with basic signature detection
+- [x] Proxy admin UI tab in dashboard
+- [ ] Traffic recording integration (proxy does not use internal/recorder)
 
 ### Phase 4: Nightmare Mode
-- [ ] Nightmare profiles for all three components
-- [ ] Survival criteria checking
-- [ ] Nightmare-specific monitoring and alerting
-- [ ] Recovery detection
+- [x] Nightmare profiles for all three components (NightmareState for server/scanner/proxy)
+- [ ] Survival criteria checking (only basic error rate check, no crash/OOM/state detection)
+- [ ] Nightmare-specific monitoring and alerting (no monitor.go, no thresholds)
+- [ ] Recovery detection (no post-nightmare health check)
 
 ### Phase 5: Self-Test Pipeline
-- [ ] `glitch selftest` command
-- [ ] Internal orchestration (start all three, connect, monitor)
-- [ ] Unified dashboard with pipeline view
-- [ ] Self-test reporting
+- [x] `glitch selftest` command (6 modes: baseline, scanner-stress, proxy-stress, server-stress, chaos, nightmare)
+- [x] Internal orchestration (start all three, connect, monitor)
+- [ ] Unified dashboard with pipeline view (no selftest tab/display)
+- [x] Self-test reporting
 
 ### Phase 6: Testing & Polish
-- [ ] Scanner unit tests
-- [ ] Proxy enhancement tests
-- [ ] Self-test integration tests
-- [ ] PM acceptance testing for all new features
-- [ ] Documentation finalization
+- [x] Scanner unit tests
+- [x] Proxy enhancement tests
+- [ ] Self-test integration tests (no selftest test files)
+- [ ] PM acceptance testing for all new features (partial — per-feature only)
+- [ ] Documentation finalization (ongoing)
 
 ---
 
