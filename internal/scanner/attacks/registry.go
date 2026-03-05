@@ -27,6 +27,8 @@ func AllModules() []scanner.AttackModule {
 		&ProtocolModule{},
 		&AuthModule{},
 		&ChaosModule{},
+		&TLSModule{},
+		&SlowHTTPModule{},
 	}
 }
 
