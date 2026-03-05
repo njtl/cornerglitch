@@ -66,6 +66,8 @@ func (as *AdminServer) registerAdminTools() {
 			if err := as.handler.ToggleFeature(params.Feature, params.Enabled); err != nil {
 				return errorContent(err.Error())
 			}
+			// Notify SSE clients about potential tool/resource changes
+			as.NotifyListsChanged()
 			return map[string]interface{}{
 				"content": []map[string]interface{}{
 					{"type": "text", "text": fmt.Sprintf("Feature '%s' set to %v", params.Feature, params.Enabled)},

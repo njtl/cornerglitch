@@ -226,6 +226,37 @@ func main() {
 				"unique_clients": len(collector.GetAllClientProfiles()),
 			}
 		},
+		SetErrorWeights: func(weights map[string]float64) error {
+			cfg := dashboard.GetAdminConfig()
+			for errType, weight := range weights {
+				if errType == "" {
+					continue
+				}
+				cfg.SetErrorWeight(errType, weight)
+			}
+			return nil
+		},
+		NightmareToggle: func(subsystem string, enabled bool) error {
+			ns := dashboard.GetNightmareState()
+			ns.Mu().Lock()
+			defer ns.Mu().Unlock()
+			switch subsystem {
+			case "server":
+				if enabled && !ns.ServerActive {
+					dashboard.ApplyServerNightmare()
+				} else if !enabled && ns.ServerActive {
+					dashboard.RestoreServerNightmare()
+				}
+				ns.ServerActive = enabled
+			case "scanner":
+				ns.ScannerActive = enabled
+			case "proxy":
+				ns.ProxyActive = enabled
+			default:
+				return fmt.Errorf("unknown subsystem: %s (use server, scanner, or proxy)", subsystem)
+			}
+			return nil
+		},
 	})
 	dashboard.SetAdminMCPHandler(adminMCP)
 	dashboard.SetMCPScanner(mcpScannerAdapter{})
