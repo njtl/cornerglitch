@@ -28,6 +28,7 @@ services:
       - GLITCH_ADMIN_PASSWORD=${GLITCH_ADMIN_PASSWORD:-admin}
       - GLITCH_CONFIG=${GLITCH_CONFIG:-}
       - GLITCH_DB_URL=postgres://glitch:glitch@postgres:5432/glitch?sslmode=disable
+      - GLITCH_HEALTH_SECRET=${GLITCH_HEALTH_SECRET:-docker-healthcheck-secret}
     volumes:
       - ./config.json:/etc/glitch/config.json:ro
       - ./captures:/data/captures
@@ -37,7 +38,7 @@ services:
       -dash-port 8766
       ${GLITCH_CONFIG:+-config /etc/glitch/config.json}'
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8765/health/live"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:8765/_internal/$${GLITCH_HEALTH_SECRET}/healthz"]
       interval: 30s
       timeout: 5s
       start_period: 5s

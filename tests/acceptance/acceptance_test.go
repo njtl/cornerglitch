@@ -28,11 +28,20 @@ var adminPassword = func() string {
 
 func requireServer(t *testing.T) {
 	t.Helper()
-	resp, err := http.Get(serverURL + "/health")
-	if err != nil {
-		t.Skipf("Glitch server not running at %s: %v", serverURL, err)
+	// /health is now subject to error injection, so retry a few times.
+	// We just need to confirm the server is listening — any response is fine.
+	var lastErr error
+	for i := 0; i < 5; i++ {
+		resp, err := http.Get(serverURL + "/health")
+		if err != nil {
+			lastErr = err
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		resp.Body.Close()
+		return
 	}
-	resp.Body.Close()
+	t.Skipf("Glitch server not running at %s: %v", serverURL, lastErr)
 }
 
 func requireAdmin(t *testing.T) {
@@ -821,16 +830,24 @@ func TestScanner_CompareReflectsFeatureFlags(t *testing.T) {
 func TestSubsystem_HealthEndpoints(t *testing.T) {
 	requireServer(t)
 
+	// Health endpoints are now subject to error injection like all other
+	// public endpoints. Retry to get a successful response.
 	endpoints := []string{"/health", "/ping", "/status"}
 	for _, ep := range endpoints {
-		resp, err := http.Get(serverURL + ep)
-		if err != nil {
-			t.Errorf("GET %s: %v", ep, err)
-			continue
+		var got200 bool
+		for i := 0; i < 10; i++ {
+			resp, err := http.Get(serverURL + ep)
+			if err != nil {
+				continue
+			}
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				got200 = true
+				break
+			}
 		}
-		resp.Body.Close()
-		if resp.StatusCode != 200 {
-			t.Errorf("GET %s: expected 200, got %d", ep, resp.StatusCode)
+		if !got200 {
+			t.Errorf("GET %s: never got 200 in 10 tries", ep)
 		}
 	}
 }
