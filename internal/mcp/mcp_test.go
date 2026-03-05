@@ -1,12 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- JSON-RPC tests ---
@@ -1343,5 +1345,256 @@ func TestAdminServer_ListsAdminTools(t *testing.T) {
 	// Should NOT have honeypot tools
 	if toolNames["get_aws_credentials"] {
 		t.Error("admin server should not expose honeypot tools")
+	}
+}
+
+// --- Admin tool execution tests ---
+
+func TestAdminServer_SetErrorProfile(t *testing.T) {
+	var capturedWeights map[string]float64
+	as := NewAdminServer(&AdminToolHandler{
+		SetErrorWeights: func(weights map[string]float64) error {
+			capturedWeights = weights
+			return nil
+		},
+	})
+
+	args := json.RawMessage(`{"weights":{"500":0.5,"503":0.3}}`)
+	tool := as.tools.Get("set_error_profile")
+	if tool == nil {
+		t.Fatal("set_error_profile tool not found")
+	}
+	result := tool.Handler(args)
+	if result["isError"] != nil {
+		t.Errorf("unexpected error: %v", result)
+	}
+	if capturedWeights["500"] != 0.5 || capturedWeights["503"] != 0.3 {
+		t.Errorf("weights not passed correctly: %v", capturedWeights)
+	}
+}
+
+func TestAdminServer_NightmareToggle(t *testing.T) {
+	var capturedSub string
+	var capturedEnabled bool
+	as := NewAdminServer(&AdminToolHandler{
+		NightmareToggle: func(subsystem string, enabled bool) error {
+			capturedSub = subsystem
+			capturedEnabled = enabled
+			return nil
+		},
+	})
+
+	args := json.RawMessage(`{"subsystem":"server","enabled":true}`)
+	tool := as.tools.Get("nightmare_toggle")
+	if tool == nil {
+		t.Fatal("nightmare_toggle tool not found")
+	}
+	result := tool.Handler(args)
+	if result["isError"] != nil {
+		t.Errorf("unexpected error: %v", result)
+	}
+	if capturedSub != "server" || !capturedEnabled {
+		t.Errorf("nightmare toggle not called correctly: sub=%s enabled=%v", capturedSub, capturedEnabled)
+	}
+}
+
+func TestAdminServer_GetMCPStats(t *testing.T) {
+	as := NewAdminServer(&AdminToolHandler{})
+	tool := as.tools.Get("get_mcp_stats")
+	if tool == nil {
+		t.Fatal("get_mcp_stats tool not found")
+	}
+	result := tool.Handler(json.RawMessage(`{}`))
+	if result["isError"] != nil {
+		t.Errorf("unexpected error: %v", result)
+	}
+	content := result["content"].([]map[string]interface{})
+	if len(content) == 0 || content[0]["text"] == "" {
+		t.Error("get_mcp_stats should return stats JSON")
+	}
+}
+
+func TestAdminServer_ListSessions(t *testing.T) {
+	as := NewAdminServer(&AdminToolHandler{})
+	tool := as.tools.Get("list_sessions")
+	if tool == nil {
+		t.Fatal("list_sessions tool not found")
+	}
+	result := tool.Handler(json.RawMessage(`{}`))
+	if result["isError"] != nil {
+		t.Errorf("unexpected error: %v", result)
+	}
+}
+
+func TestAdminServer_UnwiredToolReturnsError(t *testing.T) {
+	as := NewAdminServer(&AdminToolHandler{}) // nil callbacks
+
+	tool := as.tools.Get("set_error_profile")
+	result := tool.Handler(json.RawMessage(`{"weights":{"500":0.5}}`))
+	if result["isError"] != true {
+		t.Error("unwired set_error_profile should return error")
+	}
+
+	tool = as.tools.Get("nightmare_toggle")
+	result = tool.Handler(json.RawMessage(`{"subsystem":"server","enabled":true}`))
+	if result["isError"] != true {
+		t.Error("unwired nightmare_toggle should return error")
+	}
+}
+
+// --- SSE HTTP delivery tests ---
+
+func TestSSE_HTTPDelivery(t *testing.T) {
+	srv := NewServer()
+
+	// Initialize a session
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"sse-test"}}}`
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(initBody))
+	initReq.Header.Set("Content-Type", "application/json")
+	initW := httptest.NewRecorder()
+	srv.ServeHTTP(initW, initReq)
+	sid := initW.Header().Get("Mcp-Session-Id")
+	if sid == "" {
+		t.Fatal("no session ID returned")
+	}
+
+	// Connect SSE with a cancelable context
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	sseReq := httptest.NewRequest(http.MethodGet, "/mcp", nil).WithContext(ctx)
+	sseReq.Header.Set("Mcp-Session-Id", sid)
+	sseReq.Header.Set("Accept", "text/event-stream")
+
+	received := make(chan string, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		go func() {
+			time.Sleep(50 * time.Millisecond) // let SSE handler start
+			srv.BroadcastToolsChanged()
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+		srv.ServeHTTP(w, sseReq)
+		received <- w.Body.String()
+	}()
+
+	body := <-received
+	if !strings.Contains(body, "tools/listChanged") {
+		t.Errorf("SSE stream should contain tools/listChanged, got: %s", truncate(body, 200))
+	}
+}
+
+func TestSSE_ReplayMissedEvents(t *testing.T) {
+	srv := NewServer()
+
+	// Broadcast events while no clients are connected
+	srv.BroadcastToolsChanged()
+	srv.BroadcastResourcesChanged()
+	srv.BroadcastToolsChanged()
+
+	srv.sseMu.Lock()
+	bufLen := len(srv.eventBuffer)
+	srv.sseMu.Unlock()
+	if bufLen != 3 {
+		t.Fatalf("expected 3 buffered events, got %d", bufLen)
+	}
+
+	// Initialize a session
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"replay-test"}}}`
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(initBody))
+	initReq.Header.Set("Content-Type", "application/json")
+	initW := httptest.NewRecorder()
+	srv.ServeHTTP(initW, initReq)
+	sid := initW.Header().Get("Mcp-Session-Id")
+
+	// Connect with Last-Event-ID=1 (should replay events 2 and 3)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	sseReq := httptest.NewRequest(http.MethodGet, "/mcp", nil).WithContext(ctx)
+	sseReq.Header.Set("Mcp-Session-Id", sid)
+	sseReq.Header.Set("Accept", "text/event-stream")
+	sseReq.Header.Set("Last-Event-ID", "1")
+
+	received := make(chan string, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			cancel()
+		}()
+		srv.ServeHTTP(w, sseReq)
+		received <- w.Body.String()
+	}()
+
+	body := <-received
+	if !strings.Contains(body, "resources/listChanged") {
+		t.Errorf("SSE replay should include resources/listChanged, got: %s", truncate(body, 200))
+	}
+
+	// Count replayed events — should have at least the 2 missed events (id 2 and 3)
+	count := strings.Count(body, "event: message")
+	if count < 2 {
+		t.Errorf("expected at least 2 replayed events, got %d", count)
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
+// --- Injection follow auto-detection ---
+
+func TestFingerprint_InjectionFollowAutoDetection(t *testing.T) {
+	srv := NewServer()
+
+	// Initialize a session
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"inject-test"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(initBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	sid := w.Header().Get("Mcp-Session-Id")
+
+	// Call an injection-indicating tool (get_aws_credentials)
+	callBody := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_aws_credentials","arguments":{}}}`
+	callReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(callBody))
+	callReq.Header.Set("Content-Type", "application/json")
+	callReq.Header.Set("Mcp-Session-Id", sid)
+	callW := httptest.NewRecorder()
+	srv.ServeHTTP(callW, callReq)
+
+	// Check that injection follow was auto-recorded
+	session := srv.sessions.Get(sid)
+	if session == nil {
+		t.Fatal("session not found")
+	}
+	if session.Fingerprint == nil {
+		t.Fatal("fingerprint is nil")
+	}
+	if !session.Fingerprint.InjectionFollow {
+		t.Error("InjectionFollow should be true after calling get_aws_credentials")
+	}
+	if session.Fingerprint.RiskScore == 0 {
+		t.Error("risk score should be elevated after injection follow")
+	}
+}
+
+func TestIsInjectionIndicatingTool(t *testing.T) {
+	positive := []string{"get_aws_credentials", "get_api_keys", "get_database_connection", "submit_feedback", "analyze_codebase"}
+	for _, name := range positive {
+		if !isInjectionIndicatingTool(name) {
+			t.Errorf("%s should be injection-indicating", name)
+		}
+	}
+	negative := []string{"help", "status_report", "ping", "random_tool"}
+	for _, name := range negative {
+		if isInjectionIndicatingTool(name) {
+			t.Errorf("%s should NOT be injection-indicating", name)
+		}
 	}
 }

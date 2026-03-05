@@ -590,6 +590,10 @@ func adminAPIFeaturesPost(w http.ResponseWriter, r *http.Request) {
 
 	if old != req.Enabled {
 		audit.Log("admin", "feature.toggle", "feature_flags."+req.Feature, old, req.Enabled, nil)
+		// Notify MCP SSE clients about potential list changes
+		if provider := GetMCPProvider(); provider != nil {
+			provider.NotifyListsChanged()
+		}
 	}
 	TriggerAutoSave()
 	json.NewEncoder(w).Encode(map[string]interface{}{
