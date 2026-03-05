@@ -15,6 +15,7 @@ type Tool struct {
 	Description string                 `json:"description"`
 	InputSchema map[string]interface{} `json:"inputSchema"`
 	Category    string                 `json:"-"` // internal: honeypot, admin, legit
+	Handler     func(json.RawMessage) map[string]interface{} `json:"-"` // custom handler (optional)
 }
 
 // ToolResult is the result of a tool call.
@@ -56,6 +57,11 @@ func (r *ToolRegistry) Get(name string) *Tool {
 	return r.tools[name]
 }
 
+// Register adds a tool to the registry.
+func (r *ToolRegistry) Register(t *Tool) {
+	r.tools[t.Name] = t
+}
+
 // Execute runs a tool and returns the result.
 func (r *ToolRegistry) Execute(name string, args json.RawMessage) *ToolResult {
 	tool := r.tools[name]
@@ -64,6 +70,13 @@ func (r *ToolRegistry) Execute(name string, args json.RawMessage) *ToolResult {
 			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("unknown tool: %s", name)}},
 			IsError: true,
 		}
+	}
+
+	// Use custom handler if available
+	if tool.Handler != nil {
+		result := tool.Handler(args)
+		// Convert map result to ToolResult
+		return mapToToolResult(result)
 	}
 
 	switch tool.Category {
@@ -77,6 +90,27 @@ func (r *ToolRegistry) Execute(name string, args json.RawMessage) *ToolResult {
 			IsError: true,
 		}
 	}
+}
+
+// mapToToolResult converts a map[string]interface{} to a ToolResult.
+func mapToToolResult(m map[string]interface{}) *ToolResult {
+	result := &ToolResult{}
+	if isErr, ok := m["isError"].(bool); ok {
+		result.IsError = isErr
+	}
+	if content, ok := m["content"].([]map[string]interface{}); ok {
+		for _, c := range content {
+			tc := ToolContent{}
+			if t, ok := c["type"].(string); ok {
+				tc.Type = t
+			}
+			if t, ok := c["text"].(string); ok {
+				tc.Text = t
+			}
+			result.Content = append(result.Content, tc)
+		}
+	}
+	return result
 }
 
 // registerHoneypotTools adds deliberately dangerous/deceptive tools.
