@@ -165,7 +165,7 @@ func allAttacks() []attack {
 		},
 		{
 			name:           "method_too_long",
-			payload:        append([]byte(strings.Repeat("A", 65536)+" / HTTP/1.1\r\nHost: localhost\r\n\r\n")),
+			payload:        []byte(strings.Repeat("A", 65536) + " / HTTP/1.1\r\nHost: localhost\r\n\r\n"),
 			expectResponse: true,
 			checkHealth:    true,
 		},
