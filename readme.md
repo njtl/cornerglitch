@@ -81,6 +81,7 @@ go build -o glitch ./cmd/glitch
 go build -o glitch-scanner ./cmd/glitch-scanner
 ./glitch-scanner -target http://localhost:8765
 ./glitch-scanner -target http://localhost:8765 -profile nightmare
+./glitch-scanner -target http://localhost:8765 -profile destroyer   # server destruction testing
 ```
 
 ### Glitch Proxy
@@ -120,7 +121,10 @@ make db-psql                                # connect to PostgreSQL with psql
 
 ### Glitch Server (backend emulator)
 
-- Dozens of error types across three layers: HTTP errors, TCP-level errors (resets, drops, slow drip, partial bodies), and protocol-level glitches (version mismatches, header corruption, encoding conflicts)
+- Dozens of error types across three layers: HTTP errors, TCP-level errors (resets, drops, slow drip, partial bodies), and protocol-level glitches (version mismatches, header corruption, encoding conflicts, HTTP/2 frame chaos -- GOAWAY, RST_STREAM, SETTINGS flood, window exhaustion, CONTINUATION flood, PING flood)
+- TLS chaos engine with 5 levels (clean, downgrade, weak cipher, cert chaos, nightmare) -- auto-generated self-signed certs, per-connection cert rotation, SNI-based mismatch, weak key certs, ALPN lies, per-client TLS config adaptation
+- HSTS chaos -- random Strict-Transport-Security headers per client+path (lock, disable, short-lived, conflicting, missing, subdomain-only)
+- HTTPS listener on port 8767 with HTTP/2 auto-enabled via ALPN, custom cert/key support
 - Vulnerability emulation across all major OWASP Top 10 lists (Web, API, LLM, CI/CD, Cloud-Native, Mobile, Privacy, Client-Side, IoT, Serverless, and more) plus advanced categories -- realistic corporate-looking pages, not demo labels
 - Infinite AI scraper labyrinth -- procedurally generated, deterministic page graph that traps crawlers
 - Adaptive behavior engine -- fingerprints clients and adjusts hostility per-client in real time
@@ -144,7 +148,9 @@ make db-psql                                # connect to PostgreSQL with psql
 - Crawl engine with depth limiting, deduplication, and loop detection
 - Resilience testing -- verifies graceful handling of every error type the server can throw
 - Evasion modes for WAF bypass testing (encoding, header manipulation, fragmentation)
-- Configurable profiles: compliance, aggressive, stealth, nightmare
+- Slow HTTP attack module -- slowloris, slow POST (RUDY), slow read, connection exhaustion, large headers, chunked abuse, multipart bombs, ReDoS payloads, compression bombs
+- TLS attack module -- HSTS probing, TLS version probing (1.0-1.3), weak cipher enumeration, certificate analysis, ALPN probing, downgrade testing
+- Configurable profiles: compliance, aggressive, stealth, nightmare, destroyer
 - Scanner evaluation: compare results against expected vulnerability surface, classify false negatives (crawled vs not-crawled), multi-scanner comparison with accuracy scoring
 - Supported external scanners: nuclei, httpx, ffuf, nikto, nmap, wapiti -- launched and parsed automatically from the admin panel
 - MCP scanner -- connects to external MCP servers and tests for security issues: injection patterns in tool descriptions, credential harvesting, path traversal in resources, rug pull detection (tool description changes), canary payload exfiltration testing. Risk scoring and structured JSON reports via dashboard
@@ -225,6 +231,8 @@ cp .env.example .env    # then edit with your values
 | `GLITCH_ADMIN_PASSWORD` | Recommended | Dashboard login password | Auto-generated (printed to stderr) |
 | `GLITCH_DB_URL` | **Yes** for persistence | PostgreSQL connection string | None (memory-only mode) |
 | `PASSWORD_RESET_FROM_ENV` | No | Set to `1` to force-reset password from env | `0` (disabled) |
+| `GLITCH_TLS_CERT` | No | Path to TLS certificate file | Auto-generated self-signed |
+| `GLITCH_TLS_KEY` | No | Path to TLS private key file | Auto-generated self-signed |
 
 > **Password persistence**: Password changes via the admin UI are saved to the database. On restart, the DB password takes priority over the `.env` value. To recover from a forgotten password, set `PASSWORD_RESET_FROM_ENV=1` — this overwrites the DB password with `GLITCH_ADMIN_PASSWORD` on next startup. Remove the flag after resetting.
 
@@ -325,6 +333,10 @@ make k8s-deploy     # deploy to Kubernetes
 ## Architecture Overview
 
 The server, scanner, and proxy are separate binaries built from `cmd/`. All internal logic lives under `internal/` organized by subsystem. The server has dozens of subsystems including error generation, page rendering, vulnerability emulation, fingerprinting, adaptive behavior, bot detection, honeypot, API emulation, OAuth, CDN, search, email, WebSocket, traffic recording, API chaos engine, media chaos engine (procedural generation and corruption of images, audio, video, and streaming formats), and a full admin dashboard with live metrics. The proxy adds an interception pipeline with chaos, WAF, corruption, and replay modules. The scanner adds attack, evasion, resilience, and crawl modules with multi-scanner evaluation. See `docs/PLAN.md` for the full architecture plan and `docs/` for component-level PRDs.
+
+### Server Destruction Testing
+
+The destroyer profile (`-profile destroyer`) runs all attack modules at maximum concurrency (200 workers, no rate limit, 60s timeout) with no crawling -- direct assault. Docker Compose targets in `tests/targets/` provide 7 common HTTP servers (Express, Flask, Django, Go net/http, Nginx, Apache, Puma) for benchmarking server resilience. See [`docs/server-destruction-findings.md`](docs/server-destruction-findings.md) for detailed results.
 
 ### Real-World Scanner Behavior
 
