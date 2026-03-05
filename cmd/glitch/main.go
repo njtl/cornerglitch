@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -264,6 +266,19 @@ func main() {
 
 
 	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng, mediaGen, mediaChaosEng, budgetTrapEng, mcpServer)
+
+	// Set up secret internal health endpoint.
+	// The real health check is at /_internal/<secret>/healthz — only known to CI/selftest.
+	// All public health endpoints (/health, /health/live, /actuator, etc.) are emulated
+	// and subject to error injection like any other endpoint.
+	healthSecret := os.Getenv("GLITCH_HEALTH_SECRET")
+	if healthSecret == "" {
+		b := make([]byte, 16)
+		rand.Read(b)
+		healthSecret = hex.EncodeToString(b)
+	}
+	handler.SetHealthSecret(healthSecret)
+	log.Printf("\033[36m[glitch]\033[0m Internal health: http://localhost:%d/_internal/%s/healthz", *port, healthSecret)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler.ServeHTTP)

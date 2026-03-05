@@ -131,6 +131,7 @@ type Handler struct {
 	apiChaosConfig       *dashboard.APIChaosConfig
 	mediaChaosConfig     *dashboard.MediaChaosConfig
 	lastConfigVersion    atomic.Int64
+	healthSecret         string // UUID path for real internal health check
 }
 
 func NewHandler(
@@ -207,7 +208,23 @@ func NewHandler(
 	}
 }
 
+// SetHealthSecret sets the secret path for the real internal health endpoint.
+// The real health check is at /_internal/<secret>/healthz — everything else
+// (including /health, /health/live, etc.) goes through error injection.
+func (h *Handler) SetHealthSecret(secret string) {
+	h.healthSecret = secret
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Real internal health check — bypasses ALL chaos/fingerprinting.
+	// Only accessible via secret UUID path, not exposed to clients.
+	if h.healthSecret != "" && r.URL.Path == "/_internal/"+h.healthSecret+"/healthz" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+		return
+	}
+
 	start := time.Now()
 	h.collector.ActiveConns.Add(1)
 	defer h.collector.ActiveConns.Add(-1)
@@ -376,11 +393,9 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 		return status, "mcp"
 	}
 
-	// Health/status/debug endpoints
-	if h.healthH != nil && h.flags.IsHealthEnabled() && h.healthH.ShouldHandle(r.URL.Path) {
-		status := h.healthH.ServeHTTP(w, r)
-		return status, "health"
-	}
+	// Health/status/debug endpoints are emulated — they go through error
+	// injection like everything else. Only the secret /_internal/<uuid>/healthz
+	// path bypasses chaos. Health is checked AFTER the error roll below.
 
 	// Spider/crawler resource files (robots.txt, sitemap.xml, favicon.ico, etc.)
 	if h.spiderH != nil && h.flags.IsSpiderEnabled() && h.spiderH.ShouldHandle(r.URL.Path) {
@@ -485,10 +500,15 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 		return status, "vuln"
 	}
 
-	// Honeypot: catch scanner probes on known vuln paths
+	// Honeypot: catch scanner probes on known vuln paths.
+	// Skip health paths when health subsystem is enabled — those should fall
+	// through to the health handler (after error injection) instead.
 	if h.honey != nil && h.flags.IsHoneypotEnabled() && h.honey.ShouldHandle(r.URL.Path) {
-		status := h.honey.ServeHTTP(w, r)
-		return status, "honeypot"
+		isHealthPath := h.healthH != nil && h.flags.IsHealthEnabled() && h.healthH.ShouldHandle(r.URL.Path)
+		if !isHealthPath {
+			status := h.honey.ServeHTTP(w, r)
+			return status, "honeypot"
+		}
 	}
 
 	// Budget traps: escalating traps for high-volume clients
@@ -585,6 +605,14 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 		if errors.IsDelay(errType) {
 			return h.servePage(w, r, behavior, clientID), "delayed"
 		}
+	}
+
+	// Health/status/debug endpoints — emulated, after error injection.
+	// These return realistic Spring Boot Actuator / K8s health responses
+	// but only when no error was injected above.
+	if h.healthH != nil && h.flags.IsHealthEnabled() && h.healthH.ShouldHandle(r.URL.Path) {
+		status := h.healthH.ServeHTTP(w, r)
+		return status, "health"
 	}
 
 	return h.servePage(w, r, behavior, clientID), "ok"

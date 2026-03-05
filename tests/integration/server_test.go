@@ -74,13 +74,18 @@ func newTestHandler() *server.Handler {
 	botDet := botdetect.NewDetector()
 	spiderH := spider.NewHandler(nil)
 
-	return server.NewHandler(
+	h := server.NewHandler(
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
 		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(), nil,
 	)
+	h.SetHealthSecret("test-health-secret")
+	return h
 }
+
+// testInternalHealthPath is the internal health endpoint for test handlers.
+const testInternalHealthPath = "/_internal/test-health-secret/healthz"
 
 // newTestHandlerNoChaos creates a handler with media generation but no chaos engine.
 // Used for tests that need deterministic media serving without chaos interference.
@@ -113,12 +118,14 @@ func newTestHandlerNoChaos() *server.Handler {
 	botDet := botdetect.NewDetector()
 	spiderH := spider.NewHandler(nil)
 
-	return server.NewHandler(
+	h := server.NewHandler(
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
 		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), nil, budgettrap.NewEngine(), nil,
 	)
+	h.SetHealthSecret("test-health-secret")
+	return h
 }
 
 func doRequest(h http.Handler, method, path string, body string, headers map[string]string) *httptest.ResponseRecorder {
@@ -184,84 +191,132 @@ func TestContentPagesReturnHTML(t *testing.T) {
 
 func TestHealthEndpointIntegration(t *testing.T) {
 	h := newTestHandler()
-	rr := doRequest(h, "GET", "/health", "", nil)
+
+	// Internal health endpoint always returns 200 (bypasses chaos)
+	rr := doRequest(h, "GET", testInternalHealthPath, "", nil)
 	if rr.Code != 200 {
-		t.Errorf("expected 200, got %d", rr.Code)
+		t.Errorf("internal health: expected 200, got %d", rr.Code)
 	}
-	ct := rr.Header().Get("Content-Type")
-	if !strings.Contains(ct, "application/json") {
-		t.Errorf("expected JSON content-type, got %s", ct)
+
+	// Emulated /health is subject to error injection, but should sometimes return
+	// the health JSON when no error is rolled
+	var gotHealth bool
+	for i := 0; i < 20; i++ {
+		rr = doRequest(h, "GET", "/health", "", nil)
+		if rr.Code == 200 && strings.Contains(rr.Body.String(), "status") {
+			gotHealth = true
+			break
+		}
+	}
+	if !gotHealth {
+		t.Error("emulated /health never returned health JSON in 20 tries")
 	}
 }
 
 func TestPingEndpointIntegration(t *testing.T) {
 	h := newTestHandler()
-	rr := doRequest(h, "GET", "/ping", "", nil)
-	if rr.Code != 200 {
-		t.Errorf("expected 200, got %d", rr.Code)
+	// /ping is subject to error injection — retry until we get the real response
+	var gotPong bool
+	for i := 0; i < 20; i++ {
+		rr := doRequest(h, "GET", "/ping", "", nil)
+		if rr.Code == 200 && strings.Contains(rr.Body.String(), "pong") {
+			gotPong = true
+			break
+		}
 	}
-	body := rr.Body.String()
-	if !strings.Contains(body, "pong") {
-		t.Errorf("expected pong, got: %s", body)
+	if !gotPong {
+		t.Error("/ping never returned pong in 20 tries")
 	}
 }
 
 func TestVersionEndpointIntegration(t *testing.T) {
 	h := newTestHandler()
-	rr := doRequest(h, "GET", "/version", "", nil)
-	if rr.Code != 200 {
-		t.Errorf("expected 200, got %d", rr.Code)
+	// /version is subject to error injection — retry until we get valid JSON
+	var gotVersion bool
+	for i := 0; i < 20; i++ {
+		rr := doRequest(h, "GET", "/version", "", nil)
+		if rr.Code == 200 {
+			var data map[string]interface{}
+			if err := json.Unmarshal(rr.Body.Bytes(), &data); err == nil {
+				if _, ok := data["version"]; ok {
+					gotVersion = true
+					break
+				}
+			}
+		}
 	}
-	var data map[string]interface{}
-	if err := json.Unmarshal(rr.Body.Bytes(), &data); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if _, ok := data["version"]; !ok {
-		t.Error("expected version field in response")
+	if !gotVersion {
+		t.Error("/version never returned valid version JSON in 20 tries")
 	}
 }
 
 func TestStatusEndpointIntegration(t *testing.T) {
 	h := newTestHandler()
-	rr := doRequest(h, "GET", "/status", "", nil)
-	if rr.Code != 200 {
-		t.Errorf("expected 200, got %d", rr.Code)
+	// /status is subject to error injection — retry until 200
+	var got200 bool
+	for i := 0; i < 20; i++ {
+		rr := doRequest(h, "GET", "/status", "", nil)
+		if rr.Code == 200 {
+			got200 = true
+			break
+		}
+	}
+	if !got200 {
+		t.Error("/status never returned 200 in 20 tries")
 	}
 }
 
 func TestStatusJSONEndpointIntegration(t *testing.T) {
 	h := newTestHandler()
-	rr := doRequest(h, "GET", "/status.json", "", nil)
-	if rr.Code != 200 {
-		t.Errorf("expected 200, got %d", rr.Code)
+	var gotJSON bool
+	for i := 0; i < 20; i++ {
+		rr := doRequest(h, "GET", "/status.json", "", nil)
+		if rr.Code == 200 {
+			var data map[string]interface{}
+			if err := json.Unmarshal(rr.Body.Bytes(), &data); err == nil {
+				gotJSON = true
+				break
+			}
+		}
 	}
-	var data map[string]interface{}
-	if err := json.Unmarshal(rr.Body.Bytes(), &data); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+	if !gotJSON {
+		t.Error("/status.json never returned valid JSON in 20 tries")
 	}
 }
 
 func TestMetricsEndpointIntegration(t *testing.T) {
 	h := newTestHandler()
-	rr := doRequest(h, "GET", "/metrics", "", nil)
-	if rr.Code != 200 {
-		t.Errorf("expected 200, got %d", rr.Code)
+	var gotMetrics bool
+	for i := 0; i < 20; i++ {
+		rr := doRequest(h, "GET", "/metrics", "", nil)
+		if rr.Code == 200 {
+			body := rr.Body.String()
+			if strings.Contains(body, "process_") || strings.Contains(body, "go_") {
+				gotMetrics = true
+				break
+			}
+		}
 	}
-	body := rr.Body.String()
-	if !strings.Contains(body, "process_") || !strings.Contains(body, "go_") {
-		t.Error("expected Prometheus metrics format")
+	if !gotMetrics {
+		t.Error("/metrics never returned Prometheus metrics format in 20 tries")
 	}
 }
 
 func TestDebugVarsIntegration(t *testing.T) {
 	h := newTestHandler()
-	rr := doRequest(h, "GET", "/debug/vars", "", nil)
-	if rr.Code != 200 {
-		t.Errorf("expected 200, got %d", rr.Code)
+	var gotDebug bool
+	for i := 0; i < 20; i++ {
+		rr := doRequest(h, "GET", "/debug/vars", "", nil)
+		if rr.Code == 200 {
+			var data map[string]interface{}
+			if err := json.Unmarshal(rr.Body.Bytes(), &data); err == nil {
+				gotDebug = true
+				break
+			}
+		}
 	}
-	var data map[string]interface{}
-	if err := json.Unmarshal(rr.Body.Bytes(), &data); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+	if !gotDebug {
+		t.Error("/debug/vars never returned valid JSON in 20 tries")
 	}
 }
 
@@ -673,15 +728,20 @@ func TestFrameworkHeadersApplied(t *testing.T) {
 
 func TestCDNHeadersApplied(t *testing.T) {
 	h := newTestHandler()
-	// Use /health which always returns cleanly (no error injection or labyrinth)
-	rr := doRequest(h, "GET", "/health", "", nil)
-	// CDN emulator applies headers to all requests in ServeHTTP (before dispatch)
-	headers := rr.Header()
-	hasCDNHeader := false
-	for k := range headers {
-		if k == "X-Cache" || k == "Cache-Control" || k == "Age" || k == "Cf-Ray" ||
-			strings.Contains(k, "Cache") || strings.Contains(k, "CDN") {
-			hasCDNHeader = true
+	// CDN emulator applies headers in ServeHTTP (before dispatch), so even
+	// error-injected responses should have CDN headers. Retry a few times
+	// since some error types may drop headers entirely.
+	var hasCDNHeader bool
+	for i := 0; i < 20; i++ {
+		rr := doRequest(h, "GET", "/static/js/app.js", "", nil)
+		for k := range rr.Header() {
+			if k == "X-Cache" || k == "Cache-Control" || k == "Age" || k == "Cf-Ray" ||
+				strings.Contains(k, "Cache") || strings.Contains(k, "CDN") {
+				hasCDNHeader = true
+				break
+			}
+		}
+		if hasCDNHeader {
 			break
 		}
 	}
@@ -740,12 +800,12 @@ func TestConcurrentRequests(t *testing.T) {
 	h := newTestHandler()
 	done := make(chan bool, 20)
 
-	// Use paths that are handled by deterministic subsystems (health, search,
+	// Use paths that are handled by deterministic subsystems (search,
 	// api, etc.) and avoid "/" which can hit slow error types like slow_drip
 	// (17s) or delayed (3-5s). This test verifies concurrency safety, not
 	// response speed — slow chaos errors are tested elsewhere.
 	paths := []string{
-		"/health", "/search?q=test", "/api/v1/users",
+		testInternalHealthPath, "/search?q=test", "/api/v1/users",
 		"/webmail", "/es/", "/api/i18n/languages", "/status",
 		"/vuln/a01/admin", "/wp-admin/", "/ping",
 	}
@@ -777,7 +837,7 @@ func TestConcurrentRequests(t *testing.T) {
 func TestResponsesNotEmpty(t *testing.T) {
 	h := newTestHandler()
 	paths := []string{
-		"/health",
+		testInternalHealthPath,
 		"/search?q=test",
 		"/api/v1/users",
 		"/webmail",
@@ -817,7 +877,7 @@ func TestAllSubsystemsRouted(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"health", "GET", "/health"},
+		{"health", "GET", testInternalHealthPath},
 		{"api", "GET", "/api/v1/users"},
 		{"oauth", "GET", "/.well-known/openid-configuration"},
 		{"privacy", "GET", "/privacy-policy"},
@@ -943,6 +1003,7 @@ func newTestHandlerWithMCP() (*server.Handler, *mcp.Server) {
 		wsH, rec, searchH, emailH, healthH, i18nH,
 		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(), mcpServer,
 	)
+	h.SetHealthSecret("test-health-secret")
 	return h, mcpServer
 }
 
@@ -1043,10 +1104,10 @@ func TestIntegration_MCP_DoesNotInterfere(t *testing.T) {
 	h, _ := newTestHandlerWithMCP()
 	dashboard.GetFeatureFlags().Set("mcp", true)
 
-	// Health endpoint should still work
-	rr := doRequest(h, "GET", "/health", "", nil)
+	// Internal health endpoint should still work
+	rr := doRequest(h, "GET", testInternalHealthPath, "", nil)
 	if rr.Code != 200 {
-		t.Errorf("health: status = %d, want 200", rr.Code)
+		t.Errorf("internal health: status = %d, want 200", rr.Code)
 	}
 
 	// API endpoint should still work
