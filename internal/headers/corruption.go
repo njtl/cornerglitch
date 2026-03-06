@@ -324,8 +324,20 @@ func (e *Engine) applyChaos(w http.ResponseWriter, r *http.Request, seed uint64)
 				buf.WriteString("HTTP/1.0 200 OK\r\n")
 				buf.WriteString("Content-Type: text/html; charset=utf-8\r\n")
 				buf.WriteString("Transfer-Encoding: chunked\r\n")
-				// Add null bytes in a header value
+				// Null bytes in header values
 				buf.WriteString("X-Chaos: before\x00after\r\n")
+				// Emoji in header name (completely illegal but crashes parsers)
+				buf.WriteString("X-\xF0\x9F\x94\xA5: fire\r\n")
+				// Control chars in status line extension
+				buf.WriteString("X-Escape: \x1b[31mRED\x1b[0m\r\n")
+				// ANSI bell character (audible beep in terminals reading logs)
+				buf.WriteString("X-Bell: \x07\x07\x07\r\n")
+				// Zero-width joiners and spaces
+				buf.WriteString("X-Zero: a\xe2\x80\x8b\xe2\x80\x8bb\r\n")
+				// Bare CR without LF (confuses line-based parsers)
+				buf.WriteString("X-BareCR: value1\rvalue2\r\n")
+				// Header continuation (obs-fold) with tab
+				buf.WriteString("X-Folded: start\r\n\tcontinued\r\n\t more\r\n")
 				buf.WriteString(fmt.Sprintf("X-Chaos-ID: %x\r\n", nth(seed, 301)))
 				buf.WriteString("\r\n")
 				// Write a chunked body with extensions
@@ -340,7 +352,100 @@ func (e *Engine) applyChaos(w http.ResponseWriter, r *http.Request, seed uint64)
 		}
 	}
 
-	// 4. Drip-feed with interleaved garbage via Flusher
+	// 4. Emoji and Unicode in headers — crashes parsers that expect ASCII-only
+	//    RFC 7230 restricts header values to visible ASCII + obs-text (0x80-0xFF).
+	//    Emoji (multi-byte UTF-8 starting with 0xF0) and other Unicode in header
+	//    names/values crashes many HTTP parsers.
+	if bit(seed, 340, 0.6) {
+		emojiHeaders := []struct{ key, val string }{
+			// Emoji in header values
+			{"Server", "Apache/2.4 \xF0\x9F\x94\xA5\xF0\x9F\x92\x80"}, // 🔥💀
+			{"X-Powered-By", "Go \xF0\x9F\x90\xBF"},                     // 🐿
+			{"X-Status", "\xF0\x9F\x9A\x80 Running"},                    // 🚀
+			{"X-Mood", "\xF0\x9F\x98\x88\xF0\x9F\x91\xBB\xF0\x9F\x92\xA3"}, // 😈👻💣
+			// CJK characters
+			{"X-Lang", "\xe4\xb8\xad\xe6\x96\x87\xe6\xb5\x8b\xe8\xaf\x95"},
+			// Arabic (RTL override can mess up log viewers)
+			{"X-RTL", "\xd8\xa7\xd9\x84\xd8\xb9\xd8\xb1\xd8\xa8\xd9\x8a\xd8\xa9"},
+			// Zero-width chars (invisible but break string comparison)
+			{"X-Invisible", "normal\xe2\x80\x8b\xe2\x80\x8b\xe2\x80\x8btext"},
+			// Combining diacritics (Zalgo-style)
+			{"X-Zalgo", "h\xcc\xa8\xcc\xa9\xcc\xaee\xcc\xa8\xcc\xa9l\xcc\xa8\xcc\xa9p"},
+		}
+		picked := emojiHeaders[nth(seed, 341)%uint64(len(emojiHeaders))]
+		w.Header().Set(picked.key, picked.val)
+	}
+
+	// 5. High bytes and control characters in headers
+	if bit(seed, 350, 0.5) {
+		// Control characters (0x01-0x1F, 0x7F) are illegal in header values
+		controlVals := []string{
+			"value\x01with\x02control\x03chars",
+			"bell\x07tab\x0bvertical",
+			"escape\x1b[31mred\x1b[0m", // ANSI escape — crashes log viewers
+			"del\x7fchar",
+			"backspace\x08\x08\x08overwrite",
+			// Mix of high bytes (0x80-0xFF) — obs-text but many parsers reject
+			"high\x80\x81\x82\xff\xfebytes",
+			"latin1\xe9\xe8\xf1\xfc", // é è ñ ü in Latin-1 (not UTF-8)
+		}
+		val := controlVals[nth(seed, 351)%uint64(len(controlVals))]
+		w.Header().Set("X-Data", val)
+	}
+
+	// 6. Wrong encoding indicators — Content-Type claims one charset, body is another
+	if bit(seed, 360, 0.4) {
+		wrongEncodings := []string{
+			"text/html; charset=utf-32",
+			"text/html; charset=iso-2022-jp",
+			"text/html; charset=ebcdic-us",
+			"text/html; charset=utf-7",
+			"text/html; charset=windows-31j",
+			"application/json; charset=utf-16le",
+			"text/html; charset=\xF0\x9F\x92\xA9", // 💩 as charset name
+		}
+		w.Header().Set("Content-Type", wrongEncodings[nth(seed, 361)%uint64(len(wrongEncodings))])
+	}
+
+	// 7. Overlong UTF-8 sequences in headers (security bypass technique)
+	//    Overlong encodings of '/' and '.' can bypass path validation
+	if bit(seed, 370, 0.3) {
+		// Overlong UTF-8 for ASCII chars — illegal but parsed by some
+		w.Header().Set("X-Path", "/admin\xc0\xaf..%c0%af../../etc/passwd")
+		w.Header().Set("X-Overlong", "A\xc1\x81B\xc0\xafC") // Overlong 'A', overlong '/'
+	}
+
+	// 8. CVE-inspired header attacks — patterns from real parser crashes
+	if bit(seed, 380, 0.4) {
+		cveHeaders := []struct{ key, val string }{
+			// CVE-2019-9740 (Python urllib) — CRLF injection in URL
+			{"Location", "http://evil.com\r\nInjected: yes"},
+			// CVE-2020-8945 (gpgme) — double-free via large header
+			{"X-Large", strings.Repeat("A", 65536)},
+			// CVE-2023-44487 (HTTP/2 rapid reset) — via header hint
+			{"X-HTTP2-Hint", "RST_STREAM"},
+			// CVE-2021-22901 (curl) — TLS session reuse confusion
+			{"Alt-Svc", `h2="evil.com:443"; ma=2592000; persist=1`},
+			// Apache mod_proxy CVE-2021-40438 — SSRF via crafted URI
+			{"X-Forwarded-Host", "evil.com:@internal:8080"},
+			// Node.js HTTP request smuggling via Unicode
+			{"Transfer-Encoding", "chunked\xc0\xae"},
+			// Nginx CVE-2013-4547 — null byte in URI
+			{"X-Original-URL", "/admin\x00.html"},
+			// Header name with whitespace (RFC violation, crashes strict parsers)
+			{"X Header", "space in name"},
+			// Duplicate content-length (request smuggling classic)
+			{"Content-Length", "0"},
+			// Empty header name
+			{"", "empty-name-value"},
+		}
+		picked := cveHeaders[nth(seed, 381)%uint64(len(cveHeaders))]
+		if picked.key != "" {
+			w.Header().Set(picked.key, picked.val)
+		}
+	}
+
+	// 9. Drip-feed with interleaved garbage via Flusher
 	if bit(seed, 320, 0.3) {
 		if flusher, ok := w.(http.Flusher); ok {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

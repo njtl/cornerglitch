@@ -498,6 +498,10 @@ type AdminConfig struct {
 	// Domain chaos controls
 	HSTSChaosEnabled bool // whether HSTS chaos is active
 
+	// H3/QUIC chaos controls
+	H3ChaosEnabled bool // whether HTTP/3 chaos emulation is active
+	H3ChaosLevel   int  // 0=off, 1=subtle, 2=moderate, 3=aggressive, 4=nightmare
+
 	// Extended controllability fields
 	ErrorWeights           map[string]float64
 	HoneypotResponseStyle  string
@@ -523,6 +527,11 @@ type AdminConfig struct {
 
 	// Budget trap controls
 	BudgetTrapThreshold int // request count before budget traps activate per client
+
+	// MCP subsystem controls
+	MCPHoneypotEnabled    bool // whether honeypot tools are active
+	MCPFingerprintEnabled bool // whether client fingerprinting is active
+	MCPTrapPromptsEnabled bool // whether trap/injection prompts are active
 }
 
 // NewAdminConfig returns an AdminConfig with sensible defaults.
@@ -544,6 +553,8 @@ func NewAdminConfig() *AdminConfig {
 		TLSChaosEnabled:       false,
 		TLSChaosLevel:         0,
 		HSTSChaosEnabled:      false,
+		H3ChaosEnabled:        false,
+		H3ChaosLevel:          0,
 		ErrorWeights:           make(map[string]float64),
 		HoneypotResponseStyle:  "realistic",
 		PageTypeWeights:        make(map[string]float64),
@@ -562,6 +573,9 @@ func NewAdminConfig() *AdminConfig {
 		MediaChaosSlowMaxMs:         1000,
 		MediaChaosInfiniteMaxBytes:  104857600, // 100MB
 		BudgetTrapThreshold:         10,
+		MCPHoneypotEnabled:          true,
+		MCPFingerprintEnabled:       true,
+		MCPTrapPromptsEnabled:       true,
 	}
 }
 
@@ -586,6 +600,8 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"tls_chaos_enabled":        c.TLSChaosEnabled,
 		"tls_chaos_level":          c.TLSChaosLevel,
 		"hsts_chaos_enabled":       c.HSTSChaosEnabled,
+		"h3_chaos_enabled":         c.H3ChaosEnabled,
+		"h3_chaos_level":           c.H3ChaosLevel,
 		"honeypot_response_style":  c.HoneypotResponseStyle,
 		"cookie_trap_frequency":    c.CookieTrapFrequency,
 		"js_trap_difficulty":       c.JSTrapDifficulty,
@@ -602,6 +618,9 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"media_chaos_slow_max_ms":           c.MediaChaosSlowMaxMs,
 		"media_chaos_infinite_max_bytes":    c.MediaChaosInfiniteMaxBytes,
 		"budget_trap_threshold":             c.BudgetTrapThreshold,
+		"mcp_honeypot_enabled":              c.MCPHoneypotEnabled,
+		"mcp_fingerprint_enabled":           c.MCPFingerprintEnabled,
+		"mcp_trap_prompts_enabled":          c.MCPTrapPromptsEnabled,
 	}
 }
 
@@ -783,6 +802,17 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 		}
 	case "hsts_chaos_enabled":
 		c.HSTSChaosEnabled = value != 0
+	case "h3_chaos_enabled":
+		c.H3ChaosEnabled = value != 0
+	case "h3_chaos_level":
+		v := int(value)
+		if v < 0 {
+			v = 0
+		}
+		if v > 4 {
+			v = 4
+		}
+		c.H3ChaosLevel = v
 	case "api_chaos_probability":
 		if value < 0 {
 			value = 0
@@ -843,6 +873,12 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 			v = 10000
 		}
 		c.BudgetTrapThreshold = v
+	case "mcp_honeypot_enabled":
+		c.MCPHoneypotEnabled = value != 0
+	case "mcp_fingerprint_enabled":
+		c.MCPFingerprintEnabled = value != 0
+	case "mcp_trap_prompts_enabled":
+		c.MCPTrapPromptsEnabled = value != 0
 	default:
 		return false
 	}
@@ -1357,7 +1393,7 @@ func ImportConfig(export *ConfigExport) {
 // ---------------------------------------------------------------------------
 
 // ProxyModes lists all valid proxy modes.
-var ProxyModes = []string{"transparent", "waf", "chaos", "gateway", "nightmare", "mirror"}
+var ProxyModes = []string{"transparent", "waf", "chaos", "gateway", "nightmare", "killer", "mirror"}
 
 // MirrorConfig holds a snapshot of server settings that the proxy mirrors.
 type MirrorConfig struct {
@@ -1644,12 +1680,21 @@ func (pc *ProxyConfig) SetMirror(mc *MirrorConfig) {
 // MCP Provider interface — avoids import cycle with internal/mcp
 // ---------------------------------------------------------------------------
 
+// MCPEndpointInfo describes a single MCP endpoint with its enabled status.
+type MCPEndpointInfo struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`     // "tool", "resource", "prompt"
+	Category string `json:"category"` // "honeypot", "legit"
+	Enabled  bool   `json:"enabled"`
+}
+
 // MCPProvider exposes MCP server stats, sessions, and events for the dashboard.
 type MCPProvider interface {
 	Stats() map[string]interface{}
 	SessionsAny() interface{}
 	EventsAny() interface{}
 	NotifyListsChanged()
+	GetEndpoints() interface{}
 }
 
 // AdminMCPHandler handles authenticated MCP requests on the admin endpoint.
@@ -1660,9 +1705,15 @@ type AdminMCPHandler interface {
 // MCPScanResult represents an MCP security scan result.
 type MCPScanResult interface{}
 
+// MCPScanHistoryEntry represents a stored scan history entry.
+type MCPScanHistoryEntry interface{}
+
 // MCPScannerProvider can scan external MCP servers.
 type MCPScannerProvider interface {
 	Scan(targetURL string) MCPScanResult
+	ScanWithHeaders(targetURL string, customHeaders map[string]string) MCPScanResult
+	GetHistory(includeReports bool) []MCPScanHistoryEntry
+	GetHistoryEntry(id int) MCPScanHistoryEntry
 }
 
 // ---------------------------------------------------------------------------

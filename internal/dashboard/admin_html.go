@@ -1090,6 +1090,24 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         <div class="card"><div class="label">Resources</div><div class="value v-info" id="mcp-resources-count">0</div></div>
         <div class="card"><div class="label">Prompts</div><div class="value v-info" id="mcp-prompts-count">0</div></div>
       </div>
+      <div style="margin-bottom:12px" id="mcp-settings-toggles">
+        <span style="color:#00ccaa;font-size:0.8em;font-weight:bold">MCP Settings</span>
+        <div style="margin-top:6px;display:flex;gap:16px;flex-wrap:wrap" id="mcp-toggles-row"></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <span style="color:#00ccaa;font-size:0.8em;font-weight:bold">Endpoints</span>
+        <div style="margin-top:6px;max-height:220px;overflow-y:auto">
+          <table style="width:100%%;font-size:0.75em;border-collapse:collapse" id="mcp-endpoints-table">
+            <thead><tr style="color:#888;text-align:left;border-bottom:1px solid #333">
+              <th style="padding:4px">Name</th>
+              <th style="padding:4px">Type</th>
+              <th style="padding:4px">Category</th>
+              <th style="padding:4px">Status</th>
+            </tr></thead>
+            <tbody id="mcp-endpoints-body"></tbody>
+          </table>
+        </div>
+      </div>
       <div style="margin-bottom:8px">
         <span style="color:#00ccaa;font-size:0.8em;font-weight:bold">Per-Tool Call Counts</span>
         <div id="mcp-tool-breakdown" style="margin-top:6px;font-size:0.78em;color:#888">No tool calls yet</div>
@@ -1581,15 +1599,24 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <div class="section">
       <h2>// MCP Security Scanner</h2>
       <p style="color:#666;font-size:0.8em;margin-bottom:12px">Scan external MCP servers for security issues: injection patterns, credential harvesting, rug pulls, suspicious resources.</p>
-      <div style="display:flex;gap:8px;margin-bottom:16px">
+      <div style="display:flex;gap:8px;margin-bottom:8px">
         <input type="text" id="mcp-scan-target" placeholder="MCP server URL (e.g. http://localhost:8765/mcp)" style="flex:1;background:#111;border:1px solid #333;color:#fff;padding:8px 12px;border-radius:6px;font-family:inherit;font-size:0.85em">
         <button class="cfg-btn" onclick="runMCPScan()" id="mcp-scan-btn" style="padding:8px 20px">Scan</button>
       </div>
+      <details style="margin-bottom:12px">
+        <summary style="color:#888;font-size:0.78em;cursor:pointer;user-select:none">Custom Headers (Authorization, API keys, etc.)</summary>
+        <textarea id="mcp-scan-headers" placeholder="Authorization: Bearer token123&#10;X-API-Key: my-key" rows="3" style="width:100%%;background:#0d0d0d;border:1px solid #333;color:#ccc;padding:8px 10px;border-radius:4px;font-family:monospace;font-size:0.78em;margin-top:6px;resize:vertical"></textarea>
+        <p style="color:#555;font-size:0.7em;margin-top:2px">One header per line, format: <code style="color:#888">Key: Value</code></p>
+      </details>
       <div id="mcp-scan-status" style="color:#888;font-size:0.8em;margin-bottom:12px;display:none"></div>
       <div id="mcp-scan-results" style="display:none">
         <div class="grid" id="mcp-scan-summary" style="margin-bottom:14px"></div>
         <div id="mcp-scan-findings"></div>
       </div>
+    </div>
+    <div class="section">
+      <h2>// Scan History</h2>
+      <div id="mcp-scan-history" style="color:#888;font-size:0.82em">Loading...</div>
     </div>
   </div>
 
@@ -2672,7 +2699,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     proxy_reset_prob: 'Probability of sending TCP RST instead of response (0=none, 1=always)',
     protocol_glitch_level: 'Severity of HTTP protocol-level glitches (0=disabled, 1=subtle, 2=moderate, 3=aggressive, 4=chaos)',
     tls_chaos_level: 'TLS chaos level (0=clean TLS 1.3, 1=version downgrade, 2=weak ciphers, 3=cert chaos, 4=nightmare)',
-    budget_trap_threshold: 'Request count before budget-draining traps activate for a client'
+    budget_trap_threshold: 'Request count before budget-draining traps activate for a client',
+    h3_chaos_level: 'HTTP/3 chaos level (0=off, 1=subtle Alt-Svc, 2=conflicting Alt-Svc, 3=malformed, 4=nightmare with emoji/null bytes)'
   };
 
   const ERROR_TIPS = {
@@ -2761,7 +2789,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           '<input type="checkbox" ' + (cfg.hsts_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'hsts_chaos_enabled\', this.checked ? 1 : 0)">' +
           '<div class="toggle-track"></div>' +
           '<div class="toggle-knob"></div>' +
-          '</label></div>';
+          '</label></div>' +
+
+        '<div class="toggle-row" style="margin-top:8px">' +
+          '<div class="toggle-name has-tip">H3/QUIC Chaos Enabled' +
+            '<span class="tip-icon">?</span><span class="tip-box">Inject fake HTTP/3 Alt-Svc headers and run a fake QUIC UDP listener to confuse clients</span>' +
+          '</div>' +
+          '<label class="toggle-sw">' +
+          '<input type="checkbox" ' + (cfg.h3_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'h3_chaos_enabled\', this.checked ? 1 : 0)">' +
+          '<div class="toggle-track"></div>' +
+          '<div class="toggle-knob"></div>' +
+          '</label></div>' +
+        slider('h3_chaos_level', 'H3 Chaos Level (0-4)', cfg.h3_chaos_level || 0, 0, 4, 1);
 
       // Labyrinth sliders
       var labEl = document.getElementById('labyrinth-sliders');
@@ -3357,6 +3396,53 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       if (el('mcp-tools-count')) el('mcp-tools-count').textContent = stats.tools_registered || 0;
       if (el('mcp-resources-count')) el('mcp-resources-count').textContent = stats.resources_exposed || 0;
       if (el('mcp-prompts-count')) el('mcp-prompts-count').textContent = stats.prompts_registered || 0;
+    } catch(e) {}
+
+    // MCP settings toggles
+    try {
+      var cfg = await api('/admin/api/config');
+      var togglesRow = document.getElementById('mcp-toggles-row');
+      if (togglesRow) {
+        var mcpToggles = [
+          {key: 'mcp_honeypot_enabled', label: 'Honeypot Tools'},
+          {key: 'mcp_fingerprint_enabled', label: 'Fingerprinting'},
+          {key: 'mcp_trap_prompts_enabled', label: 'Trap Prompts'}
+        ];
+        togglesRow.innerHTML = mcpToggles.map(function(t) {
+          var on = cfg[t.key] ? 'checked' : '';
+          return '<div class="group-toggle">' +
+            '<div class="toggle-name">' + t.label + '</div>' +
+            '<label class="toggle-sw">' +
+            '<input type="checkbox" ' + on + ' onchange="sliderCommit(\'' + t.key + '\', this.checked ? 1 : 0)">' +
+            '<div class="toggle-track"></div>' +
+            '<div class="toggle-knob"></div>' +
+            '</label></div>';
+        }).join('');
+      }
+    } catch(e) {}
+
+    // MCP endpoints table
+    try {
+      var epData = await api('/admin/api/mcp/endpoints');
+      var endpoints = epData.endpoints || [];
+      var epBody = document.getElementById('mcp-endpoints-body');
+      if (epBody) {
+        if (endpoints.length === 0) {
+          epBody.innerHTML = '<tr><td colspan="4" style="color:#555;padding:8px;text-align:center">No endpoints</td></tr>';
+        } else {
+          epBody.innerHTML = endpoints.map(function(ep) {
+            var catColor = ep.category === 'honeypot' ? '#ff4444' : '#00ff88';
+            var statusColor = ep.enabled ? '#00ff88' : '#ff4444';
+            var statusText = ep.enabled ? 'Enabled' : 'Disabled';
+            return '<tr style="border-bottom:1px solid #222">' +
+              '<td style="padding:3px 4px;color:#ccc">' + esc(ep.name) + '</td>' +
+              '<td style="padding:3px 4px;color:#888">' + esc(ep.type) + '</td>' +
+              '<td style="padding:3px 4px;color:' + catColor + '">' + esc(ep.category) + '</td>' +
+              '<td style="padding:3px 4px;color:' + statusColor + '">' + statusText + '</td>' +
+              '</tr>';
+          }).join('');
+        }
+      }
     } catch(e) {}
 
     // Per-tool call breakdown from sessions
@@ -4190,9 +4276,25 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     if (tab === 'eval') refreshScannerTab();
     else if (tab === 'builtin') refreshBuiltinScanner();
     else if (tab === 'replay') refreshReplay();
+    else if (tab === 'mcpscan') loadMCPScanHistory();
   };
 
   // ------ MCP Scanner ------
+  function parseMCPCustomHeaders() {
+    var text = (document.getElementById('mcp-scan-headers') || {}).value || '';
+    var headers = {};
+    text.split('\n').forEach(function(line) {
+      line = line.trim();
+      if (!line) return;
+      var idx = line.indexOf(':');
+      if (idx <= 0) return;
+      var key = line.substring(0, idx).trim();
+      var val = line.substring(idx + 1).trim();
+      if (key) headers[key] = val;
+    });
+    return Object.keys(headers).length > 0 ? headers : undefined;
+  }
+
   window.runMCPScan = async function() {
     var target = document.getElementById('mcp-scan-target').value.trim();
     if (!target) { toast('Enter a target URL'); return; }
@@ -4204,10 +4306,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     status.textContent = 'Scanning ' + target + '...';
     status.style.color = '#ffaa00';
     try {
+      var payload = {target: target};
+      var customHeaders = parseMCPCustomHeaders();
+      if (customHeaders) payload.custom_headers = customHeaders;
       var result = await api('/admin/api/mcp/scan', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({target: target})
+        body: JSON.stringify(payload)
       });
       var resultsEl = document.getElementById('mcp-scan-results');
       resultsEl.style.display = '';
@@ -4240,6 +4345,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       }
       status.textContent = 'Scan completed in ' + (result.duration_ms||0) + 'ms — ' + findings.length + ' findings';
       status.style.color = '#00ff88';
+      loadMCPScanHistory();
     } catch(e) {
       status.textContent = 'Scan failed: ' + e.message;
       status.style.color = '#ff4444';
@@ -4247,6 +4353,79 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       btn.disabled = false;
       btn.textContent = 'Scan';
     }
+  };
+
+  async function loadMCPScanHistory() {
+    var el = document.getElementById('mcp-scan-history');
+    if (!el) return;
+    try {
+      var data = await api('/admin/api/mcp/scanner/history');
+      var history = data.history || [];
+      if (history.length === 0) {
+        el.innerHTML = '<p style="color:#555;font-size:0.82em">No scans yet.</p>';
+        return;
+      }
+      var sevColors = {0:'#00ff88',1:'#00ff88',40:'#ffaa00',70:'#ff4444'};
+      function riskColor(score) { return score >= 70 ? '#ff4444' : (score >= 40 ? '#ffaa00' : '#00ff88'); }
+      el.innerHTML = '<table style="width:100%%;font-size:0.78em;border-collapse:collapse">' +
+        '<thead><tr style="color:#888;border-bottom:1px solid #333"><th style="padding:4px;text-align:left">#</th><th style="padding:4px;text-align:left">Target</th><th style="padding:4px;text-align:left">Time</th><th style="padding:4px;text-align:left">Risk</th><th style="padding:4px;text-align:left">Findings</th><th style="padding:4px;text-align:left">Duration</th><th style="padding:4px;text-align:left"></th></tr></thead><tbody>' +
+        history.map(function(h) {
+          var t = new Date(h.scan_time);
+          var timeStr = t.toLocaleString();
+          var errTag = h.error ? ' <span style="color:#ff4444">(error)</span>' : '';
+          return '<tr style="border-bottom:1px solid #222">' +
+            '<td style="padding:3px 4px;color:#888">' + h.id + '</td>' +
+            '<td style="padding:3px 4px;color:#00ccaa;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(h.target) + '">' + esc(h.target) + '</td>' +
+            '<td style="padding:3px 4px;color:#888">' + esc(timeStr) + '</td>' +
+            '<td style="padding:3px 4px;color:' + riskColor(h.risk_score) + ';font-weight:bold">' + (h.risk_score||0) + '</td>' +
+            '<td style="padding:3px 4px;color:#ccc">' + (h.findings_count||0) + errTag + '</td>' +
+            '<td style="padding:3px 4px;color:#888">' + (h.duration_ms||0) + 'ms</td>' +
+            '<td style="padding:3px 4px"><a href="#" onclick="viewMCPScanDetail(' + h.id + ');return false" style="color:#00ccff;text-decoration:none;font-size:0.9em">details</a></td></tr>';
+        }).join('') + '</tbody></table>';
+    } catch(e) {
+      el.innerHTML = '<p style="color:#ff4444;font-size:0.82em">Failed to load history.</p>';
+    }
+  }
+
+  window.viewMCPScanDetail = async function(id) {
+    try {
+      var entry = await api('/admin/api/mcp/scanner/history?id=' + id);
+      if (!entry || !entry.report) { toast('No report data'); return; }
+      var result = entry.report;
+      // Populate the results section with this report
+      var resultsEl = document.getElementById('mcp-scan-results');
+      resultsEl.style.display = '';
+      var summary = document.getElementById('mcp-scan-summary');
+      var riskColor = result.risk_score >= 70 ? '#ff4444' : (result.risk_score >= 40 ? '#ffaa00' : '#00ff88');
+      summary.innerHTML =
+        '<div class="card"><div class="label">Risk Score</div><div class="value" style="color:' + riskColor + '">' + (result.risk_score||0) + '/100</div></div>' +
+        '<div class="card"><div class="label">Server</div><div class="value v-info" style="font-size:0.85em">' + esc(result.server_name||'unknown') + '</div></div>' +
+        '<div class="card"><div class="label">Tools</div><div class="value">' + (result.tool_count||0) + '</div></div>' +
+        '<div class="card"><div class="label">Resources</div><div class="value">' + (result.resource_count||0) + '</div></div>' +
+        '<div class="card"><div class="label">Prompts</div><div class="value">' + (result.prompt_count||0) + '</div></div>' +
+        '<div class="card"><div class="label">Rug Pull</div><div class="value" style="color:' + (result.rug_pull ? '#ff4444' : '#00ff88') + '">' + (result.rug_pull ? 'DETECTED' : 'None') + '</div></div>';
+      var findings = result.findings || [];
+      var findingsEl = document.getElementById('mcp-scan-findings');
+      if (findings.length === 0) {
+        findingsEl.innerHTML = '<p style="color:#00ff88;font-size:0.85em">No security issues found.</p>';
+      } else {
+        var sevColors2 = {critical:'#ff4444',high:'#ff6600',medium:'#ffaa00',low:'#888',info:'#00ccff'};
+        findingsEl.innerHTML = '<table style="width:100%%;font-size:0.78em;border-collapse:collapse">' +
+          '<thead><tr style="color:#888;border-bottom:1px solid #333"><th style="padding:4px;text-align:left">Severity</th><th style="padding:4px;text-align:left">Category</th><th style="padding:4px;text-align:left">Title</th><th style="padding:4px;text-align:left">Target</th></tr></thead><tbody>' +
+          findings.map(function(f) {
+            var tgt = f.tool || f.resource || f.prompt || '';
+            return '<tr style="border-bottom:1px solid #222">' +
+              '<td style="padding:3px 4px;color:' + (sevColors2[f.severity]||'#888') + ';font-weight:bold">' + esc(f.severity||'') + '</td>' +
+              '<td style="padding:3px 4px;color:#ccc">' + esc(f.category||'') + '</td>' +
+              '<td style="padding:3px 4px;color:#fff">' + esc(f.title||'') + '</td>' +
+              '<td style="padding:3px 4px;color:#00ccaa;font-size:0.9em">' + esc(tgt) + '</td></tr>';
+          }).join('') + '</tbody></table>';
+      }
+      var statusEl = document.getElementById('mcp-scan-status');
+      statusEl.style.display = '';
+      statusEl.textContent = 'Viewing scan #' + id + ' from ' + new Date(result.scan_time).toLocaleString() + ' — ' + findings.length + ' findings';
+      statusEl.style.color = '#00ccff';
+    } catch(e) { toast('Failed to load scan detail: ' + e.message); }
   };
 
   window.selectBuiltinProfile = function(el, profile) {
