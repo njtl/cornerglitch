@@ -1,0 +1,7 @@
+FROM ruby:3.3-alpine
+RUN apk add --no-cache build-base
+WORKDIR /app
+RUN gem install puma --no-doc
+COPY config.ru .
+EXPOSE 9292
+CMD ["puma", "-b", "tcp://0.0.0.0:9292"]

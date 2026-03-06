@@ -1,0 +1,83 @@
+# Docker Compose for server destruction testing targets.
+# Each service is a minimal HTTP server with default config.
+# Usage: docker compose -f tests/targets/docker-compose.yml up -d
+#
+# Then run: glitch-scanner -target http://localhost:900X -profile destroyer
+
+services:
+  express:
+    build:
+      context: .
+      dockerfile: Dockerfile.express
+    ports:
+      - "9001:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 5s
+      retries: 3
+
+  flask:
+    build:
+      context: .
+      dockerfile: Dockerfile.flask
+    ports:
+      - "9002:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      retries: 3
+
+  django:
+    build:
+      context: .
+      dockerfile: Dockerfile.django
+    ports:
+      - "9003:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      retries: 3
+
+  gohttp:
+    build:
+      context: .
+      dockerfile: Dockerfile.gohttp
+    ports:
+      - "9004:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      retries: 3
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    ports:
+      - "9005:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 5s
+      retries: 3
+
+  apache:
+    build:
+      context: .
+      dockerfile: Dockerfile.apache
+    ports:
+      - "9006:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 5s
+      retries: 3
+
+  puma:
+    build:
+      context: .
+      dockerfile: Dockerfile.puma
+    ports:
+      - "9007:9292"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9292/health"]
+      interval: 5s
+      retries: 3

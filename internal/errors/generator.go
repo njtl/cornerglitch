@@ -75,6 +75,14 @@ const (
 	// Protocol-level glitches — connection violations
 	ErrKeepAliveUpgrade  ErrorType = "keepalive_upgrade"   // both Connection: keep-alive and Upgrade: websocket
 
+	// HTTP/2 frame-level chaos (works on real H2 connections)
+	ErrH2GoAway          ErrorType = "h2_goaway"           // trigger GOAWAY by panicking in handler
+	ErrH2RstStream       ErrorType = "h2_rst_stream"       // reset stream via handler panic after partial write
+	ErrH2SettingsFlood   ErrorType = "h2_settings_flood"   // send many small responses to trigger settings acks
+	ErrH2WindowExhaust   ErrorType = "h2_window_exhaust"   // write response that exceeds flow control window
+	ErrH2ContinuationFlood ErrorType = "h2_continuation_flood" // send response with many small header blocks
+	ErrH2PingFlood       ErrorType = "h2_ping_flood"       // rapid tiny responses to force ping/ack overhead
+
 	// Scanner-destroying payloads
 	ErrGzipBomb          ErrorType = "gzip_bomb"           // valid gzip that decompresses to massive size
 	ErrInfiniteChunked   ErrorType = "infinite_chunked"    // chunked response that never terminates
@@ -92,7 +100,7 @@ type ErrorProfile struct {
 func DefaultProfile() ErrorProfile {
 	return ErrorProfile{
 		Weights: map[ErrorType]float64{
-			ErrNone:              0.584,
+			ErrNone:              0.572,
 			Err500:               0.03,
 			Err502:               0.02,
 			Err503:               0.02,
@@ -142,6 +150,13 @@ func DefaultProfile() ErrorProfile {
 			ErrFalseCompression: 0.002,
 			ErrMultiEncodings:   0.002,
 			ErrKeepAliveUpgrade: 0.002,
+			// HTTP/2 frame-level chaos
+			ErrH2GoAway:           0.002,
+			ErrH2RstStream:        0.002,
+			ErrH2SettingsFlood:    0.002,
+			ErrH2WindowExhaust:    0.002,
+			ErrH2ContinuationFlood: 0.002,
+			ErrH2PingFlood:        0.002,
 			// Scanner-destroying payloads
 			ErrGzipBomb:        0.002,
 			ErrInfiniteChunked: 0.002,
@@ -157,14 +172,14 @@ func AggressiveProfile() ErrorProfile {
 	return ErrorProfile{
 		Weights: map[ErrorType]float64{
 			ErrNone:             0.016,
-			Err500:              0.06,
-			Err502:              0.05,
-			Err503:              0.05,
-			Err504:              0.03,
-			Err404:              0.05,
-			Err403:              0.03,
-			Err429:              0.05,
-			Err408:              0.03,
+			Err500:              0.054,
+			Err502:              0.044,
+			Err503:              0.044,
+			Err504:              0.024,
+			Err404:              0.044,
+			Err403:              0.024,
+			Err429:              0.044,
+			Err408:              0.024,
 			ErrSlowDrip:         0.04,
 			ErrConnectionReset:  0.03,
 			ErrPartialBody:      0.04,
@@ -206,6 +221,13 @@ func AggressiveProfile() ErrorProfile {
 			ErrFalseCompression: 0.008,
 			ErrMultiEncodings:   0.008,
 			ErrKeepAliveUpgrade: 0.008,
+			// HTTP/2 frame-level chaos
+			ErrH2GoAway:           0.008,
+			ErrH2RstStream:        0.008,
+			ErrH2SettingsFlood:    0.008,
+			ErrH2WindowExhaust:    0.008,
+			ErrH2ContinuationFlood: 0.008,
+			ErrH2PingFlood:        0.008,
 			// Scanner-destroying payloads
 			ErrGzipBomb:        0.008,
 			ErrInfiniteChunked: 0.008,
@@ -625,6 +647,106 @@ func (g *Generator) Apply(w http.ResponseWriter, r *http.Request, errType ErrorT
 		w.Write([]byte("<html><head></head><body>False server push preload hints</body></html>"))
 		return true
 
+	// ---- HTTP/2 Frame-Level Chaos ----
+
+	case ErrH2GoAway:
+		// Trigger GOAWAY: panicking with http.ErrAbortHandler causes Go's HTTP/2
+		// server to send a GOAWAY frame and tear down the entire connection.
+		if r.ProtoMajor == 2 {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("GOAWAY incoming..."))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			panic(http.ErrAbortHandler)
+		}
+		// Fallback for HTTP/1.1: just close connection abruptly
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, _, err := hj.Hijack()
+			if err == nil {
+				conn.Close()
+			}
+		}
+		return true
+
+	case ErrH2RstStream:
+		// Reset stream: write partial response then abort to trigger RST_STREAM.
+		// On HTTP/2, aborting mid-stream sends RST_STREAM for that stream.
+		if r.ProtoMajor == 2 {
+			w.Header().Set("Content-Type", "text/html")
+			w.Header().Set("Content-Length", "1000000") // promise large body
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("<html><body>This response will be cut short by RST_STREAM"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			panic(http.ErrAbortHandler)
+		}
+		// HTTP/1.1 fallback: partial body
+		w.Header().Set("Content-Length", "1000000")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("partial"))
+		return true
+
+	case ErrH2SettingsFlood:
+		// Send many small responses rapidly — each one triggers SETTINGS frame overhead.
+		// This works by sending a response with many small trailers and headers.
+		w.Header().Set("Content-Type", "text/plain")
+		for i := 0; i < 100; i++ {
+			w.Header().Add(fmt.Sprintf("X-Settings-Flood-%d", i), fmt.Sprintf("value-%d", i))
+		}
+		w.WriteHeader(http.StatusOK)
+		// Write small chunks to maximize frame overhead
+		for i := 0; i < 50; i++ {
+			w.Write([]byte(fmt.Sprintf("frame-%d\n", i)))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		return true
+
+	case ErrH2WindowExhaust:
+		// Exhaust flow control window: write large response body without checking window
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(http.StatusOK)
+		// Write 64KB chunks (default H2 initial window is 64KB) to pressure flow control
+		chunk := make([]byte, 65536)
+		for i := range chunk {
+			chunk[i] = byte(i % 256)
+		}
+		for i := 0; i < 8; i++ { // 512KB total — well above default window
+			w.Write(chunk)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		return true
+
+	case ErrH2ContinuationFlood:
+		// Generate response with many headers to force CONTINUATION frames.
+		// HTTP/2 has a max frame size; excess headers spill into CONTINUATION frames.
+		w.Header().Set("Content-Type", "text/plain")
+		for i := 0; i < 500; i++ {
+			w.Header().Add(fmt.Sprintf("X-Continuation-%04d", i), strings.Repeat("H", 100))
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Response with 500 headers forcing CONTINUATION frames"))
+		return true
+
+	case ErrH2PingFlood:
+		// Rapid tiny responses to force ping/ack overhead — send minimal response
+		// then many flushed chunks to keep the stream active and force control frames
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for i := 0; i < 200; i++ {
+			w.Write([]byte(fmt.Sprintf("data: ping-%d\n\n", i)))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		return true
+
 	// ---- Protocol-level glitches: Header Protocol ----
 
 	case ErrDuplicateStatus:
@@ -910,6 +1032,7 @@ func IsProtocolGlitch(et ErrorType) bool {
 	switch et {
 	case ErrHTTP10Chunked, ErrHTTP11NoLength, ErrProtocolDowngrade, ErrMixedVersions, ErrInfoNoFinal,
 		ErrH2UpgradeReject, ErrFalseH2Preface, ErrH2BadStreamID, ErrH2PriorityLoop, ErrFalseServerPush,
+		ErrH2GoAway, ErrH2RstStream, ErrH2SettingsFlood, ErrH2WindowExhaust, ErrH2ContinuationFlood, ErrH2PingFlood,
 		ErrDuplicateStatus, ErrHeaderNullBytes, ErrMissingCRLF, ErrHeaderObsFold,
 		ErrBothCLAndTE, ErrFalseCompression, ErrMultiEncodings,
 		ErrKeepAliveUpgrade,

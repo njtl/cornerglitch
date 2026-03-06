@@ -1,0 +1,19 @@
+FROM httpd:2.4-alpine
+
+COPY httpd.conf /usr/local/apache2/conf/httpd.conf
+
+RUN echo '<html><body><h1>Apache Target</h1><p>Default config, no hardening.</p></body></html>' \
+    > /usr/local/apache2/htdocs/index.html
+
+# Health CGI script
+RUN printf '#!/bin/sh\necho "Content-Type: text/plain"\necho ""\necho "ok"\n' \
+    > /usr/local/apache2/cgi-bin/health && \
+    chmod +x /usr/local/apache2/cgi-bin/health
+
+# Login CGI script
+RUN printf '#!/bin/sh\necho "Content-Type: text/html"\necho ""\nif [ "$REQUEST_METHOD" = "POST" ]; then\n  read BODY\n  echo "<html><body><h1>Login received</h1><pre>$BODY</pre></body></html>"\nelse\n  echo "Method Not Allowed"\nfi\n' \
+    > /usr/local/apache2/cgi-bin/login && \
+    chmod +x /usr/local/apache2/cgi-bin/login
+
+EXPOSE 80
+CMD ["httpd-foreground"]
