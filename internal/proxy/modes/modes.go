@@ -99,6 +99,9 @@ var registry = map[string]*Mode{
 				0.3,   // 30% chance of truncation (when corrupting)
 				0.2,   // 20% chance of wrong Content-Type (when corrupting)
 			))
+
+			// Add client killer at moderate probability
+			pipeline.Add(chaos.NewClientKiller(0.1))
 		},
 	},
 
@@ -173,8 +176,48 @@ var registry = map[string]*Mode{
 				0.3,   // 30% chance of wrong Content-Type (when corrupting)
 			))
 
+			// Client killer at high probability
+			pipeline.Add(chaos.NewClientKiller(0.4))
+
 			// Header chaos
 			pipeline.Add(&headerInterceptor{})
+		},
+	},
+
+	"killer": {
+		Name:        "killer",
+		Description: "Maximum client destruction — every response is weaponized",
+		Configure: func(pipeline *proxy.Pipeline, chaosCfg *ChaosConfig, wafCfg *WAFConfig) {
+			// No WAF — let everything through so we can destroy the client
+			*wafCfg = WAFConfig{}
+
+			// Extreme chaos
+			*chaosCfg = ChaosConfig{
+				LatencyMin:  100 * time.Millisecond,
+				LatencyMax:  3 * time.Second,
+				LatencyProb: 0.4,
+				CorruptProb: 0.5,
+				DropProb:    0.1,
+				ResetProb:   0.1,
+			}
+
+			// Client killer on every response
+			pipeline.Add(chaos.NewClientKiller(1.0))
+
+			// Layer on corruption for responses that survive the killer
+			pipeline.Add(chaos.NewResponseCorruptor(
+				0.5,
+				0.1,  // flip 10% of bytes
+				0.5,  // 50% truncation
+				0.3,  // 30% wrong content-type
+			))
+
+			// Latency to slow client down
+			pipeline.Add(chaos.NewLatencyInjector(
+				chaosCfg.LatencyMin,
+				chaosCfg.LatencyMax,
+				chaosCfg.LatencyProb,
+			))
 		},
 	},
 
@@ -201,7 +244,7 @@ func Get(name string) (*Mode, error) {
 
 // List returns the names of all available modes.
 func List() []string {
-	return []string{"transparent", "waf", "chaos", "gateway", "nightmare", "mirror"}
+	return []string{"transparent", "waf", "chaos", "gateway", "nightmare", "killer", "mirror"}
 }
 
 // wafInterceptor adapts the WAF SignatureDetector into a proxy.Interceptor.
