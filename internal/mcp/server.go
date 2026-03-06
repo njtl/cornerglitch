@@ -42,6 +42,10 @@ type Server struct {
 	sseClients map[string][]*sseClient // sessionID -> clients
 	lastEventID uint64
 	eventBuffer []sseEvent // bounded buffer for replay (max 100)
+
+	// configFunc returns (honeypotEnabled, fingerprintEnabled, trapPromptsEnabled).
+	// Set via SetConfigFunc to read dashboard AdminConfig without import cycles.
+	configFunc func() (bool, bool, bool)
 }
 
 // EventRecord captures an MCP interaction for monitoring.
@@ -63,6 +67,20 @@ func NewServer() *Server {
 		sessions:   NewSessionStore(),
 		sseClients: make(map[string][]*sseClient),
 	}
+}
+
+// SetConfigFunc sets the callback that returns MCP config toggles from the dashboard.
+// The callback returns (honeypotEnabled, fingerprintEnabled, trapPromptsEnabled).
+func (s *Server) SetConfigFunc(fn func() (bool, bool, bool)) {
+	s.configFunc = fn
+}
+
+// mcpConfig returns the current MCP config state (honeypot, fingerprint, trapPrompts).
+func (s *Server) mcpConfig() (honeypotOn, fingerprintOn, trapPromptsOn bool) {
+	if s.configFunc == nil {
+		return true, true, true
+	}
+	return s.configFunc()
 }
 
 // ShouldHandle returns true if the path is an MCP endpoint.
@@ -282,10 +300,14 @@ func (s *Server) handleInitialize(req *Request, httpReq *http.Request) *Response
 
 // handleToolsList returns all available tools.
 func (s *Server) handleToolsList(req *Request) *Response {
+	honeypotOn, _, _ := s.mcpConfig()
 	tools := s.tools.List()
 	// Build the response matching MCP spec
 	toolDefs := make([]map[string]interface{}, 0, len(tools))
 	for _, t := range tools {
+		if t.Category == "honeypot" && !honeypotOn {
+			continue
+		}
 		toolDefs = append(toolDefs, map[string]interface{}{
 			"name":        t.Name,
 			"description": t.Description,
@@ -299,6 +321,8 @@ func (s *Server) handleToolsList(req *Request) *Response {
 
 // handleToolsCall executes a tool.
 func (s *Server) handleToolsCall(req *Request, httpReq *http.Request) *Response {
+	honeypotOn, fingerprintOn, _ := s.mcpConfig()
+
 	var params struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -313,18 +337,26 @@ func (s *Server) handleToolsCall(req *Request, httpReq *http.Request) *Response 
 		category = tool.Category
 	}
 
+	// Block honeypot tool calls when honeypot is disabled
+	if tool != nil && tool.Category == "honeypot" && !honeypotOn {
+		return NewErrorResponse(req.ID, ErrCodeMethodNotFound,
+			fmt.Sprintf("unknown tool: %s", params.Name), nil)
+	}
+
 	// Record the tool call
 	sid := httpReq.Header.Get("Mcp-Session-Id")
 	s.sessions.RecordToolCall(sid, params.Name)
-	s.sessions.RecordFingerprint(sid, func(fp *Fingerprint) {
-		fp.RecordToolCall(params.Name)
-		// Auto-detect injection susceptibility: if the client has read a prompt
-		// and then calls a tool that is suggested by trap prompt injection content,
-		// mark as injection follow.
-		if isInjectionIndicatingTool(params.Name) {
-			fp.RecordInjectionFollow()
-		}
-	})
+	if fingerprintOn {
+		s.sessions.RecordFingerprint(sid, func(fp *Fingerprint) {
+			fp.RecordToolCall(params.Name)
+			// Auto-detect injection susceptibility: if the client has read a prompt
+			// and then calls a tool that is suggested by trap prompt injection content,
+			// mark as injection follow.
+			if isInjectionIndicatingTool(params.Name) {
+				fp.RecordInjectionFollow()
+			}
+		})
+	}
 	s.recordEvent(EventRecord{
 		SessionID: sid,
 		Method:    "tools/call",
@@ -338,9 +370,13 @@ func (s *Server) handleToolsCall(req *Request, httpReq *http.Request) *Response 
 
 // handleResourcesList returns all available resources.
 func (s *Server) handleResourcesList(req *Request) *Response {
+	honeypotOn, _, _ := s.mcpConfig()
 	resources := s.resources.List()
 	resDefs := make([]map[string]interface{}, 0, len(resources))
 	for _, r := range resources {
+		if r.Category == "honeypot" && !honeypotOn {
+			continue
+		}
 		rd := map[string]interface{}{
 			"uri":      r.URI,
 			"name":     r.Name,
@@ -358,6 +394,8 @@ func (s *Server) handleResourcesList(req *Request) *Response {
 
 // handleResourcesRead reads a resource by URI.
 func (s *Server) handleResourcesRead(req *Request, httpReq *http.Request) *Response {
+	_, fingerprintOn, _ := s.mcpConfig()
+
 	var params struct {
 		URI string `json:"uri"`
 	}
@@ -366,7 +404,9 @@ func (s *Server) handleResourcesRead(req *Request, httpReq *http.Request) *Respo
 	}
 
 	sid := httpReq.Header.Get("Mcp-Session-Id")
-	s.sessions.RecordFingerprint(sid, func(fp *Fingerprint) { fp.RecordResourceRead(params.URI) })
+	if fingerprintOn {
+		s.sessions.RecordFingerprint(sid, func(fp *Fingerprint) { fp.RecordResourceRead(params.URI) })
+	}
 	s.recordEvent(EventRecord{
 		SessionID: sid,
 		Method:    "resources/read",
@@ -380,9 +420,13 @@ func (s *Server) handleResourcesRead(req *Request, httpReq *http.Request) *Respo
 
 // handlePromptsList returns all available prompts.
 func (s *Server) handlePromptsList(req *Request) *Response {
+	_, _, trapPromptsOn := s.mcpConfig()
 	prompts := s.prompts.List()
 	promptDefs := make([]map[string]interface{}, 0, len(prompts))
 	for _, p := range prompts {
+		if p.Category == "honeypot" && !trapPromptsOn {
+			continue
+		}
 		pd := map[string]interface{}{
 			"name":        p.Name,
 			"description": p.Description,
@@ -567,6 +611,70 @@ func (s *Server) SessionsAny() interface{} {
 // EventsAny returns recent events as interface{} for dashboard provider.
 func (s *Server) EventsAny() interface{} {
 	return s.Events()
+}
+
+// MCPEndpointInfo describes a single MCP endpoint with its enabled status.
+// Mirrors dashboard.MCPEndpointInfo to avoid import cycles.
+type MCPEndpointInfo struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`     // "tool", "resource", "prompt"
+	Category string `json:"category"` // "honeypot", "legit"
+	Enabled  bool   `json:"enabled"`
+}
+
+// GetEndpoints returns all MCP endpoints with their enabled/disabled status
+// based on the current config callback values.
+func (s *Server) GetEndpoints() interface{} {
+	honeypotOn := true
+	fingerprintOn := true
+	trapPromptsOn := true
+	if s.configFunc != nil {
+		honeypotOn, fingerprintOn, trapPromptsOn = s.configFunc()
+	}
+	_ = fingerprintOn // fingerprinting doesn't affect endpoint visibility
+
+	var endpoints []MCPEndpointInfo
+
+	for _, t := range s.tools.List() {
+		enabled := true
+		if t.Category == "honeypot" && !honeypotOn {
+			enabled = false
+		}
+		endpoints = append(endpoints, MCPEndpointInfo{
+			Name:     t.Name,
+			Type:     "tool",
+			Category: t.Category,
+			Enabled:  enabled,
+		})
+	}
+
+	for _, r := range s.resources.List() {
+		enabled := true
+		if r.Category == "honeypot" && !honeypotOn {
+			enabled = false
+		}
+		endpoints = append(endpoints, MCPEndpointInfo{
+			Name:     r.URI,
+			Type:     "resource",
+			Category: r.Category,
+			Enabled:  enabled,
+		})
+	}
+
+	for _, p := range s.prompts.List() {
+		enabled := true
+		if p.Category == "honeypot" && !trapPromptsOn {
+			enabled = false
+		}
+		endpoints = append(endpoints, MCPEndpointInfo{
+			Name:     p.Name,
+			Type:     "prompt",
+			Category: p.Category,
+			Enabled:  enabled,
+		})
+	}
+
+	return endpoints
 }
 
 // Stats returns summary statistics.

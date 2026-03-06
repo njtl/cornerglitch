@@ -9,8 +9,27 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
+
+// ScanOptions configures a single MCP scan.
+type ScanOptions struct {
+	Target        string            `json:"target"`
+	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
+}
+
+// ScanHistoryEntry stores a past scan result with metadata.
+type ScanHistoryEntry struct {
+	ID            int         `json:"id"`
+	Target        string      `json:"target"`
+	ScanTime      time.Time   `json:"scan_time"`
+	DurationMS    int64       `json:"duration_ms"`
+	FindingsCount int         `json:"findings_count"`
+	RiskScore     int         `json:"risk_score"`
+	Error         string      `json:"error,omitempty"`
+	Report        *ScanReport `json:"report,omitempty"`
+}
 
 // ScanFinding represents a security issue found during MCP scanning.
 type ScanFinding struct {
@@ -42,14 +61,78 @@ type ScanReport struct {
 
 // Scanner connects to external MCP servers and tests their security.
 type Scanner struct {
-	client *http.Client
+	client        *http.Client
+	customHeaders map[string]string // per-scan custom headers (set before each scan)
+
+	historyMu sync.RWMutex
+	history   []ScanHistoryEntry
+	nextID    int
 }
 
 // NewScanner creates a new MCP scanner.
 func NewScanner() *Scanner {
 	return &Scanner{
 		client: &http.Client{Timeout: 30 * time.Second},
+		nextID: 1,
 	}
+}
+
+// ScanWithOptions performs a scan using the provided options (including custom headers).
+func (sc *Scanner) ScanWithOptions(opts ScanOptions) *ScanReport {
+	sc.customHeaders = opts.CustomHeaders
+	defer func() { sc.customHeaders = nil }()
+
+	report := sc.Scan(opts.Target)
+
+	// Store in history
+	entry := ScanHistoryEntry{
+		Target:        opts.Target,
+		ScanTime:      report.ScanTime,
+		DurationMS:    report.DurationMS,
+		FindingsCount: len(report.Findings),
+		RiskScore:     report.RiskScore,
+		Error:         report.Error,
+		Report:        report,
+	}
+	sc.historyMu.Lock()
+	entry.ID = sc.nextID
+	sc.nextID++
+	sc.history = append(sc.history, entry)
+	// Keep at most 100 entries
+	if len(sc.history) > 100 {
+		sc.history = sc.history[len(sc.history)-100:]
+	}
+	sc.historyMu.Unlock()
+
+	return report
+}
+
+// GetHistory returns all stored scan history entries (newest first).
+// If includeReports is false, the full report is omitted to reduce payload size.
+func (sc *Scanner) GetHistory(includeReports bool) []ScanHistoryEntry {
+	sc.historyMu.RLock()
+	defer sc.historyMu.RUnlock()
+
+	result := make([]ScanHistoryEntry, len(sc.history))
+	for i, e := range sc.history {
+		if !includeReports {
+			e.Report = nil
+		}
+		result[len(sc.history)-1-i] = e // reverse: newest first
+	}
+	return result
+}
+
+// GetHistoryEntry returns a single history entry by ID, or nil if not found.
+func (sc *Scanner) GetHistoryEntry(id int) *ScanHistoryEntry {
+	sc.historyMu.RLock()
+	defer sc.historyMu.RUnlock()
+	for _, e := range sc.history {
+		if e.ID == id {
+			return &e
+		}
+	}
+	return nil
 }
 
 // Scan performs a security scan of an MCP server at the given URL.
@@ -311,6 +394,9 @@ func (sc *Scanner) testCanaryPayloads(url, sid string, tools []map[string]interf
 func (sc *Scanner) deleteSession(url, sid string) {
 	req, _ := http.NewRequest(http.MethodDelete, url, nil)
 	req.Header.Set("Mcp-Session-Id", sid)
+	for k, v := range sc.customHeaders {
+		req.Header.Set(k, v)
+	}
 	sc.client.Do(req)
 }
 
@@ -328,6 +414,10 @@ func (sc *Scanner) rpcCall(url, sid string, payload map[string]interface{}) (map
 	req.Header.Set("Content-Type", "application/json")
 	if sid != "" {
 		req.Header.Set("Mcp-Session-Id", sid)
+	}
+	// Apply custom headers (e.g. Authorization, API keys)
+	for k, v := range sc.customHeaders {
+		req.Header.Set(k, v)
 	}
 
 	resp, err := sc.client.Do(req)

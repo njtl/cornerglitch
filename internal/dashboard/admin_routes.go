@@ -399,6 +399,12 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/admin/api/mcp/scan", func(w http.ResponseWriter, r *http.Request) {
 		adminMCPScan(w, r)
 	})
+	mux.HandleFunc("/admin/api/mcp/scanner/history", func(w http.ResponseWriter, r *http.Request) {
+		adminMCPScanHistory(w, r)
+	})
+	mux.HandleFunc("/admin/api/mcp/endpoints", func(w http.ResponseWriter, r *http.Request) {
+		adminMCPEndpoints(w, r)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -2605,6 +2611,8 @@ func applyServerNightmare() {
 	globalConfig.Set("js_trap_difficulty", 5)
 	globalConfig.Set("bot_score_threshold", 20)
 	globalConfig.Set("adaptive_aggressive_rps", 2)
+	globalConfig.Set("h3_chaos_enabled", 1)
+	globalConfig.Set("h3_chaos_level", 4)
 }
 
 // restoreServerNightmare restores the config snapshot.
@@ -3094,14 +3102,73 @@ func adminMCPScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Target string `json:"target"`
+		Target        string            `json:"target"`
+		CustomHeaders map[string]string `json:"custom_headers,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Target == "" {
 		http.Error(w, `{"error":"target URL required"}`, http.StatusBadRequest)
 		return
 	}
-	result := scanner.Scan(body.Target)
+	var result MCPScanResult
+	if len(body.CustomHeaders) > 0 {
+		result = scanner.ScanWithHeaders(body.Target, body.CustomHeaders)
+	} else {
+		result = scanner.ScanWithHeaders(body.Target, nil)
+	}
 	json.NewEncoder(w).Encode(result)
+}
+
+// adminMCPScanHistory returns stored MCP scan history.
+func adminMCPScanHistory(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	scanner := GetMCPScanner()
+	if scanner == nil {
+		http.Error(w, `{"error":"MCP scanner not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	// Check if a specific entry is requested
+	idStr := r.URL.Query().Get("id")
+	if idStr != "" {
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+			return
+		}
+		entry := scanner.GetHistoryEntry(id)
+		if entry == nil {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(entry)
+		return
+	}
+	// Return summary list (no full reports)
+	history := scanner.GetHistory(false)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"history": history,
+		"total":   len(history),
+	})
+}
+
+// adminMCPEndpoints returns all MCP endpoints with enabled/disabled status.
+func adminMCPEndpoints(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	p := GetMCPProvider()
+	if p == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"endpoints": []interface{}{}})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"endpoints": p.GetEndpoints()})
 }
 
 // adminMCPEndpoint forwards authenticated MCP requests to the admin MCP server.
