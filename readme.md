@@ -124,6 +124,8 @@ make db-psql                                # connect to PostgreSQL with psql
 - Dozens of error types across three layers: HTTP errors, TCP-level errors (resets, drops, slow drip, partial bodies), and protocol-level glitches (version mismatches, header corruption, encoding conflicts, HTTP/2 frame chaos -- GOAWAY, RST_STREAM, SETTINGS flood, window exhaustion, CONTINUATION flood, PING flood)
 - TLS chaos engine with 5 levels (clean, downgrade, weak cipher, cert chaos, nightmare) -- auto-generated self-signed certs, per-connection cert rotation, SNI-based mismatch, weak key certs, ALPN lies, per-client TLS config adaptation
 - HSTS chaos -- random Strict-Transport-Security headers per client+path (lock, disable, short-lived, conflicting, missing, subdomain-only)
+- H3/QUIC chaos engine with 4 levels -- injects Alt-Svc headers to trick clients into QUIC upgrades, fake UDP QUIC listener responding with malformed packets (Version Negotiation, Retry, Stateless Reset, garbage), emoji ports, null bytes, CRLF injection in Alt-Svc values
+- CVE-inspired header attacks -- CRLF injection (CVE-2019-9740), 65KB header overflow, null bytes in URI (CVE-2013-4547), duplicate Content-Length, unicode Transfer-Encoding bypass, and other real-world crash patterns from open-source vulnerability reports
 - HTTPS listener on port 8767 with HTTP/2 auto-enabled via ALPN, custom cert/key support
 - Vulnerability emulation across all major OWASP Top 10 lists (Web, API, LLM, CI/CD, Cloud-Native, Mobile, Privacy, Client-Side, IoT, Serverless, and more) plus advanced categories -- realistic corporate-looking pages, not demo labels
 - Infinite AI scraper labyrinth -- procedurally generated, deterministic page graph that traps crawlers
@@ -131,7 +133,7 @@ make db-psql                                # connect to PostgreSQL with psql
 - Bot detection with multi-signal scoring, JS traps, cookie traps, and CAPTCHA challenges
 - Honeypot system with hundreds of known scanner paths and realistic lure responses
 - Budget-draining traps -- graduated tarpits, fake vulnerability breadcrumbs, infinite pagination, progressive content expansion, streaming bait, and WebSocket honeypots that escalate based on per-client request volume
-- MCP (Model Context Protocol) honeypot server -- fake tools (credential harvesters, data harvesters, budget drains), poisoned resources (fake .env, SSH keys, DB dumps, K8s secrets), and trap prompts with injection attacks, rug pulls, and cross-server exfiltration lures. Agent fingerprinting classifies MCP clients (Claude, GPT, Cursor, Windsurf) by behavioral signals. SSE transport with event notifications and heartbeat keepalive. Authenticated admin MCP endpoint at `/admin/mcp` for server management via AI agents (toggle features, get metrics, nightmare control). Dashboard integration with stats cards, event log, and per-tool breakdown
+- MCP (Model Context Protocol) honeypot server -- fake tools (credential harvesters, data harvesters, budget drains), poisoned resources (fake .env, SSH keys, DB dumps, K8s secrets), and trap prompts with injection attacks, rug pulls, and cross-server exfiltration lures. Agent fingerprinting classifies MCP clients (Claude, GPT, Cursor, Windsurf) by behavioral signals. SSE transport with event notifications and heartbeat keepalive. Authenticated admin MCP endpoint at `/admin/mcp` for server management via AI agents (toggle features, get metrics, nightmare control). Individual subsystems (honeypot, fingerprinting, trap prompts) independently toggleable via admin config. Dashboard integration with stats cards, event log, per-tool breakdown, endpoint visibility table, and MCP scanner history
 - Multiple content formats, visual themes, and framework emulation (Rails, Django, Express, Spring, Laravel, and more)
 - REST API emulation (users, products, CMS, forms, infrastructure), GraphQL, Swagger/OpenAPI
 - OAuth2/SSO flows, CDN emulation, search engine, email/webmail simulation, i18n, emulated health/actuator endpoints (all subject to error injection), WebSocket streams, analytics tracking, privacy/consent
@@ -150,10 +152,12 @@ make db-psql                                # connect to PostgreSQL with psql
 - Evasion modes for WAF bypass testing (encoding, header manipulation, fragmentation)
 - Slow HTTP attack module -- slowloris, slow POST (RUDY), slow read, connection exhaustion, large headers, chunked abuse, multipart bombs, ReDoS payloads, compression bombs
 - TLS attack module -- HSTS probing, TLS version probing (1.0-1.3), weak cipher enumeration, certificate analysis, ALPN probing, downgrade testing
+- H3 attack module -- Alt-Svc confusion probes (emoji port, null byte, huge port, negative max-age, CRLF injection)
+- CVE-inspired breakage attacks -- raw TCP payloads reproducing real-world crashes (CRLF injection, 65KB headers, null in URI, duplicate Content-Length, overlong UTF-8 Transfer-Encoding)
 - Configurable profiles: compliance, aggressive, stealth, nightmare, destroyer
 - Scanner evaluation: compare results against expected vulnerability surface, classify false negatives (crawled vs not-crawled), multi-scanner comparison with accuracy scoring
 - Supported external scanners: nuclei, httpx, ffuf, nikto, nmap, wapiti -- launched and parsed automatically from the admin panel
-- MCP scanner -- connects to external MCP servers and tests for security issues: injection patterns in tool descriptions, credential harvesting, path traversal in resources, rug pull detection (tool description changes), canary payload exfiltration testing. Risk scoring and structured JSON reports via dashboard
+- MCP scanner -- connects to external MCP servers and tests for security issues: injection patterns in tool descriptions, credential harvesting, path traversal in resources, rug pull detection (tool description changes), canary payload exfiltration testing. Risk scoring and structured JSON reports via dashboard. Supports custom headers for authentication and scan history persistence
 
 ### Glitch Proxy (middleware emulator)
 
@@ -162,7 +166,7 @@ make db-psql                                # connect to PostgreSQL with psql
 - WAF mode with signature-based blocking and rate limiting
 - PCAP replay: load recorded traffic and replay through the proxy pipeline
 - MCP traffic interception -- detects MCP JSON-RPC traffic in transit, injects honeypot tools, poisons resource content, modifies tool results, tracks sessions
-- Configurable modes: transparent, WAF, chaos, gateway, nightmare, mirror (copies server settings)
+- Configurable modes: transparent, WAF, chaos, gateway, nightmare, mirror (copies server settings), killer (100% client-killing attacks on every response -- H3 Alt-Svc confusion, header corruption, connection manipulation)
 
 ---
 
