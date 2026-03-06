@@ -25,6 +25,7 @@ var registry = map[string]*Profile{
 	"aggressive": aggressiveProfile(),
 	"stealth":    stealthProfile(),
 	"nightmare":  nightmareProfile(),
+	"destroyer":  destroyerProfile(),
 }
 
 // Get returns the profile with the given name, or an error if no profile
@@ -164,6 +165,37 @@ func stealthProfile() *Profile {
 	}
 }
 
+// destroyerProfile returns a maximum-aggression configuration focused on
+// crashing, hanging, or OOMing the target server. No evasion, no rate limit,
+// all attack modules with emphasis on server-killing techniques.
+func destroyerProfile() *Profile {
+	return &Profile{
+		Name: "destroyer",
+		Description: "Server destruction profile. Maximum concurrency with no rate limiting. " +
+			"All attack modules enabled including slow HTTP, compression bombs, ReDoS, " +
+			"multipart bombs, and connection exhaustion. Designed to find crashes, hangs, " +
+			"and OOM conditions in target servers. WARNING: Will likely crash the target.",
+		Config: scanner.Config{
+			Concurrency: 200,
+			RateLimit:   0, // unlimited
+			Timeout:     60 * time.Second,
+			MaxBodyRead: 8 << 20, // 8 MB
+			CrawlFirst:  false,   // skip crawling, go straight to attacks
+			CrawlDepth:  0,
+			Profile:     "destroyer",
+			EnabledModules: nil, // all modules
+			EvasionMode:    "none",
+			UserAgent:      "GlitchScanner/1.0 (Destroyer)",
+			CustomHeaders: map[string]string{
+				"Connection": "keep-alive",
+				"Keep-Alive": "timeout=600, max=99999",
+			},
+			OutputFormat: "json",
+			Verbose:      true,
+		},
+	}
+}
+
 // nightmareProfile returns an extreme configuration designed to overwhelm,
 // crash, or confuse the target. Maximum concurrency with no rate limiting,
 // all modules including protocol-level abuse, and nightmare-level evasion
@@ -195,6 +227,8 @@ func nightmareProfile() *Profile {
 				"body-bomb", "connection-exhaustion",
 				// Chaos module for malformed/impossible requests.
 				"chaos",
+				// Server destruction modules.
+				"slowhttp", "tls",
 			},
 			EvasionMode: "nightmare",
 			UserAgent:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",

@@ -232,6 +232,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Panic recovery — log the stack trace instead of crashing the server
 	defer func() {
 		if rv := recover(); rv != nil {
+			// Let http.ErrAbortHandler propagate — Go's HTTP server handles it
+			// specially by aborting the connection (triggers GOAWAY on H2).
+			if rv == http.ErrAbortHandler {
+				panic(rv)
+			}
 			log.Printf("\033[31m[PANIC]\033[0m %s %s: %v\n%s", r.Method, r.URL.Path, rv, debug.Stack())
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
@@ -282,6 +287,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.headerEng.ShouldCorrupt(string(clientClass)) {
 			level := h.headerEng.GetLevel()
 			h.headerEng.Apply(mrw, r, clientID, level)
+		}
+	}
+
+	// Step 2.9: HSTS chaos — inject Strict-Transport-Security headers
+	if cfg := dashboard.GetAdminConfig(); cfg != nil {
+		cfgMap := cfg.Get()
+		if enabled, ok := cfgMap["hsts_chaos_enabled"]; ok && enabled == true {
+			h.applyHSTSChaos(mrw, r, clientID)
 		}
 	}
 
@@ -1176,4 +1189,41 @@ func (h *Handler) inferMediaFormat(path string, r *http.Request) media.Format {
 		return media.FormatJPEG
 	}
 	return ""
+}
+
+// applyHSTSChaos adds chaotic Strict-Transport-Security headers to the response.
+func (h *Handler) applyHSTSChaos(w http.ResponseWriter, r *http.Request, clientID string) {
+	// Use client ID to deterministically vary HSTS behavior per-client
+	hash := fnv32a(clientID + r.URL.Path)
+
+	switch hash % 6 {
+	case 0:
+		// Lock with max max-age and all directives
+		w.Header().Set("Strict-Transport-Security", "max-age=999999999; includeSubDomains; preload")
+	case 1:
+		// Disable HSTS
+		w.Header().Set("Strict-Transport-Security", "max-age=0")
+	case 2:
+		// Normal-ish HSTS
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+	case 3:
+		// HSTS with includeSubDomains but short max-age
+		w.Header().Set("Strict-Transport-Security", "max-age=60; includeSubDomains")
+	case 4:
+		// Conflicting HSTS headers
+		w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		w.Header().Add("Strict-Transport-Security", "max-age=0")
+	case 5:
+		// No HSTS header (omit entirely)
+	}
+}
+
+// fnv32a is a simple FNV-1a hash for deterministic per-client selection.
+func fnv32a(s string) uint32 {
+	h := uint32(2166136261)
+	for i := 0; i < len(s); i++ {
+		h ^= uint32(s[i])
+		h *= 16777619
+	}
+	return h
 }

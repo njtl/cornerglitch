@@ -210,7 +210,33 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 		return e.reporter.BuildReport(e.config, startedAt, completedAt), ctx.Err()
 	}
 
-	// ---- Phase 4: build report ----
+	// ---- Phase 4: raw TCP attack modules ----
+	if ctx.Err() == nil {
+		for _, mod := range e.modules {
+			if rawMod, ok := mod.(RawTCPModule); ok {
+				// Check if module is enabled.
+				if len(e.config.EnabledModules) > 0 {
+					enabled := false
+					for _, name := range e.config.EnabledModules {
+						if strings.EqualFold(name, mod.Name()) {
+							enabled = true
+							break
+						}
+					}
+					if !enabled {
+						continue
+					}
+				}
+				findings := rawMod.RunRawTCP(ctx, e.config.Target, e.config.Concurrency, e.config.Timeout)
+				for _, f := range findings {
+					e.reporter.AddFinding(f)
+					e.found.Add(1)
+				}
+			}
+		}
+	}
+
+	// ---- Phase 5: build report ----
 	e.phase.Store("done")
 	completedAt := time.Now()
 	report := e.reporter.BuildReport(e.config, startedAt, completedAt)
@@ -405,14 +431,14 @@ func (e *Engine) executeAll(ctx context.Context, requests []AttackRequest) error
 		concurrency = 10
 	}
 
-	// Rate limiter: one token per (1s / RateLimit).
+	// Rate limiter: one token per (1s / RateLimit). 0 means unlimited.
 	rateLimit := e.config.RateLimit
-	if rateLimit <= 0 {
-		rateLimit = 100
+	var ticker *time.Ticker
+	if rateLimit > 0 {
+		interval := time.Second / time.Duration(rateLimit)
+		ticker = time.NewTicker(interval)
+		defer ticker.Stop()
 	}
-	interval := time.Second / time.Duration(rateLimit)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 
 	work := make(chan AttackRequest, concurrency*2)
 	var wg sync.WaitGroup
@@ -436,13 +462,15 @@ func (e *Engine) executeAll(ctx context.Context, requests []AttackRequest) error
 
 	// Feed work channel with rate limiting.
 	for _, req := range requests {
-		select {
-		case <-ctx.Done():
-			close(work)
-			wg.Wait()
-			return ctx.Err()
-		case <-ticker.C:
-			// Rate-limit token acquired.
+		if ticker != nil {
+			select {
+			case <-ctx.Done():
+				close(work)
+				wg.Wait()
+				return ctx.Err()
+			case <-ticker.C:
+				// Rate-limit token acquired.
+			}
 		}
 
 		select {

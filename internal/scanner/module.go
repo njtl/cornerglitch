@@ -1,5 +1,10 @@
 package scanner
 
+import (
+	"context"
+	"time"
+)
+
 // AttackModule defines the interface for all scanner attack modules.
 // Each module generates a set of AttackRequests targeting a given host.
 type AttackModule interface {
@@ -12,6 +17,15 @@ type AttackModule interface {
 	// GenerateRequests produces attack requests against the given target base URL.
 	// The target includes the scheme and host (e.g. "http://localhost:8765").
 	GenerateRequests(target string) []AttackRequest
+}
+
+// RawTCPModule is an optional interface that attack modules can implement
+// to run raw TCP attacks that bypass Go's net/http client. Modules that
+// implement this interface will have RunRawTCP called during the scan
+// in addition to (or instead of) GenerateRequests.
+type RawTCPModule interface {
+	AttackModule
+	RunRawTCP(ctx context.Context, target string, concurrency int, timeout time.Duration) []Finding
 }
 
 // AttackRequest represents a single HTTP request to send during a scan.

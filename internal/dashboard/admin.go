@@ -491,6 +491,13 @@ type AdminConfig struct {
 	ProtocolGlitchEnabled bool // whether protocol-level glitches are active
 	ProtocolGlitchLevel   int  // 0=disabled, 1=subtle, 2=moderate, 3=aggressive, 4=chaos
 
+	// TLS chaos controls
+	TLSChaosEnabled bool // whether TLS chaos is active
+	TLSChaosLevel   int  // 0=clean, 1=downgrade, 2=weak cipher, 3=cert chaos, 4=nightmare
+
+	// Domain chaos controls
+	HSTSChaosEnabled bool // whether HSTS chaos is active
+
 	// Extended controllability fields
 	ErrorWeights           map[string]float64
 	HoneypotResponseStyle  string
@@ -534,6 +541,9 @@ func NewAdminConfig() *AdminConfig {
 		AdaptiveIntervalSec:    30,
 		ProtocolGlitchEnabled: true,
 		ProtocolGlitchLevel:   2,
+		TLSChaosEnabled:       false,
+		TLSChaosLevel:         0,
+		HSTSChaosEnabled:      false,
 		ErrorWeights:           make(map[string]float64),
 		HoneypotResponseStyle:  "realistic",
 		PageTypeWeights:        make(map[string]float64),
@@ -573,6 +583,9 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"adaptive_interval_sec":    c.AdaptiveIntervalSec,
 		"protocol_glitch_enabled":  c.ProtocolGlitchEnabled,
 		"protocol_glitch_level":    c.ProtocolGlitchLevel,
+		"tls_chaos_enabled":        c.TLSChaosEnabled,
+		"tls_chaos_level":          c.TLSChaosLevel,
+		"hsts_chaos_enabled":       c.HSTSChaosEnabled,
 		"honeypot_response_style":  c.HoneypotResponseStyle,
 		"cookie_trap_frequency":    c.CookieTrapFrequency,
 		"js_trap_difficulty":       c.JSTrapDifficulty,
@@ -739,6 +752,37 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 			v = 4
 		}
 		c.ProtocolGlitchLevel = v
+	case "tls_chaos_enabled":
+		c.TLSChaosEnabled = value != 0
+		globalTLSEngineMu.RLock()
+		e := globalTLSEngine
+		globalTLSEngineMu.RUnlock()
+		if e != nil {
+			if c.TLSChaosEnabled {
+				e.SetLevel(c.TLSChaosLevel)
+			} else {
+				e.SetLevel(0)
+			}
+		}
+	case "tls_chaos_level":
+		v := int(value)
+		if v < 0 {
+			v = 0
+		}
+		if v > 4 {
+			v = 4
+		}
+		c.TLSChaosLevel = v
+		if c.TLSChaosEnabled {
+			globalTLSEngineMu.RLock()
+			e := globalTLSEngine
+			globalTLSEngineMu.RUnlock()
+			if e != nil {
+				e.SetLevel(v)
+			}
+		}
+	case "hsts_chaos_enabled":
+		c.HSTSChaosEnabled = value != 0
 	case "api_chaos_probability":
 		if value < 0 {
 			value = 0
@@ -1636,6 +1680,8 @@ var (
 	globalProxyManager = NewProxyManager()
 	globalRecorder     *recorder.Recorder
 	globalAdaptive     *adaptive.Engine
+	globalTLSEngine    TLSChaosEngine
+	globalTLSEngineMu  sync.RWMutex
 	globalMCP          MCPProvider
 	globalAdminMCP     AdminMCPHandler
 	globalMCPScanner   MCPScannerProvider
@@ -1969,6 +2015,26 @@ func SetRecorder(rec *recorder.Recorder) {
 // GetRecorder returns the global recorder instance.
 func GetRecorder() *recorder.Recorder {
 	return globalRecorder
+}
+
+// TLSChaosEngine is the interface for TLS chaos level control.
+type TLSChaosEngine interface {
+	SetLevel(level int)
+	Level() int
+}
+
+// SetTLSChaosEngine sets the global TLS chaos engine.
+func SetTLSChaosEngine(e TLSChaosEngine) {
+	globalTLSEngineMu.Lock()
+	defer globalTLSEngineMu.Unlock()
+	globalTLSEngine = e
+}
+
+// GetTLSChaosEngine returns the global TLS chaos engine.
+func GetTLSChaosEngine() TLSChaosEngine {
+	globalTLSEngineMu.RLock()
+	defer globalTLSEngineMu.RUnlock()
+	return globalTLSEngine
 }
 
 // InitScanRunner eagerly creates the scanner runner so available-scanner

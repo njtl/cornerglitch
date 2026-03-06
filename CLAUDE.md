@@ -29,8 +29,10 @@ make run                                     # build + run in foreground
 
 # Server (backend emulator)
 go build -o glitch ./cmd/glitch
-./glitch                                    # ports 8765 + 8766, auto-loads .env
-./glitch -port 9000 -dash-port 9001         # custom ports
+./glitch                                    # ports 8765 + 8766 + 8767 (TLS), auto-loads .env
+./glitch -port 9000 -dash-port 9001 -tls-port 9002  # custom ports
+./glitch -tls-port 0                        # disable TLS listener
+./glitch -cert cert.pem -key key.pem        # use custom TLS cert (env: GLITCH_TLS_CERT/KEY)
 ./glitch -config config.json                # load saved configuration
 ./glitch -nightmare                         # nightmare mode
 GLITCH_ADMIN_PASSWORD=secret ./glitch       # set admin password (or -admin-password flag, or .env file)
@@ -40,6 +42,7 @@ GLITCH_DB_URL=postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable ./g
 go build -o glitch-scanner ./cmd/glitch-scanner
 glitch-scanner -target http://localhost:8765
 glitch-scanner -target http://localhost:8765 -profile nightmare
+glitch-scanner -target http://localhost:9001 -profile destroyer  # server destruction mode
 
 # Proxy (middleware emulator)
 go build -o glitch-proxy ./cmd/glitch-proxy
@@ -72,6 +75,8 @@ The server auto-loads `.env` from the working directory on startup. No need to m
 | `GLITCH_DB_URL` | PostgreSQL connection string | None (no persistence — data lost on restart) |
 | `PASSWORD_RESET_FROM_ENV` | Set to `1` to force-reset password from `GLITCH_ADMIN_PASSWORD`, overwriting DB | `0` (disabled) |
 | `GLITCH_HEALTH_SECRET` | Secret path segment for internal health endpoint | Auto-generated (printed to stderr) |
+| `GLITCH_TLS_CERT` | Path to TLS certificate file for HTTPS listener | None (self-signed auto-generated) |
+| `GLITCH_TLS_KEY` | Path to TLS private key file for HTTPS listener | None (self-signed auto-generated) |
 
 **Password persistence**: When a database is configured, password changes via the admin UI are saved to PostgreSQL. On restart, the DB password takes priority over the `.env` value. To recover from a forgotten password, set `PASSWORD_RESET_FROM_ENV=1` — this overwrites the DB password with `GLITCH_ADMIN_PASSWORD` on next startup. Remove the flag after resetting.
 
@@ -117,6 +122,7 @@ internal/
   media/                         Procedural media generation (images, audio, video, streaming)
   mediachaos/                    Media chaos engine (corruption, delivery chaos, cache poisoning)
   budgettrap/                    Budget-draining traps (tarpit, breadcrumbs, pagination, expansion, streaming bait)
+  tlschaos/                      TLS chaos engine (version downgrade, weak ciphers, cert rotation, ALPN lies)
   mcp/                           MCP (Model Context Protocol) subsystem — honeypot server, agent fingerprinting, SSE transport, outbound scanner, admin tools
     mcp/server.go                MCP honeypot server (Streamable HTTP transport, JSON-RPC 2.0)
     mcp/fingerprint.go           Client fingerprinting (classify Claude, GPT, Cursor, Windsurf; behavioral signals)
@@ -130,10 +136,10 @@ internal/
     config.go                    Configuration and profiles
     crawler.go                   Page/API discovery
     reporter.go                  Findings and coverage reports
-    attacks/                     Attack modules (owasp, injection, fuzzing, protocol, auth)
+    attacks/                     Attack modules (owasp, injection, fuzzing, protocol, auth, chaos, tls, slowhttp)
     resilience/                  Error handling, timeouts, connections
     evasion/                     WAF bypass, encoding, fragmentation
-    profiles/                    Scan profiles (aggressive, stealth, nightmare, compliance)
+    profiles/                    Scan profiles (aggressive, stealth, nightmare, compliance, destroyer)
 
   # Proxy subsystems
   proxy/                         Core proxy + interception pipeline
@@ -167,7 +173,9 @@ tests/
 
 - **Minimal external deps.** Only `github.com/lib/pq` (PostgreSQL driver) is allowed. Everything else uses Go stdlib.
 - **All logic is in `internal/`.** Nothing in `internal/` is meant to be imported by external code.
-- **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0. Includes HTTP errors, TCP-level errors, and protocol-level glitches (18 types: version mismatches, header corruption, encoding conflicts, connection tricks). Protocol glitches are togglable via admin config (`protocol_glitch_enabled`, `protocol_glitch_level` 0-4).
+- **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0. Includes HTTP errors, TCP-level errors, protocol-level glitches, HTTP/2 frame-level chaos (h2_goaway, h2_rst_stream, h2_settings_flood, h2_window_exhaust, h2_continuation_flood, h2_ping_flood), and scanner-destroying payloads. Protocol glitches are togglable via admin config (`protocol_glitch_enabled`, `protocol_glitch_level` 0-4).
+- **TLS chaos engine** (`internal/tlschaos/`) provides 5 chaos levels: 0=clean TLS 1.3, 1=version downgrade, 2=weak ciphers, 3=cert chaos (rotation through expired/wrong-host/weak-key certs), 4=nightmare (all + ALPN lies). Controlled via `tls_chaos_enabled` and `tls_chaos_level` admin config. HTTPS listener on port 8767 auto-generates self-signed certs. HTTP/2 is auto-enabled by Go stdlib over TLS.
+- **HSTS chaos** injects random Strict-Transport-Security headers (max-age 0 to 999999999, conflicting directives). Controlled via `hsts_chaos_enabled` admin config.
 - **Labyrinth pages are deterministic** — seeded from path via SHA-256 so the same URL always yields the same page.
 - **Adaptive behavior** is per-client (keyed by fingerprint ID) and mode transitions happen in `adaptive/engine.go:evaluate()`.
 - **Admin panel runs on a separate port** (default 8766), password-protected via `GLITCH_ADMIN_PASSWORD` env var (or `.env` file) or `-admin-password` flag (session cookies with 8-hour TTL). 5 tabs: Dashboard, Server (green), Scanner (cyan), Proxy (orange), Settings. Server tab uses collapsible sections. Scanner has 3 sub-tabs (Evaluate External, Built-in Scanner, PCAP Replay). External scanner sub-tab order: Launch, History, Results, Target Vulnerability Surface, Manual Upload.
