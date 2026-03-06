@@ -219,7 +219,7 @@ func TestProxy_Modes_RuntimeEndpoint(t *testing.T) {
 
 // TestProxy_Modes_AllModesPresent verifies all expected modes exist.
 func TestProxy_Modes_AllModesPresent(t *testing.T) {
-	expected := []string{"transparent", "waf", "chaos", "gateway", "nightmare", "mirror"}
+	expected := []string{"transparent", "waf", "chaos", "gateway", "nightmare", "mirror", "killer"}
 	if len(allProxyModes) != len(expected) {
 		t.Errorf("ProxyModes has %d modes, want %d", len(allProxyModes), len(expected))
 	}

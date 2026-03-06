@@ -29,6 +29,7 @@ import (
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/framework"
+	"github.com/glitchWebServer/internal/h3chaos"
 	"github.com/glitchWebServer/internal/headers"
 	"github.com/glitchWebServer/internal/health"
 	"github.com/glitchWebServer/internal/honeypot"
@@ -126,6 +127,7 @@ type Handler struct {
 	mediaChaosEng        *mediachaos.Engine
 	budgetTrap           *budgettrap.Engine
 	mcpServer            *mcp.Server
+	h3Engine             *h3chaos.Engine
 	flags                *dashboard.FeatureFlags
 	config               *dashboard.AdminConfig
 	apiChaosConfig       *dashboard.APIChaosConfig
@@ -167,6 +169,7 @@ func NewHandler(
 	mediaChaosEng *mediachaos.Engine,
 	budgetTrap *budgettrap.Engine,
 	mcpServer *mcp.Server,
+	h3Engine *h3chaos.Engine,
 ) *Handler {
 	return &Handler{
 		collector:      collector,
@@ -201,6 +204,7 @@ func NewHandler(
 		mediaChaosEng:    mediaChaosEng,
 		budgetTrap:       budgetTrap,
 		mcpServer:        mcpServer,
+		h3Engine:         h3Engine,
 		flags:            dashboard.GetFeatureFlags(),
 		config:           dashboard.GetAdminConfig(),
 		apiChaosConfig:   dashboard.GetAPIChaosConfig(),
@@ -296,6 +300,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if enabled, ok := cfgMap["hsts_chaos_enabled"]; ok && enabled == true {
 			h.applyHSTSChaos(mrw, r, clientID)
 		}
+	}
+
+	// Step 2.10: H3/QUIC chaos — inject Alt-Svc headers to trick clients into QUIC
+	if h.h3Engine != nil {
+		h.h3Engine.InjectHeaders(mrw, r)
 	}
 
 	// Step 3: Get adaptive behavior for this client
@@ -853,6 +862,25 @@ func (h *Handler) syncConfigToSubsystems() {
 	if h.headerEng != nil {
 		if level, ok := cfg["header_corrupt_level"].(int); ok {
 			h.headerEng.SetCorruptionLevel(level)
+		}
+	}
+
+	// Sync H3/QUIC chaos engine
+	if h.h3Engine != nil {
+		h3Enabled := false
+		switch v := cfg["h3_chaos_enabled"].(type) {
+		case bool:
+			h3Enabled = v
+		case int:
+			h3Enabled = v != 0
+		case float64:
+			h3Enabled = v != 0
+		}
+		if h3Enabled != h.h3Engine.IsEnabled() {
+			h.h3Engine.SetEnabled(h3Enabled)
+		}
+		if level, ok := cfg["h3_chaos_level"].(int); ok {
+			h.h3Engine.SetLevel(level)
 		}
 	}
 

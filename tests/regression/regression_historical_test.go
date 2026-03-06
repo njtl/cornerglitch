@@ -490,6 +490,8 @@ func TestRegression_e6ef91e_ProxyModesList(t *testing.T) {
 		"chaos":       false,
 		"gateway":     false,
 		"nightmare":   false,
+		"mirror":      false,
+		"killer":      false,
 	}
 
 	for _, mode := range dashboard.ProxyModes {

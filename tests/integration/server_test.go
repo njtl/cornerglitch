@@ -78,7 +78,7 @@ func newTestHandler() *server.Handler {
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(), nil,
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(), nil, nil,
 	)
 	h.SetHealthSecret("test-health-secret")
 	return h
@@ -122,7 +122,7 @@ func newTestHandlerNoChaos() *server.Handler {
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), nil, budgettrap.NewEngine(), nil,
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), nil, budgettrap.NewEngine(), nil, nil,
 	)
 	h.SetHealthSecret("test-health-secret")
 	return h
@@ -1001,7 +1001,7 @@ func newTestHandlerWithMCP() (*server.Handler, *mcp.Server) {
 		collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter,
 		honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH,
 		wsH, rec, searchH, emailH, healthH, i18nH,
-		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(), mcpServer,
+		headerEng, cookieT, jsEng, botDet, spiderH, nil, media.New(), mediachaos.New(), budgettrap.NewEngine(), mcpServer, nil,
 	)
 	h.SetHealthSecret("test-health-secret")
 	return h, mcpServer
