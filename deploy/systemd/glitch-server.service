@@ -15,6 +15,8 @@ EnvironmentFile=-/etc/glitch/glitch.env
 # Fallback defaults (overridden by EnvironmentFile)
 Environment=GLITCH_DB_URL=postgres://glitch:glitch@localhost:5432/glitch?sslmode=disable
 
+# Wait for PostgreSQL to accept connections before starting
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do pg_isready -h localhost -U glitch -q && exit 0; sleep 1; done; echo "PostgreSQL not ready after 30s" >&2; exit 1'
 ExecStart=/usr/local/bin/glitch -port 8765 -dash-port 8766
 Restart=on-failure
 RestartSec=5
