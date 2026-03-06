@@ -159,13 +159,14 @@ func main() {
 	}
 
 	// Initialize PostgreSQL storage (optional — graceful degradation).
+	// Retries with backoff to handle Docker/systemd startup race conditions.
 	dbConn := *dbURL
 	if dbConn == "" {
 		dbConn = os.Getenv("GLITCH_DB_URL")
 	}
 	if dbConn != "" {
 		if err := dashboard.InitStorage(dbConn); err != nil {
-			log.Printf("\033[33m[glitch]\033[0m Storage init warning: %v", err)
+			log.Printf("\033[33m[glitch]\033[0m Running without database persistence: %v", err)
 		} else {
 			log.Printf("\033[36m[glitch]\033[0m PostgreSQL connected")
 		}

@@ -57,20 +57,35 @@ func SetStateFile(path string) {
 
 // InitStorage initializes the PostgreSQL storage backend.
 // If dbURL is empty, storage is disabled (file-only mode).
+// Retries up to 5 times with backoff to handle Docker/systemd startup races.
 func InitStorage(dbURL string) error {
 	if dbURL == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	store, err := storage.NewWithDSN(ctx, dbURL)
-	if err != nil {
-		log.Printf("\033[33m[glitch]\033[0m Warning: DB connection failed, using file-only mode: %v", err)
-		return nil // graceful degradation, not fatal
+
+	const maxRetries = 5
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		store, err := storage.NewWithDSN(ctx, dbURL)
+		cancel()
+		if err == nil {
+			globalStore = store
+			if attempt > 1 {
+				log.Printf("\033[36m[glitch]\033[0m PostgreSQL connected (after %d attempts)", attempt)
+			}
+			return nil
+		}
+		lastErr = err
+		if attempt < maxRetries {
+			delay := time.Duration(attempt) * 2 * time.Second
+			log.Printf("\033[33m[glitch]\033[0m DB connection attempt %d/%d failed: %v (retrying in %v)", attempt, maxRetries, err, delay)
+			time.Sleep(delay)
+		}
 	}
-	globalStore = store
-	log.Printf("\033[36m[glitch]\033[0m PostgreSQL storage initialized")
-	return nil
+
+	log.Printf("\033[33m[glitch]\033[0m Warning: DB connection failed after %d attempts, using file-only mode: %v", maxRetries, lastErr)
+	return fmt.Errorf("DB connection failed: %w", lastErr)
 }
 
 // GetStore returns the global storage instance (may be nil if DB disabled).
