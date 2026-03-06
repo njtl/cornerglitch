@@ -31,6 +31,7 @@ import (
 	"github.com/glitchWebServer/internal/errors"
 	"github.com/glitchWebServer/internal/fingerprint"
 	"github.com/glitchWebServer/internal/framework"
+	"github.com/glitchWebServer/internal/h3chaos"
 	"github.com/glitchWebServer/internal/headers"
 	"github.com/glitchWebServer/internal/health"
 	"github.com/glitchWebServer/internal/honeypot"
@@ -89,10 +90,40 @@ func loadEnvFile(path string) {
 }
 
 // mcpScannerAdapter adapts the MCP scanner to the dashboard's MCPScannerProvider interface.
-type mcpScannerAdapter struct{}
+type mcpScannerAdapter struct {
+	scanner *mcpkg.Scanner
+}
 
-func (mcpScannerAdapter) Scan(target string) dashboard.MCPScanResult {
-	return mcpkg.NewScanner().Scan(target)
+func newMCPScannerAdapter() mcpScannerAdapter {
+	return mcpScannerAdapter{scanner: mcpkg.NewScanner()}
+}
+
+func (a mcpScannerAdapter) Scan(target string) dashboard.MCPScanResult {
+	return a.scanner.Scan(target)
+}
+
+func (a mcpScannerAdapter) ScanWithHeaders(target string, customHeaders map[string]string) dashboard.MCPScanResult {
+	return a.scanner.ScanWithOptions(mcpkg.ScanOptions{
+		Target:        target,
+		CustomHeaders: customHeaders,
+	})
+}
+
+func (a mcpScannerAdapter) GetHistory(includeReports bool) []dashboard.MCPScanHistoryEntry {
+	entries := a.scanner.GetHistory(includeReports)
+	result := make([]dashboard.MCPScanHistoryEntry, len(entries))
+	for i, e := range entries {
+		result[i] = e
+	}
+	return result
+}
+
+func (a mcpScannerAdapter) GetHistoryEntry(id int) dashboard.MCPScanHistoryEntry {
+	e := a.scanner.GetHistoryEntry(id)
+	if e == nil {
+		return nil
+	}
+	return e
 }
 
 func main() {
@@ -214,6 +245,14 @@ func main() {
 	mediaChaosEng := mediachaos.New()
 	budgetTrapEng := budgettrap.NewEngine()
 	mcpServer := mcpkg.NewServer()
+	mcpServer.SetConfigFunc(func() (bool, bool, bool) {
+		m := dashboard.GetAdminConfig().Get()
+		honeypot, _ := m["mcp_honeypot_enabled"].(bool)
+		fingerprint, _ := m["mcp_fingerprint_enabled"].(bool)
+		trapPrompts, _ := m["mcp_trap_prompts_enabled"].(bool)
+		return honeypot, fingerprint, trapPrompts
+	})
+	h3Engine := h3chaos.NewEngine()
 	dashboard.SetMCPProvider(mcpServer)
 
 	// Admin MCP server with authenticated tools
@@ -265,11 +304,11 @@ func main() {
 		},
 	})
 	dashboard.SetAdminMCPHandler(adminMCP)
-	dashboard.SetMCPScanner(mcpScannerAdapter{})
+	dashboard.SetMCPScanner(newMCPScannerAdapter())
 
 
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng, mediaGen, mediaChaosEng, budgetTrapEng, mcpServer)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng, mediaGen, mediaChaosEng, budgetTrapEng, mcpServer, h3Engine)
 
 	// Set up secret internal health endpoint.
 	// The real health check is at /_internal/<secret>/healthz — only known to CI/selftest.
@@ -376,6 +415,7 @@ func main() {
 		tlsSrv.Shutdown(ctx)
 	}
 	dashSrv.Shutdown(ctx)
+	h3Engine.Shutdown()
 	botDet.Stop()
 	contentEng.Stop()
 	if l := audit.GetLogger(); l != nil {

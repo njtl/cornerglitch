@@ -110,6 +110,15 @@ func (ck *ClientKiller) allAttacks() []clientKillAttack {
 		// --- Protocol confusion ---
 		{"status_line_corrupt", 0.5, ck.attackStatusLineCorrupt},
 		{"chunk_overflow_header", 1.0, ck.attackChunkOverflowHeader},
+
+		// --- Emoji & Unicode chaos ---
+		{"emoji_headers", 1.0, ck.attackEmojiHeaders},
+		{"control_chars", 1.0, ck.attackControlChars},
+		{"wrong_charset", 0.5, ck.attackWrongCharset},
+		{"ansi_escape", 0.5, ck.attackANSIEscape},
+		{"zero_width_inject", 0.5, ck.attackZeroWidthInject},
+		// --- H3/QUIC confusion ---
+		{"h3_alt_svc", 1.0, ck.attackH3AltSvc},
 	}
 }
 
@@ -356,6 +365,89 @@ func (ck *ClientKiller) attackChunkOverflowHeader(resp *http.Response) *http.Res
 	// This confuses clients that inspect headers for chunked handling
 	resp.Header.Set("Transfer-Encoding", "chunked")
 	resp.Header.Set("X-Chunk-Size", "FFFFFFFFFFFFFFFF")
+	return resp
+}
+
+// --- Emoji & Unicode chaos ---
+
+func (ck *ClientKiller) attackEmojiHeaders(resp *http.Response) *http.Response {
+	// Emoji in header values — crashes parsers that expect ASCII-only
+	resp.Header.Set("Server", "Apache/2.4 \xF0\x9F\x94\xA5\xF0\x9F\x92\x80")       // 🔥💀
+	resp.Header.Set("X-Status", "\xF0\x9F\x9A\x80 Running")                          // 🚀
+	resp.Header.Set("X-Mood", "\xF0\x9F\x98\x88\xF0\x9F\x91\xBB\xF0\x9F\x92\xA3")   // 😈👻💣
+	resp.Header.Set("X-Zalgo", "h\xcc\xa8\xcc\xa9\xcc\xaee\xcc\xa8\xcc\xa9l\xcc\xa8p") // Zalgo
+	return resp
+}
+
+func (ck *ClientKiller) attackControlChars(resp *http.Response) *http.Response {
+	// Control characters in header values — illegal per RFC 7230
+	resp.Header.Set("X-Bell", "\x07\x07\x07")                   // Audible bell
+	resp.Header.Set("X-Backspace", "normal\x08\x08\x08over")    // Backspace overwrite
+	resp.Header.Set("X-VTab", "val\x0bue")                      // Vertical tab
+	resp.Header.Set("X-FormFeed", "val\x0cue")                  // Form feed
+	resp.Header.Set("X-DEL", "val\x7fue")                       // DEL character
+	resp.Header.Set("X-High", "high\x80\x81\x82\xff\xfebytes") // High bytes
+	return resp
+}
+
+func (ck *ClientKiller) attackWrongCharset(resp *http.Response) *http.Response {
+	// Claim charset that doesn't match actual encoding
+	charsets := []string{
+		"text/html; charset=utf-32",
+		"text/html; charset=iso-2022-jp",
+		"text/html; charset=ebcdic-us",
+		"text/html; charset=utf-7",
+		"application/json; charset=utf-16le",
+		"text/html; charset=\xF0\x9F\x92\xA9", // 💩 as charset
+	}
+	ck.mu.Lock()
+	idx := ck.rng.Intn(len(charsets))
+	ck.mu.Unlock()
+	resp.Header.Set("Content-Type", charsets[idx])
+	return resp
+}
+
+func (ck *ClientKiller) attackANSIEscape(resp *http.Response) *http.Response {
+	// ANSI escape sequences — crash terminal-based log viewers/clients
+	resp.Header.Set("X-Color", "\x1b[31;1mCRITICAL\x1b[0m")
+	resp.Header.Set("X-Clear", "\x1b[2J\x1b[H")                    // Clear screen
+	resp.Header.Set("X-Title", "\x1b]0;HACKED\x07")                // Set terminal title
+	resp.Header.Set("X-RTL", "normal\xe2\x80\xaedesrever")          // RTL override
+	return resp
+}
+
+func (ck *ClientKiller) attackZeroWidthInject(resp *http.Response) *http.Response {
+	body := readBody(resp)
+	if len(body) > 20 {
+		// Inject zero-width spaces throughout — breaks string matching/comparison
+		zwsp := []byte("\xe2\x80\x8b") // U+200B Zero Width Space
+		var result []byte
+		for i, b := range body {
+			result = append(result, b)
+			if i%5 == 0 {
+				result = append(result, zwsp...)
+			}
+		}
+		body = result
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	return resp
+}
+
+// --- H3/QUIC confusion ---
+
+func (ck *ClientKiller) attackH3AltSvc(resp *http.Response) *http.Response {
+	// Inject confusing Alt-Svc headers to trick clients into QUIC
+	resp.Header.Add("Alt-Svc", `h3=":443"; ma=86400`)
+	resp.Header.Add("Alt-Svc", `h3=":0"; ma=86400`)
+	resp.Header.Add("Alt-Svc", `h3=":65535"; ma=1`)
+	resp.Header.Add("Alt-Svc", "h3=\":\xF0\x9F\x92\xA9\"; ma=86400") // emoji port
+	resp.Header.Add("Alt-Svc", "h3=\":443\x00\"; ma=86400")           // null byte
+	resp.Header.Add("Alt-Svc", "clear")                                // contradicts above
+	resp.Header.Set("Upgrade", "h3")
+	resp.Header.Set("Connection", "Upgrade")
 	return resp
 }
 
