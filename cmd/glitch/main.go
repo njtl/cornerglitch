@@ -52,6 +52,7 @@ import (
 	"github.com/glitchWebServer/internal/selftest"
 	"github.com/glitchWebServer/internal/spider"
 	"github.com/glitchWebServer/internal/server"
+	"github.com/glitchWebServer/internal/storage"
 	"github.com/glitchWebServer/internal/vuln"
 	"github.com/glitchWebServer/internal/websocket"
 )
@@ -400,6 +401,29 @@ func main() {
 
 	log.Println("\033[33m[glitch]\033[0m Shutting down...")
 	audit.LogSystem("system.stop", "system.lifecycle", nil)
+	// Save final metrics snapshot before shutdown
+	if store := dashboard.GetStore(); store != nil {
+		cs := collector.GetCounterSnapshot()
+		extraData, _ := json.Marshal(map[string]int64{
+			"total_delayed":        cs.TotalDelayed,
+			"total_labyrinth":      cs.TotalLabyrinth,
+			"total_request_bytes":  cs.TotalRequestBytes,
+			"total_response_bytes": cs.TotalResponseBytes,
+		})
+		snap := &storage.MetricsSnapshot{
+			TotalRequests: cs.TotalRequests,
+			TotalErrors:   cs.TotalErrors,
+			Total2xx:      cs.Total2xx,
+			Total4xx:      cs.Total4xx,
+			Total5xx:      cs.Total5xx,
+			UniqueClients: len(collector.GetAllClientProfiles()),
+			SnapshotData:  extraData,
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		store.SaveMetricsSnapshot(ctx, snap)
+		cancel()
+		log.Printf("\033[36m[glitch]\033[0m Final metrics snapshot saved (total_requests=%d)", cs.TotalRequests)
+	}
 	stopSnapshotter()
 	stopRequestLogger()
 	// Final metrics and client profile save before shutdown.

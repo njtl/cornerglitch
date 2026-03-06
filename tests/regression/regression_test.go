@@ -889,3 +889,88 @@ func TestRegression_PasswordResetFromEnv(t *testing.T) {
 		t.Errorf("env override password should work: got %d, want 200", rr.Code)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Bug: InitStorage() returned nil error on connection failure (graceful degradation)
+// which caused main.go to think DB connected, skip RestoreMetrics, and lose data.
+// Fix: InitStorage now retries 5 times with backoff and returns a real error on failure.
+// Test: Verify InitStorage returns error when DB is unreachable.
+// ---------------------------------------------------------------------------
+
+func TestRegression_InitStorageRetry_ReturnsErrorOnFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping retry test in short mode")
+	}
+
+	// Use a bogus DSN that will definitely fail to connect
+	err := dashboard.InitStorage("postgres://nobody:nothing@127.0.0.1:1/nonexistent?sslmode=disable&connect_timeout=1")
+	if err == nil {
+		t.Fatal("expected InitStorage to return error for unreachable DB, got nil")
+	}
+	if !strings.Contains(err.Error(), "DB connection failed") {
+		t.Fatalf("expected error to contain 'DB connection failed', got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bug: CounterSnapshot save/restore did not round-trip correctly.
+// This ensures metrics survive restart — the exact bug that caused data loss.
+// Verify CounterSnapshot save/restore round-trips correctly.
+// ---------------------------------------------------------------------------
+
+func TestRegression_CounterSnapshot_RoundTrip(t *testing.T) {
+	c := metrics.NewCollector()
+	defer c.Stop()
+
+	// Record some data
+	for i := 0; i < 100; i++ {
+		status := 200
+		if i%10 == 0 {
+			status = 500
+		}
+		if i%5 == 0 {
+			status = 404
+		}
+		c.Record(metrics.RequestRecord{
+			Timestamp:    time.Now(),
+			ClientID:     "test-client",
+			Method:       "GET",
+			Path:         "/test",
+			StatusCode:   status,
+			Latency:      time.Millisecond,
+			ResponseType: "ok",
+		})
+	}
+
+	// Give async worker time to process
+	time.Sleep(100 * time.Millisecond)
+
+	// Save snapshot
+	snap := c.GetCounterSnapshot()
+	if snap.TotalRequests != 100 {
+		t.Fatalf("expected 100 total requests, got %d", snap.TotalRequests)
+	}
+
+	// Create new collector and restore
+	c2 := metrics.NewCollector()
+	defer c2.Stop()
+	c2.RestoreCounters(snap)
+
+	// Verify restored values match
+	snap2 := c2.GetCounterSnapshot()
+	if snap2.TotalRequests != snap.TotalRequests {
+		t.Fatalf("restored TotalRequests = %d, want %d", snap2.TotalRequests, snap.TotalRequests)
+	}
+	if snap2.TotalErrors != snap.TotalErrors {
+		t.Fatalf("restored TotalErrors = %d, want %d", snap2.TotalErrors, snap.TotalErrors)
+	}
+	if snap2.Total2xx != snap.Total2xx {
+		t.Fatalf("restored Total2xx = %d, want %d", snap2.Total2xx, snap.Total2xx)
+	}
+	if snap2.Total4xx != snap.Total4xx {
+		t.Fatalf("restored Total4xx = %d, want %d", snap2.Total4xx, snap.Total4xx)
+	}
+	if snap2.Total5xx != snap.Total5xx {
+		t.Fatalf("restored Total5xx = %d, want %d", snap2.Total5xx, snap.Total5xx)
+	}
+}

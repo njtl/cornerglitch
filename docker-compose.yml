@@ -24,6 +24,7 @@ services:
     ports:
       - "${GLITCH_PORT:-8765}:8765"
       - "${GLITCH_DASH_PORT:-8766}:8766"
+      - "${GLITCH_TLS_PORT:-8767}:8767"
     environment:
       - GLITCH_ADMIN_PASSWORD=${GLITCH_ADMIN_PASSWORD:-admin}
       - GLITCH_CONFIG=${GLITCH_CONFIG:-}
@@ -36,6 +37,7 @@ services:
       sh -c '/glitch
       -port 8765
       -dash-port 8766
+      -tls-port 8767
       ${GLITCH_CONFIG:+-config /etc/glitch/config.json}'
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:8765/_internal/$${GLITCH_HEALTH_SECRET}/healthz"]
