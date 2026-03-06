@@ -21,11 +21,12 @@ type Profile struct {
 
 // registry holds all known profiles, keyed by lowercase name.
 var registry = map[string]*Profile{
-	"compliance": complianceProfile(),
-	"aggressive": aggressiveProfile(),
-	"stealth":    stealthProfile(),
-	"nightmare":  nightmareProfile(),
-	"destroyer":  destroyerProfile(),
+	"compliance":  complianceProfile(),
+	"aggressive":  aggressiveProfile(),
+	"stealth":     stealthProfile(),
+	"nightmare":   nightmareProfile(),
+	"destroyer":   destroyerProfile(),
+	"waf-buster":  wafBusterProfile(),
 }
 
 // Get returns the profile with the given name, or an error if no profile
@@ -192,6 +193,37 @@ func destroyerProfile() *Profile {
 			},
 			OutputFormat: "json",
 			Verbose:      true,
+		},
+	}
+}
+
+// wafBusterProfile returns a WAF-focused configuration emphasizing encoding
+// bypass, request smuggling, and resource exhaustion attacks. Skips crawling
+// and goes straight to WAF bypass payloads with nightmare-level evasion.
+func wafBusterProfile() *Profile {
+	return &Profile{
+		Name: "waf-buster",
+		Description: "WAF bypass specialist profile. Targets Web Application Firewalls with encoding " +
+			"tricks, request smuggling, parser confusion, CVE-specific payloads, and resource " +
+			"exhaustion attacks. Nightmare evasion mode applies all encoding variants. " +
+			"Skips crawling — goes straight to WAF bypass attacks.",
+		Config: scanner.Config{
+			Concurrency: 30,
+			RateLimit:   100,
+			Timeout:     30 * time.Second,
+			MaxBodyRead: 2 << 20, // 2 MB
+			CrawlFirst:  false,
+			CrawlDepth:  0,
+			Profile:     "waf-buster",
+			EnabledModules: []string{
+				"waf", "slowhttp", "breakage", "protocol",
+				"h3", "owasp", "injection",
+			},
+			EvasionMode:   "nightmare",
+			UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+			CustomHeaders: make(map[string]string),
+			OutputFormat:  "json",
+			Verbose:       true,
 		},
 	}
 }

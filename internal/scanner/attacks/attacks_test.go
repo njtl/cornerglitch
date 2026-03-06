@@ -240,10 +240,11 @@ func TestAllModules(t *testing.T) {
 			}
 
 			reqs := mod.GenerateRequests("http://localhost:8765")
-			// Raw TCP modules (like breakage) don't generate HTTP requests.
-			if _, isRaw := mod.(scanner.RawTCPModule); isRaw {
+			// Pure raw TCP modules (like breakage) don't generate HTTP requests.
+			// Hybrid modules (like waf) implement RawTCPModule but also generate HTTP requests.
+			if _, isRaw := mod.(scanner.RawTCPModule); isRaw && mod.Name() == "breakage" {
 				if len(reqs) != 0 {
-					t.Errorf("raw TCP module %q should generate 0 HTTP requests, got %d", mod.Name(), len(reqs))
+					t.Errorf("pure raw TCP module %q should generate 0 HTTP requests, got %d", mod.Name(), len(reqs))
 				}
 			} else if len(reqs) == 0 {
 				t.Errorf("module %q generated 0 requests", mod.Name())
@@ -265,6 +266,105 @@ func TestAllModules(t *testing.T) {
 			t.Logf("module %q generated %d requests", mod.Name(), len(reqs))
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// TestWAFModuleMetadata
+// ---------------------------------------------------------------------------
+
+func TestWAFModuleMetadata(t *testing.T) {
+	mod := &WAFModule{}
+
+	if mod.Name() != "waf" {
+		t.Errorf("expected name 'waf', got %q", mod.Name())
+	}
+	if mod.Category() != "waf-bypass" {
+		t.Errorf("expected category 'waf-bypass', got %q", mod.Category())
+	}
+
+	// WAFModule implements both AttackModule and RawTCPModule
+	var _ scanner.AttackModule = mod
+	var _ scanner.RawTCPModule = mod
+}
+
+// ---------------------------------------------------------------------------
+// TestWAFModuleGeneratesRequests
+// ---------------------------------------------------------------------------
+
+func TestWAFModuleGeneratesRequests(t *testing.T) {
+	mod := &WAFModule{}
+	reqs := mod.GenerateRequests("http://localhost:8765")
+
+	if len(reqs) < 50 {
+		t.Fatalf("WAFModule should generate >50 requests, got %d", len(reqs))
+	}
+	t.Logf("WAFModule generated %d requests", len(reqs))
+
+	// Verify all requests have required fields.
+	for i, r := range reqs {
+		if r.Method == "" {
+			t.Errorf("request %d has empty Method", i)
+		}
+		if r.Path == "" {
+			t.Errorf("request %d has empty Path", i)
+		}
+		if r.Category == "" {
+			t.Errorf("request %d has empty Category", i)
+		}
+		if r.Description == "" {
+			t.Errorf("request %d has empty Description", i)
+		}
+	}
+
+	// Verify both GET and POST methods are present.
+	methods := make(map[string]int)
+	for _, r := range reqs {
+		methods[r.Method]++
+	}
+	if methods["GET"] == 0 {
+		t.Error("expected GET requests from WAF module")
+	}
+	if methods["POST"] == 0 {
+		t.Error("expected POST requests from WAF module")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestWAFModuleCategories
+// ---------------------------------------------------------------------------
+
+func TestWAFModuleCategories(t *testing.T) {
+	mod := &WAFModule{}
+	reqs := mod.GenerateRequests("http://localhost:8765")
+
+	subCats := make(map[string]int)
+	for _, r := range reqs {
+		subCats[r.SubCategory]++
+	}
+
+	// Verify subcategories cover encoding, smuggling, parser-confusion, cve
+	expectedPrefixes := map[string]bool{
+		"encoding":       false,
+		"smuggling":      false,
+		"parser":         false,
+		"cve":            false,
+	}
+
+	for sc := range subCats {
+		for prefix := range expectedPrefixes {
+			if len(sc) >= len(prefix) && sc[:len(prefix)] == prefix {
+				expectedPrefixes[prefix] = true
+			}
+		}
+	}
+
+	for prefix, found := range expectedPrefixes {
+		if !found {
+			t.Errorf("expected at least one sub-category starting with %q, found none in: %v", prefix, subCats)
+		}
+	}
+
+	t.Logf("WAFModule sub-categories: %v", subCats)
 }
 
 // ---------------------------------------------------------------------------

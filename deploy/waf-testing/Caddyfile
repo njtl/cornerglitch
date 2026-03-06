@@ -1,0 +1,22 @@
+{
+    order coraza_waf first
+    admin off
+}
+
+:80 {
+    coraza_waf {
+        directives `
+            SecRuleEngine On
+            SecRequestBodyAccess On
+            SecResponseBodyAccess On
+            SecResponseBodyMimeType text/plain text/html text/xml application/json
+            SecRule ARGS "@rx (?i)(select|union|insert|update|delete|drop|alter|create|truncate)" "id:1001,phase:2,deny,status:403,msg:'SQL Injection'"
+            SecRule ARGS "@rx (?i)(<script|javascript:|on\w+=)" "id:1002,phase:2,deny,status:403,msg:'XSS Attack'"
+            SecRule REQUEST_URI "@rx \.\.\/" "id:1003,phase:1,deny,status:403,msg:'Path Traversal'"
+            SecRule ARGS "@rx (?i)(exec|system|passthru|popen|shell_exec)" "id:1004,phase:2,deny,status:403,msg:'Command Injection'"
+            SecRule REQUEST_HEADERS:Content-Type "@rx ^(?:application/x-www-form-urlencoded|multipart/form-data)" "id:1005,phase:1,chain"
+            SecRule REQUEST_BODY "@rx (?i)(select|union|insert|update|delete|drop)" "deny,status:403,msg:'SQL in POST body'"
+        `
+    }
+    reverse_proxy host.docker.internal:8765
+}

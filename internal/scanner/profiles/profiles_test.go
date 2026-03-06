@@ -8,7 +8,7 @@ import (
 
 func TestList(t *testing.T) {
 	names := List()
-	expected := []string{"aggressive", "compliance", "destroyer", "nightmare", "stealth"}
+	expected := []string{"aggressive", "compliance", "destroyer", "nightmare", "stealth", "waf-buster"}
 
 	if len(names) != len(expected) {
 		t.Fatalf("List() returned %d profiles, want %d", len(names), len(expected))
@@ -204,6 +204,45 @@ func TestDestroyerProfile(t *testing.T) {
 	}
 	if p.Config.Timeout < 30*time.Second {
 		t.Errorf("destroyer Timeout = %v, expected >= 30s", p.Config.Timeout)
+	}
+}
+
+func TestWAFBusterProfile(t *testing.T) {
+	p, err := Get("waf-buster")
+	if err != nil {
+		t.Fatalf("Get(\"waf-buster\") returned error: %v", err)
+	}
+
+	if p.Config.Concurrency != 30 {
+		t.Errorf("waf-buster Concurrency = %d, want 30", p.Config.Concurrency)
+	}
+	if p.Config.RateLimit != 100 {
+		t.Errorf("waf-buster RateLimit = %d, want 100", p.Config.RateLimit)
+	}
+	if p.Config.Timeout != 30*time.Second {
+		t.Errorf("waf-buster Timeout = %v, want 30s", p.Config.Timeout)
+	}
+	if p.Config.CrawlFirst {
+		t.Error("waf-buster should have CrawlFirst = false")
+	}
+	if p.Config.EvasionMode != "nightmare" {
+		t.Errorf("waf-buster EvasionMode = %q, want %q", p.Config.EvasionMode, "nightmare")
+	}
+
+	// Verify enabled modules include waf and other expected modules
+	moduleSet := make(map[string]bool)
+	for _, m := range p.Config.EnabledModules {
+		moduleSet[m] = true
+	}
+	requiredModules := []string{"waf", "slowhttp", "breakage", "protocol", "h3", "owasp", "injection"}
+	for _, m := range requiredModules {
+		if !moduleSet[m] {
+			t.Errorf("waf-buster should include module %q", m)
+		}
+	}
+
+	if !p.Config.Verbose {
+		t.Error("waf-buster should have Verbose = true")
 	}
 }
 
