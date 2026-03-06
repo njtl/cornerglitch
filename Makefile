@@ -1,4 +1,4 @@
-.PHONY: build test vet clean docker-build docker-push k8s-deploy run start stop restart logs status cross db-up db-down db-reset db-psql
+.PHONY: build build-all test test-short vet clean docker-build docker-push k8s-deploy run start stop restart logs status cross db-up db-down db-reset db-psql
 
 BINARY     := glitch
 IMAGE      := ghcr.io/njtl/glitch-server
@@ -12,9 +12,19 @@ all: build
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BINARY) ./cmd/glitch
 
+# Build all binaries
+build-all:
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BINARY) ./cmd/glitch
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o glitch-scanner ./cmd/glitch-scanner
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o glitch-proxy ./cmd/glitch-proxy
+
 # Run tests
 test:
-	go test ./... -count=1
+	go test ./... -count=1 -timeout 600s
+
+# Quick test (skip long tests)
+test-short:
+	go test ./... -count=1 -short -timeout 120s
 
 # Static analysis
 vet:
@@ -22,7 +32,7 @@ vet:
 
 # Remove build artifacts
 clean:
-	rm -f glitch glitch-proxy glitch-crawler
+	rm -f glitch glitch-proxy glitch-scanner
 	rm -f glitch-linux-amd64 glitch-linux-arm64 glitch-darwin-amd64 glitch-darwin-arm64
 
 # Build Docker image
@@ -57,7 +67,9 @@ start: build
 
 # Stop background server
 stop:
-	@if [ -f .glitch.pid ]; then \
+	@if systemctl is-active --quiet glitch 2>/dev/null; then \
+		sudo systemctl stop glitch && echo "Stopped glitch systemd service"; \
+	elif [ -f .glitch.pid ]; then \
 		kill $$(cat .glitch.pid) 2>/dev/null && echo "Stopped PID $$(cat .glitch.pid)" || echo "Process not running"; \
 		rm -f .glitch.pid; \
 	else \
@@ -102,7 +114,7 @@ db-up:
 		-e POSTGRES_PASSWORD=$(DB_USER) \
 		-e POSTGRES_DB=$(DB_NAME) \
 		-v glitch-pgdata:/var/lib/postgresql/data \
-		-p $(DB_PORT):5432 \
+		-p 127.0.0.1:$(DB_PORT):5432 \
 		--health-cmd="pg_isready -U $(DB_USER)" \
 		--health-interval=5s \
 		--health-timeout=3s \

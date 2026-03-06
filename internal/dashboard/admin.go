@@ -2304,8 +2304,8 @@ func RestoreMetrics(collector *metrics.Collector) {
 		}
 	}
 	collector.RestoreCounters(cs)
-	log.Printf("[glitch] Restored metrics from DB (total_requests=%d, last snapshot: %s)",
-		cs.TotalRequests, snap.CreatedAt.Format(time.RFC3339))
+	log.Printf("[glitch] Restored metrics from DB (requests=%d, errors=%d, 2xx=%d, 4xx=%d, 5xx=%d, last snapshot: %s)",
+		cs.TotalRequests, cs.TotalErrors, cs.Total2xx, cs.Total4xx, cs.Total5xx, snap.CreatedAt.Format(time.RFC3339))
 }
 
 // StartMetricsSnapshotter launches a background goroutine that periodically
@@ -2319,8 +2319,10 @@ func StartMetricsSnapshotter(collector *metrics.Collector) func() {
 	go func() {
 		metricsTicker := time.NewTicker(30 * time.Second)
 		profileTicker := time.NewTicker(5 * time.Minute)
+		pruneTicker := time.NewTicker(1 * time.Hour)
 		defer metricsTicker.Stop()
 		defer profileTicker.Stop()
+		defer pruneTicker.Stop()
 		for {
 			select {
 			case <-metricsTicker.C:
@@ -2346,6 +2348,24 @@ func StartMetricsSnapshotter(collector *metrics.Collector) func() {
 				cancel()
 			case <-profileTicker.C:
 				SaveClientProfiles(collector)
+			case <-pruneTicker.C:
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if n, err := store.PruneMetrics(ctx, 7*24*time.Hour); err != nil {
+					log.Printf("[glitch] Prune metrics failed: %v", err)
+				} else if n > 0 {
+					log.Printf("[glitch] Pruned %d old metrics snapshots", n)
+				}
+				if n, err := store.PruneRequests(ctx, 7*24*time.Hour); err != nil {
+					log.Printf("[glitch] Prune requests failed: %v", err)
+				} else if n > 0 {
+					log.Printf("[glitch] Pruned %d old request log entries", n)
+				}
+				if n, err := store.PruneClientProfiles(ctx, 50); err != nil {
+					log.Printf("[glitch] Prune client profiles failed: %v", err)
+				} else if n > 0 {
+					log.Printf("[glitch] Pruned %d old client profile versions", n)
+				}
+				cancel()
 			case <-stopCh:
 				return
 			}
