@@ -146,7 +146,7 @@ func TestScanner_ComplianceConfig(t *testing.T) {
 // TestScanner_ProfileList verifies all profiles are registered.
 func TestScanner_ProfileList(t *testing.T) {
 	names := profiles.List()
-	expected := []string{"aggressive", "compliance", "destroyer", "nightmare", "stealth"}
+	expected := []string{"aggressive", "compliance", "destroyer", "nightmare", "stealth", "waf-buster"}
 
 	if len(names) != len(expected) {
 		t.Fatalf("List() returned %d profiles, want %d: %v", len(names), len(expected), names)
@@ -209,8 +209,8 @@ func TestScanner_ProfileImmutability(t *testing.T) {
 // TestScanner_ProfileAll verifies All() returns all profiles.
 func TestScanner_ProfileAll(t *testing.T) {
 	all := profiles.All()
-	if len(all) != 5 {
-		t.Errorf("All() returned %d profiles, want 5", len(all))
+	if len(all) != 6 {
+		t.Errorf("All() returned %d profiles, want 6", len(all))
 	}
 }
 

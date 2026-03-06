@@ -1,0 +1,74 @@
+# WAF Testing Infrastructure
+# Deploys WAFs proxying to host Glitch server on port 8765
+# Usage: docker compose up -d
+# Prerequisite: Glitch server running on host (make start)
+
+services:
+  # =================================================================
+  # WAF 1: ModSecurity + OWASP CRS (nginx) — Paranoia Level 2
+  # Port 8083 — The gold standard open-source WAF
+  # =================================================================
+  modsecurity:
+    image: owasp/modsecurity-crs:nginx-alpine
+    container_name: modsec-waf
+    ports:
+      - "127.0.0.1:8083:8080"
+    environment:
+      - BACKEND=http://host.docker.internal:8765
+      - PARANOIA=2
+      - ANOMALY_INBOUND=5
+      - ANOMALY_OUTBOUND=4
+      - MODSEC_RULE_ENGINE=on
+      - MODSEC_AUDIT_LOG=/var/log/modsecurity/audit.log
+      - MODSEC_AUDIT_LOG_FORMAT=JSON
+      - MODSEC_RESP_BODY_ACCESS=on
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - modsec-logs:/var/log/modsecurity
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # =================================================================
+  # WAF 2: ModSecurity + OWASP CRS — Paranoia Level 4 (maximum)
+  # Port 8084 — Same WAF at max paranoia for comparison
+  # =================================================================
+  modsecurity-pl4:
+    image: owasp/modsecurity-crs:nginx-alpine
+    container_name: modsec-waf-pl4
+    ports:
+      - "127.0.0.1:8084:8080"
+    environment:
+      - BACKEND=http://host.docker.internal:8765
+      - PARANOIA=4
+      - ANOMALY_INBOUND=5
+      - ANOMALY_OUTBOUND=4
+      - MODSEC_RULE_ENGINE=on
+      - MODSEC_AUDIT_LOG=/var/log/modsecurity/audit.log
+      - MODSEC_AUDIT_LOG_FORMAT=JSON
+      - MODSEC_RESP_BODY_ACCESS=on
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - modsec-pl4-logs:/var/log/modsecurity
+
+  # =================================================================
+  # WAF 3: NAXSI (nginx module-based WAF)
+  # Port 8085 — Different detection approach (scoring-based, no regex)
+  # =================================================================
+  naxsi:
+    image: dmgnx/nginx-naxsi:latest
+    container_name: naxsi-waf
+    ports:
+      - "127.0.0.1:8085:8080"
+    volumes:
+      - ./naxsi/nginx.conf:/etc/nginx/nginx.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  modsec-logs:
+  modsec-pl4-logs:
