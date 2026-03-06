@@ -1,6 +1,7 @@
 [Unit]
 Description=Glitch PostgreSQL Database
-After=network-online.target
+After=docker.service network-online.target
+Requires=docker.service
 Wants=network-online.target
 
 [Service]
@@ -11,7 +12,7 @@ ExecStart=/usr/bin/docker run --name glitch-postgres \
     -e POSTGRES_PASSWORD=glitch \
     -e POSTGRES_DB=glitch \
     -v glitch-pgdata:/var/lib/postgresql/data \
-    -p 5432:5432 \
+    -p 127.0.0.1:5432:5432 \
     --health-cmd="pg_isready -U glitch" \
     --health-interval=5s \
     --health-timeout=3s \
