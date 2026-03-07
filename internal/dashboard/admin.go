@@ -1430,6 +1430,7 @@ type ProxyConfig struct {
 	Mode           string  `json:"mode"`
 	WAFEnabled     bool    `json:"waf_enabled"`
 	WAFBlockAction string  `json:"waf_block_action"`
+	WAFRateLimit   float64 `json:"waf_rate_limit"`
 	LatencyProb    float64 `json:"latency_prob"`
 	CorruptProb    float64 `json:"corrupt_prob"`
 	DropProb       float64 `json:"drop_prob"`
@@ -1442,6 +1443,7 @@ func NewProxyConfig() *ProxyConfig {
 	return &ProxyConfig{
 		Mode:           "transparent",
 		WAFBlockAction: "reject",
+		WAFRateLimit:   100,
 	}
 }
 
@@ -1498,6 +1500,7 @@ func (pc *ProxyConfig) Snapshot() map[string]interface{} {
 			"detections":   0,
 			"rate_limited": 0,
 			"block_action": pc.WAFBlockAction,
+			"rate_limit":   pc.WAFRateLimit,
 		},
 		"chaos_config": map[string]float64{
 			"latency_prob": pc.LatencyProb,
@@ -1523,6 +1526,7 @@ func (pc *ProxyConfig) SnapshotForExport() map[string]interface{} {
 		"mode":             pc.Mode,
 		"waf_enabled":      pc.WAFEnabled,
 		"waf_block_action": pc.WAFBlockAction,
+		"waf_rate_limit":   pc.WAFRateLimit,
 		"latency_prob":     pc.LatencyProb,
 		"corrupt_prob":     pc.CorruptProb,
 		"drop_prob":        pc.DropProb,
@@ -1564,6 +1568,9 @@ func (pc *ProxyConfig) Restore(cfg map[string]interface{}) {
 	}
 	if v, ok := cfg["waf_block_action"].(string); ok {
 		pc.WAFBlockAction = v
+	}
+	if v, ok := cfg["waf_rate_limit"].(float64); ok {
+		pc.WAFRateLimit = v
 	}
 	if v, ok := cfg["latency_prob"].(float64); ok {
 		pc.LatencyProb = v

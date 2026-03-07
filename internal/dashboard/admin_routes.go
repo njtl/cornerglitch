@@ -220,27 +220,57 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *Server) {
 			return
 		}
 		var req struct {
-			Mode           string `json:"mode"`
-			WAFBlockAction string `json:"waf_block_action"`
+			Mode           string  `json:"mode"`
+			WAFBlockAction string  `json:"waf_block_action"`
+			WAFRateLimit   float64 `json:"waf_rate_limit"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
 			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
 			return
 		}
-		oldMode := globalProxyConfig.GetMode()
-		if !globalProxyConfig.SetMode(req.Mode) {
-			http.Error(w, `{"error":"invalid proxy mode"}`, http.StatusBadRequest)
-			return
+
+		// Detect which fields were present in the JSON
+		var raw map[string]json.RawMessage
+		json.Unmarshal(body, &raw)
+		_, hasMode := raw["mode"]
+
+		resp := map[string]interface{}{"ok": true}
+
+		// Handle WAF block action update
+		if req.WAFBlockAction != "" {
+			globalProxyConfig.mu.Lock()
+			old := globalProxyConfig.WAFBlockAction
+			globalProxyConfig.WAFBlockAction = req.WAFBlockAction
+			globalProxyConfig.mu.Unlock()
+			audit.Log("admin", "proxy.waf_block_action", "proxy.waf_block_action", old, req.WAFBlockAction, nil)
+			resp["waf_block_action"] = req.WAFBlockAction
 		}
-		audit.Log("admin", "proxy.mode_change", "proxy.mode", oldMode, req.Mode, nil)
+
+		// Handle WAF rate limit update
+		if req.WAFRateLimit > 0 {
+			globalProxyConfig.mu.Lock()
+			old := globalProxyConfig.WAFRateLimit
+			globalProxyConfig.WAFRateLimit = req.WAFRateLimit
+			globalProxyConfig.mu.Unlock()
+			audit.Log("admin", "proxy.waf_rate_limit", "proxy.waf_rate_limit", old, req.WAFRateLimit, nil)
+			resp["waf_rate_limit"] = req.WAFRateLimit
+		}
+
+		// Handle mode change (only when mode key was present in JSON)
+		if hasMode {
+			oldMode := globalProxyConfig.GetMode()
+			if !globalProxyConfig.SetMode(req.Mode) {
+				http.Error(w, `{"error":"invalid proxy mode"}`, http.StatusBadRequest)
+				return
+			}
+			audit.Log("admin", "proxy.mode_change", "proxy.mode", oldMode, req.Mode, nil)
+			resp["mode"] = req.Mode
+			if req.Mode == "mirror" {
+				resp["mirror"] = globalProxyConfig.GetMirror()
+			}
+		}
+
 		TriggerAutoSave()
-		resp := map[string]interface{}{
-			"ok":   true,
-			"mode": req.Mode,
-		}
-		if req.Mode == "mirror" {
-			resp["mirror"] = globalProxyConfig.GetMirror()
-		}
 		json.NewEncoder(w).Encode(resp)
 	})
 
@@ -2729,6 +2759,15 @@ func applyServerNightmare() {
 	// HTTP/3 QUIC chaos
 	globalConfig.Set("h3_chaos_enabled", 1)
 	globalConfig.Set("h3_chaos_level", 4)
+	// API chaos
+	globalConfig.Set("api_chaos_probability", 80.0)
+	// Media chaos
+	globalConfig.Set("media_chaos_probability", 80.0)
+	globalConfig.Set("media_chaos_corruption_intensity", 90.0)
+	// MCP honeypot
+	globalConfig.Set("mcp_honeypot_enabled", 1)
+	globalConfig.Set("mcp_fingerprint_enabled", 1)
+	globalConfig.Set("mcp_trap_prompts_enabled", 1)
 }
 
 // restoreServerNightmare restores the config snapshot.

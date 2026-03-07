@@ -1544,6 +1544,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <!-- Playback Controls -->
     <div class="section">
       <h2>// Playback Controls</h2>
+      <p style="color:#888;font-size:0.82em;margin-bottom:8px">Burst sends all requests immediately; Exact preserves original inter-request timing; Scaled applies a speed multiplier to original timing.</p>
       <div class="grid">
         <div class="card">
           <div class="label">Timing Mode</div>
@@ -1813,7 +1814,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         <div class="card">
           <div class="label" style="margin-bottom:6px">Rate Limit (req/sec)</div>
           <input type="number" id="proxy-waf-ratelimit" value="100" min="1" max="100000" step="10"
-            style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%">
+            style="background:#0d0d0d;color:#0f8;border:1px solid #333;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:0.82em;width:100%%"
+            onchange="setWafRateLimit(this.value)">
         </div>
       </div>
     </div>
@@ -5522,6 +5524,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           if (actionSelect && wafStats.block_action) {
             actionSelect.value = wafStats.block_action;
           }
+          var rlInput = document.getElementById('proxy-waf-ratelimit');
+          if (rlInput && wafStats.rate_limit) {
+            rlInput.value = wafStats.rate_limit;
+          }
         }
       } else {
         wafEl.innerHTML = '<div style="color:#555">WAF not enabled. Select WAF, Gateway, or Nightmare mode to activate.</div>';
@@ -5659,6 +5665,17 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       });
       toast('WAF block action: ' + action);
     } catch(e) { console.error('setWafBlockAction:', e); }
+  };
+
+  window.setWafRateLimit = async function(val) {
+    try {
+      await fetch(API + '/admin/api/proxy/mode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({waf_rate_limit: parseFloat(val)})
+      });
+      toast('WAF rate limit: ' + val + ' req/s');
+    } catch(e) { console.error('setWafRateLimit:', e); }
   };
 
   // ------ Replay Tab ------
