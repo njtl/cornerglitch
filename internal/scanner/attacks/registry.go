@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // ModuleInfo describes a registered attack module for listing purposes.

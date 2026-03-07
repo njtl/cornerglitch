@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glitchWebServer/internal/dashboard"
-	"github.com/glitchWebServer/internal/media"
-	"github.com/glitchWebServer/internal/mediachaos"
+	"github.com/cornerglitch/internal/dashboard"
+	"github.com/cornerglitch/internal/media"
+	"github.com/cornerglitch/internal/mediachaos"
 )
 
 // ---------------------------------------------------------------------------

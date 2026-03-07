@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glitchWebServer/internal/audit"
+	"github.com/cornerglitch/internal/audit"
 )
 
 // ---------------------------------------------------------------------------

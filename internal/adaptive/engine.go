@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glitchWebServer/internal/errors"
-	"github.com/glitchWebServer/internal/fingerprint"
-	"github.com/glitchWebServer/internal/metrics"
+	"github.com/cornerglitch/internal/errors"
+	"github.com/cornerglitch/internal/fingerprint"
+	"github.com/cornerglitch/internal/metrics"
 )
 
 // BehaviorMode defines how the server treats a specific client.

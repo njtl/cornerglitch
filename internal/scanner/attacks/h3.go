@@ -3,7 +3,7 @@
 package attacks
 
 import (
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // H3Module probes targets for HTTP/3 / QUIC weaknesses via HTTP requests.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // InjectionModule generates attack requests focused on injection vulnerabilities:

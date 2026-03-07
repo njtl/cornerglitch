@@ -16,10 +16,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glitchWebServer/internal/dashboard"
-	"github.com/glitchWebServer/internal/errors"
-	"github.com/glitchWebServer/internal/jstrap"
-	"github.com/glitchWebServer/internal/pages"
+	"github.com/cornerglitch/internal/dashboard"
+	"github.com/cornerglitch/internal/errors"
+	"github.com/cornerglitch/internal/jstrap"
+	"github.com/cornerglitch/internal/pages"
 )
 
 // ---------------------------------------------------------------------------

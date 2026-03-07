@@ -12,15 +12,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/njtl/glitchWebServer.git"
+    "url": "git+https://github.com/njtl/cornerglitch.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/njtl/glitchWebServer/issues"
+    "url": "https://github.com/njtl/cornerglitch/issues"
   },
-  "homepage": "https://github.com/njtl/glitchWebServer#readme",
+  "homepage": "https://github.com/njtl/cornerglitch#readme",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "@browserbasehq/stagehand": "^3.0.8",

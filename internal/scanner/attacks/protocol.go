@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // ProtocolModule generates attack requests targeting HTTP protocol-level

@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glitchWebServer/internal/audit"
-	"github.com/glitchWebServer/internal/scanner"
-	"github.com/glitchWebServer/internal/scanner/attacks"
-	"github.com/glitchWebServer/internal/storage"
+	"github.com/cornerglitch/internal/audit"
+	"github.com/cornerglitch/internal/scanner"
+	"github.com/cornerglitch/internal/scanner/attacks"
+	"github.com/cornerglitch/internal/storage"
 )
 
 // ---------------------------------------------------------------------------

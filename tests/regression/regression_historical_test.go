@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/dashboard"
-	"github.com/glitchWebServer/internal/fingerprint"
-	"github.com/glitchWebServer/internal/framework"
-	"github.com/glitchWebServer/internal/honeypot"
-	"github.com/glitchWebServer/internal/labyrinth"
-	"github.com/glitchWebServer/internal/scanner"
-	"github.com/glitchWebServer/internal/search"
+	"github.com/cornerglitch/internal/dashboard"
+	"github.com/cornerglitch/internal/fingerprint"
+	"github.com/cornerglitch/internal/framework"
+	"github.com/cornerglitch/internal/honeypot"
+	"github.com/cornerglitch/internal/labyrinth"
+	"github.com/cornerglitch/internal/scanner"
+	"github.com/cornerglitch/internal/search"
 )
 
 // ---------------------------------------------------------------------------

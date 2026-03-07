@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // AuthModule generates attack requests for authentication and authorization

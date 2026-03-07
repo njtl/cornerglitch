@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/glitchWebServer/internal/proxy"
-	"github.com/glitchWebServer/internal/proxy/modes"
+	"github.com/cornerglitch/internal/proxy"
+	"github.com/cornerglitch/internal/proxy/modes"
 )
 
 func main() {

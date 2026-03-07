@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/scanner"
-	"github.com/glitchWebServer/internal/scanner/attacks"
+	"github.com/cornerglitch/internal/scanner"
+	"github.com/cornerglitch/internal/scanner/attacks"
 )
 
 // ---------------------------------------------------------------------------

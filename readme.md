@@ -391,8 +391,8 @@ Deploy Glitch on a public-facing server. The adaptive behavior engine fingerprin
 You don't need to configure anything manually. Clone the repo, open Claude Code (or any AI coding assistant), and tell it to set up and run Glitch. The `CLAUDE.md` and README contain everything an AI agent needs to build, configure, and start experimenting.
 
 ```bash
-git clone https://github.com/njtl/glitchWebServer.git
-cd glitchWebServer
+git clone https://github.com/njtl/cornerglitch.git
+cd cornerglitch
 claude   # "set up and run Glitch, then show me the dashboard"
 ```
 

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/scanner/attacks"
+	"github.com/cornerglitch/internal/scanner/attacks"
 )
 
 // TestBreakageModule_AllTargets runs the integrated BreakageModule against

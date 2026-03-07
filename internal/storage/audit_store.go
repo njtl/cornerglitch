@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glitchWebServer/internal/audit"
+	"github.com/cornerglitch/internal/audit"
 )
 
 // SaveAuditEntry inserts a single audit log entry.

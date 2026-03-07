@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glitchWebServer/internal/dashboard"
+	"github.com/cornerglitch/internal/dashboard"
 )
 
 // Handler emulates OWASP Top 10 (2021) vulnerabilities with realistic-looking

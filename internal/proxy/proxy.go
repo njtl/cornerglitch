@@ -14,9 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/glitchWebServer/internal/errors"
-	"github.com/glitchWebServer/internal/labyrinth"
-	"github.com/glitchWebServer/internal/pages"
+	"github.com/cornerglitch/internal/errors"
+	"github.com/cornerglitch/internal/labyrinth"
+	"github.com/cornerglitch/internal/pages"
 )
 
 // Options configures the reverse proxy behavior.

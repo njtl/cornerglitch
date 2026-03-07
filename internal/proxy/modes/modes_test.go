@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/proxy"
+	"github.com/cornerglitch/internal/proxy"
 )
 
 func TestList(t *testing.T) {

@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/adaptive"
-	"github.com/glitchWebServer/internal/fingerprint"
-	"github.com/glitchWebServer/internal/metrics"
-	"github.com/glitchWebServer/internal/spider"
-	"github.com/glitchWebServer/internal/storage"
+	"github.com/cornerglitch/internal/adaptive"
+	"github.com/cornerglitch/internal/fingerprint"
+	"github.com/cornerglitch/internal/metrics"
+	"github.com/cornerglitch/internal/spider"
+	"github.com/cornerglitch/internal/storage"
 )
 
 // ---------------------------------------------------------------------------

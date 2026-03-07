@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glitchWebServer/internal/apichaos"
-	"github.com/glitchWebServer/internal/dashboard"
+	"github.com/cornerglitch/internal/apichaos"
+	"github.com/cornerglitch/internal/dashboard"
 )
 
 // TestAPIChaos_EngineApply verifies that the API chaos engine produces responses

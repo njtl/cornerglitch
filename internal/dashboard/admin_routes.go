@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glitchWebServer/internal/adaptive"
-	"github.com/glitchWebServer/internal/audit"
-	"github.com/glitchWebServer/internal/recorder"
-	"github.com/glitchWebServer/internal/replay"
-	"github.com/glitchWebServer/internal/scaneval"
+	"github.com/cornerglitch/internal/adaptive"
+	"github.com/cornerglitch/internal/audit"
+	"github.com/cornerglitch/internal/recorder"
+	"github.com/cornerglitch/internal/replay"
+	"github.com/cornerglitch/internal/scaneval"
 )
 
 // ---------------------------------------------------------------------------

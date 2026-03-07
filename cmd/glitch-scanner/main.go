@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/glitchWebServer/internal/scanner"
-	"github.com/glitchWebServer/internal/scanner/attacks"
-	"github.com/glitchWebServer/internal/scanner/profiles"
+	"github.com/cornerglitch/internal/scanner"
+	"github.com/cornerglitch/internal/scanner/attacks"
+	"github.com/cornerglitch/internal/scanner/profiles"
 )
 
 func main() {

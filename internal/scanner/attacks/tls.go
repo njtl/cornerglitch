@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // TLSModule generates attack requests targeting TLS configuration weaknesses

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glitchWebServer/internal/adaptive"
-	"github.com/glitchWebServer/internal/fingerprint"
-	"github.com/glitchWebServer/internal/metrics"
+	"github.com/cornerglitch/internal/adaptive"
+	"github.com/cornerglitch/internal/fingerprint"
+	"github.com/cornerglitch/internal/metrics"
 )
 
 // Server serves the monitoring dashboard and metrics API.

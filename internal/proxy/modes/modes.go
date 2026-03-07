@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/glitchWebServer/internal/proxy"
-	"github.com/glitchWebServer/internal/proxy/chaos"
-	"github.com/glitchWebServer/internal/proxy/waf"
+	"github.com/cornerglitch/internal/proxy"
+	"github.com/cornerglitch/internal/proxy/chaos"
+	"github.com/cornerglitch/internal/proxy/waf"
 )
 
 // ChaosConfig holds tuning parameters for chaos injection modules.

@@ -13,13 +13,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/glitchWebServer/internal/adaptive"
-	"github.com/glitchWebServer/internal/audit"
-	"github.com/glitchWebServer/internal/metrics"
-	"github.com/glitchWebServer/internal/recorder"
-	"github.com/glitchWebServer/internal/scaneval"
-	"github.com/glitchWebServer/internal/spider"
-	"github.com/glitchWebServer/internal/storage"
+	"github.com/cornerglitch/internal/adaptive"
+	"github.com/cornerglitch/internal/audit"
+	"github.com/cornerglitch/internal/metrics"
+	"github.com/cornerglitch/internal/recorder"
+	"github.com/cornerglitch/internal/scaneval"
+	"github.com/cornerglitch/internal/spider"
+	"github.com/cornerglitch/internal/storage"
 )
 
 // ---------------------------------------------------------------------------

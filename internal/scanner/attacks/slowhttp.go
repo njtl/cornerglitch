@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // SlowHTTPModule generates attack requests designed to exhaust server

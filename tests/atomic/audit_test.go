@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/audit"
+	"github.com/cornerglitch/internal/audit"
 )
 
 // ---------------------------------------------------------------------------

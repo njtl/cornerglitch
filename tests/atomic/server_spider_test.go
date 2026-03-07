@@ -3,7 +3,7 @@ package atomic
 import (
 	"testing"
 
-	"github.com/glitchWebServer/internal/dashboard"
+	"github.com/cornerglitch/internal/dashboard"
 )
 
 // ---------------------------------------------------------------------------

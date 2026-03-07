@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/glitchWebServer/internal/storage"
+	"github.com/cornerglitch/internal/storage"
 )
 
 // RequestLogger samples incoming requests and persists them to the database

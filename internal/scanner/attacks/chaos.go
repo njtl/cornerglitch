@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // ChaosModule generates malformed and impossible HTTP requests designed to

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/proxy"
-	"github.com/glitchWebServer/internal/proxy/chaos"
-	"github.com/glitchWebServer/internal/proxy/modes"
+	"github.com/cornerglitch/internal/proxy"
+	"github.com/cornerglitch/internal/proxy/chaos"
+	"github.com/cornerglitch/internal/proxy/modes"
 )
 
 // TestProxyClientKiller_Modes verifies that the killer mode is properly configured.

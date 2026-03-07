@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // WAFModule generates attack requests targeting WAF bypass techniques:

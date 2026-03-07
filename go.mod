@@ -1,4 +1,4 @@
-module github.com/glitchWebServer
+module github.com/cornerglitch
 
 go 1.24.7
 

@@ -19,14 +19,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/adaptive"
-	"github.com/glitchWebServer/internal/dashboard"
-	"github.com/glitchWebServer/internal/fingerprint"
-	"github.com/glitchWebServer/internal/metrics"
-	"github.com/glitchWebServer/internal/proxy"
-	"github.com/glitchWebServer/internal/scaneval"
-	"github.com/glitchWebServer/internal/scanner"
-	"github.com/glitchWebServer/internal/storage"
+	"github.com/cornerglitch/internal/adaptive"
+	"github.com/cornerglitch/internal/dashboard"
+	"github.com/cornerglitch/internal/fingerprint"
+	"github.com/cornerglitch/internal/metrics"
+	"github.com/cornerglitch/internal/proxy"
+	"github.com/cornerglitch/internal/scaneval"
+	"github.com/cornerglitch/internal/scanner"
+	"github.com/cornerglitch/internal/storage"
 )
 
 // ---------------------------------------------------------------------------

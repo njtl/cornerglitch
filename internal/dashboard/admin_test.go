@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/replay"
+	"github.com/cornerglitch/internal/replay"
 )
 
 // ---------------------------------------------------------------------------

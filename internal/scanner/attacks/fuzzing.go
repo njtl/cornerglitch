@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // FuzzingModule generates requests for path fuzzing, parameter boundary testing,

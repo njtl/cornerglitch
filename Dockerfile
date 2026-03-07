@@ -11,7 +11,7 @@ FROM alpine:3.20
 
 LABEL maintainer="glitch-server maintainers"
 LABEL description="Intentionally unreliable, adaptive HTTP server for testing"
-LABEL org.opencontainers.image.source="https://github.com/njtl/glitchWebServer"
+LABEL org.opencontainers.image.source="https://github.com/njtl/cornerglitch"
 
 RUN apk add --no-cache ca-certificates curl
 

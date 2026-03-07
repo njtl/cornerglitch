@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glitchWebServer/internal/dashboard"
-	"github.com/glitchWebServer/internal/storage"
+	"github.com/cornerglitch/internal/dashboard"
+	"github.com/cornerglitch/internal/storage"
 )
 
 // ---------------------------------------------------------------------------

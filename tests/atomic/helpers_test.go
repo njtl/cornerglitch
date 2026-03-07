@@ -24,10 +24,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/glitchWebServer/internal/adaptive"
-	"github.com/glitchWebServer/internal/dashboard"
-	"github.com/glitchWebServer/internal/fingerprint"
-	"github.com/glitchWebServer/internal/metrics"
+	"github.com/cornerglitch/internal/adaptive"
+	"github.com/cornerglitch/internal/dashboard"
+	"github.com/cornerglitch/internal/fingerprint"
+	"github.com/cornerglitch/internal/metrics"
 )
 
 // ---------------------------------------------------------------------------

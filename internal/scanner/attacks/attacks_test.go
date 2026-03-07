@@ -3,7 +3,7 @@ package attacks
 import (
 	"testing"
 
-	"github.com/glitchWebServer/internal/scanner"
+	"github.com/cornerglitch/internal/scanner"
 )
 
 // ---------------------------------------------------------------------------

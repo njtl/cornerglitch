@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/glitchWebServer/internal/proxy"
-	"github.com/glitchWebServer/internal/proxy/modes"
+	"github.com/cornerglitch/internal/proxy"
+	"github.com/cornerglitch/internal/proxy/modes"
 )
 
 // ProxyManager controls the lifecycle of an embedded reverse proxy instance.

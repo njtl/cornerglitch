@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	scanner "github.com/glitchWebServer/internal/scanner"
+	scanner "github.com/cornerglitch/internal/scanner"
 )
 
 // Profile is a named, documented scan configuration. It wraps a scanner.Config
