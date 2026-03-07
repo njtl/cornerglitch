@@ -336,16 +336,9 @@ New agents can be created in `~/.claude/agents/<name>.md` — follow the existin
 
 ## Documentation
 
-- `docs/PLAN.md` — Master architecture plan for the 3-way framework
-- `docs/PRD-scanner.md` — Scanner component PRD
-- `docs/PRD-proxy.md` — Proxy component PRD
-- `docs/PRD-nightmare.md` — Nightmare mode PRD
-- `docs/PRD-selftest.md` — Self-test pipeline PRD
-- `docs/PRD-mcp.md` — MCP honeypot and AI agent security testing PRD
-- `docs/scanner_redesign.md` — Scanner subsystem redesign notes
-- `docs/ui_refactoring_plan.md` — Admin panel UI refactoring plan
 - `docs/real-world-findings.md` — Real-world scanner behavior findings from live deployment, documenting scanner weaknesses and budget-draining mechanisms
+- `docs/server-destruction-findings.md` — Server destruction testing results against common HTTP servers
 
 ### Internal Progress Archive
 
-A `progress/` folder may exist locally (excluded from git). It contains sprint logs, QA artifacts, research notes, and development history. Check `progress/claude.md` for an index of its contents. This folder is not published.
+A `progress/` folder may exist locally (excluded from git). It contains sprint logs, QA artifacts, research notes, PRDs, architecture plans, and development history. Check `progress/claude.md` for an index of its contents. This folder is not published.
