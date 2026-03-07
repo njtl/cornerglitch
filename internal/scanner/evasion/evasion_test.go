@@ -429,6 +429,139 @@ func TestRandomizeHeaders(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestUTF7Encode
+// ---------------------------------------------------------------------------
+
+func TestUTF7Encode(t *testing.T) {
+	result := UTF7Encode("<script>")
+	if !strings.Contains(result, "+") {
+		t.Errorf("UTF7Encode should contain + sequences, got %q", result)
+	}
+	// Alphanumeric chars should remain unchanged.
+	if !strings.Contains(result, "script") {
+		t.Errorf("UTF7Encode should preserve alphanumeric, got %q", result)
+	}
+	// Space should remain unchanged.
+	result2 := UTF7Encode("hello world")
+	if !strings.Contains(result2, " ") {
+		t.Errorf("UTF7Encode should preserve spaces, got %q", result2)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestIBM037Encode
+// ---------------------------------------------------------------------------
+
+func TestIBM037Encode(t *testing.T) {
+	result := IBM037Encode("AB")
+	// A=0xC1, B=0xC2 in EBCDIC
+	if result[0] != 0xC1 || result[1] != 0xC2 {
+		t.Errorf("IBM037Encode('AB') = %x, expected C1C2", []byte(result))
+	}
+	// Space should map to 0x40
+	spaceResult := IBM037Encode(" ")
+	if spaceResult[0] != 0x40 {
+		t.Errorf("IBM037Encode(' ') = %x, expected 40", []byte(spaceResult))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestHTMLEntityEncodeWithLeadingZeros
+// ---------------------------------------------------------------------------
+
+func TestHTMLEntityEncodeWithLeadingZeros(t *testing.T) {
+	result := HTMLEntityEncodeWithLeadingZeros("<script>")
+	// Should contain leading zeros in entity
+	if !strings.Contains(result, "&#00000") {
+		t.Errorf("HTMLEntityEncodeWithLeadingZeros should contain &#00000 sequences, got %q", result)
+	}
+	// Alphanumeric chars should remain unchanged.
+	if !strings.Contains(result, "script") {
+		t.Errorf("HTMLEntityEncodeWithLeadingZeros should preserve alphanumeric, got %q", result)
+	}
+	// < is decimal 60, should produce &#0000060;
+	if !strings.Contains(result, "&#0000060;") {
+		t.Errorf("HTMLEntityEncodeWithLeadingZeros('<') should produce &#0000060;, got %q", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestOverlongUTF8Encode
+// ---------------------------------------------------------------------------
+
+func TestOverlongUTF8Encode(t *testing.T) {
+	result := OverlongUTF8Encode("../etc/passwd")
+	if !strings.Contains(result, "%C0%AE") {
+		t.Errorf("OverlongUTF8Encode should replace . with %%C0%%AE, got %q", result)
+	}
+	if !strings.Contains(result, "%C0%AF") {
+		t.Errorf("OverlongUTF8Encode should replace / with %%C0%%AF, got %q", result)
+	}
+	// Letters should remain unchanged.
+	if !strings.Contains(result, "etc") {
+		t.Errorf("OverlongUTF8Encode should preserve letters, got %q", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestIISUnicodeEncode
+// ---------------------------------------------------------------------------
+
+func TestIISUnicodeEncode(t *testing.T) {
+	result := IISUnicodeEncode("<script>")
+	if !strings.Contains(result, "%u") {
+		t.Errorf("IISUnicodeEncode should contain %%u sequences, got %q", result)
+	}
+	// Alphanumeric chars should remain unchanged.
+	if !strings.Contains(result, "script") {
+		t.Errorf("IISUnicodeEncode should preserve alphanumeric, got %q", result)
+	}
+	// < is U+003C, should produce %u003C
+	if !strings.Contains(result, "%u003C") {
+		t.Errorf("IISUnicodeEncode('<') should produce %%u003C, got %q", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestNightmareIncludesWAFEncodings
+// ---------------------------------------------------------------------------
+
+func TestNightmareIncludesWAFEncodings(t *testing.T) {
+	enc := NewEncoder("nightmare")
+	variants := enc.Encode("<script>alert(1)</script>")
+
+	// Should have more variants than before (at least 14 unique)
+	if len(variants) < 14 {
+		t.Errorf("nightmare mode should return at least 14 variants with WAF encodings, got %d", len(variants))
+	}
+
+	// Check that some WAF-specific variants are present
+	hasUTF7 := false
+	hasOverlong := false
+	hasIIS := false
+	for _, v := range variants {
+		if strings.Contains(v, "+") && strings.Contains(v, "-") && v != variants[0] {
+			hasUTF7 = true
+		}
+		if strings.Contains(v, "%C0%") {
+			hasOverlong = true
+		}
+		if strings.Contains(v, "%u") {
+			hasIIS = true
+		}
+	}
+	if !hasUTF7 {
+		t.Error("nightmare should include UTF-7 encoded variant")
+	}
+	if !hasOverlong {
+		t.Error("nightmare should include overlong UTF-8 encoded variant")
+	}
+	if !hasIIS {
+		t.Error("nightmare should include IIS Unicode encoded variant")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestCommentInject
 // ---------------------------------------------------------------------------
 
