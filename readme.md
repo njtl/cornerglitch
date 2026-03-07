@@ -154,7 +154,7 @@ make db-psql                                # connect to PostgreSQL with psql
 - TLS attack module -- HSTS probing, TLS version probing (1.0-1.3), weak cipher enumeration, certificate analysis, ALPN probing, downgrade testing
 - H3 attack module -- Alt-Svc confusion probes (emoji port, null byte, huge port, negative max-age, CRLF injection)
 - CVE-inspired breakage attacks -- raw TCP payloads reproducing real-world crashes (CRLF injection, 65KB headers, null in URI, duplicate Content-Length, overlong UTF-8 Transfer-Encoding)
-- Configurable profiles: compliance, aggressive, stealth, nightmare, destroyer
+- Configurable profiles: compliance, aggressive, stealth, nightmare, destroyer, waf-buster
 - Scanner evaluation: compare results against expected vulnerability surface, classify false negatives (crawled vs not-crawled), multi-scanner comparison with accuracy scoring
 - Supported external scanners: nuclei, httpx, ffuf, nikto, nmap, wapiti -- launched and parsed automatically from the admin panel
 - MCP scanner -- connects to external MCP servers and tests for security issues: injection patterns in tool descriptions, credential harvesting, path traversal in resources, rug pull detection (tool description changes), canary payload exfiltration testing. Risk scoring and structured JSON reports via dashboard. Supports custom headers for authentication and scan history persistence
@@ -345,6 +345,72 @@ The destroyer profile (`-profile destroyer`) runs all attack modules at maximum 
 ### Real-World Scanner Behavior
 
 Glitch has been tested against real-world scanners on a public internet host. Documented findings include crawlers tar-pitted for hours by slow-drip media downloads, `.env` scanners defeated by escalating bot detection, Nmap-style probes neutralized by keepalive abuse, and AI scrapers stuck in infinite sitemap polling loops. These observations inform the server's anti-scanner design and identify exploitable weaknesses in common scanner architectures (no download limits, no honeypot detection, no connection pool management, no content deduplication, no adaptive strategy). See [`docs/real-world-findings.md`](docs/real-world-findings.md) for detailed case studies and budget-draining mechanism ideas.
+
+---
+
+## Use Cases
+
+### Benchmark your DAST scanner
+
+Point your scanner at Glitch Server running with all vulnerability groups enabled. Glitch covers every major OWASP Top 10 list with realistic, corporate-looking vulnerability pages. After the scan, use the built-in scanner evaluation to see exactly which vulnerabilities your tool found, which it missed, and whether it even crawled the right paths. Compare multiple scanners side-by-side with accuracy scoring.
+
+```bash
+make start                                          # start Glitch Server
+nuclei -u http://localhost:8765 -o results.json     # run your scanner
+# Open dashboard at :8766 → Scanner tab → upload results for analysis
+```
+
+### Stress-test your backend
+
+Use Glitch Scanner with the `destroyer` profile to throw raw TCP attacks, slow HTTP floods, malformed requests, and protocol abuse at your service. The `waf-buster` profile tests WAF bypass with encoding tricks, request smuggling, and header manipulation.
+
+```bash
+glitch-scanner -target http://your-service:8080 -profile destroyer    # max destruction
+glitch-scanner -target http://your-service:8080 -profile waf-buster   # WAF bypass testing
+```
+
+### Validate your proxy/WAF/API gateway
+
+Put your proxy between Glitch Scanner and Glitch Server. Both sides speak broken HTTP -- does your proxy handle it gracefully, or does it crash, leak data, or silently corrupt traffic?
+
+```bash
+./glitch &                                                    # hostile backend on :8765
+glitch-scanner -target http://your-proxy:8080 -profile nightmare   # hostile client
+```
+
+### Test AI agent security
+
+The MCP honeypot at `/mcp` exposes fake tools with prompt injection traps, poisoned resources (fake `.env` files, SSH keys, database dumps), and rug-pull detection. Point your AI coding agent at Glitch and see if it leaks credentials, follows injection instructions, or falls for fake tool descriptions.
+
+### Run as a honeypot
+
+Deploy Glitch on a public-facing server. The adaptive behavior engine fingerprints every visitor, the labyrinth traps crawlers in infinite procedural page graphs, and budget-draining traps escalate against persistent scanners. All traffic is recorded with full metrics visible in the dashboard.
+
+### Get started with AI assistance
+
+You don't need to configure anything manually. Clone the repo, open Claude Code (or any AI coding assistant), and tell it to set up and run Glitch. The `CLAUDE.md` and README contain everything an AI agent needs to build, configure, and start experimenting.
+
+```bash
+git clone https://github.com/njtl/glitchWebServer.git
+cd glitchWebServer
+claude   # "set up and run Glitch, then show me the dashboard"
+```
+
+---
+
+## Real-World Findings
+
+Glitch has been deployed as a live honeypot and tested against popular security tools. Key discoveries:
+
+- **Null byte in headers crashes most scanners** -- a single `\x00` in a response header (`X-Chaos: before\x00after`) kills Go's HTTP parser (Gobuster, Feroxbuster), hangs Python's urllib (Commix), and causes Ruby's NilClass errors (WhatWeb)
+- **HTTP 102 (Processing) aborts SQLMap** -- SQLMap has no handler for 1xx status codes and immediately gives up
+- **Nuclei achieves 0% detection** under nightmare mode -- error injection and delays prevent template matchers from seeing expected patterns
+- **ZAP runs out of memory** -- the infinite labyrinth generates unlimited URLs, each with API endpoints and media links, exhausting JVM heap
+- **Nmap hangs indefinitely** -- service version detection (`-sV`) can't parse corrupted responses and never completes
+- **Real crawlers hold connections for 2+ hours** downloading procedurally generated audio files
+- **AI scrapers poll robots.txt for 23 hours straight** in infinite loops
+
+See [`docs/real-world-findings.md`](docs/real-world-findings.md) for detailed case studies.
 
 ---
 

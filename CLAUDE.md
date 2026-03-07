@@ -140,7 +140,7 @@ internal/
     attacks/                     Attack modules (owasp, injection, fuzzing, protocol, auth, chaos, tls, slowhttp, breakage, h3)
     resilience/                  Error handling, timeouts, connections
     evasion/                     WAF bypass, encoding, fragmentation
-    profiles/                    Scan profiles (aggressive, stealth, nightmare, compliance, destroyer)
+    profiles/                    Scan profiles (aggressive, stealth, nightmare, compliance, destroyer, waf-buster)
 
   # Proxy subsystems
   proxy/                         Core proxy + interception pipeline
