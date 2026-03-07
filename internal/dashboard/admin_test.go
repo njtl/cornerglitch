@@ -1173,3 +1173,250 @@ func TestPaginateSlice_EmptySlice(t *testing.T) {
 		t.Errorf("empty slice: got start=%d end=%d, want 0,0", start, end)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// hasPaginationParams tests
+// ---------------------------------------------------------------------------
+
+func TestHasPaginationParams_NoParams(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test", nil)
+	if hasPaginationParams(r) {
+		t.Error("should return false when no limit/offset params")
+	}
+}
+
+func TestHasPaginationParams_LimitOnly(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?limit=10", nil)
+	if !hasPaginationParams(r) {
+		t.Error("should return true when limit is present")
+	}
+}
+
+func TestHasPaginationParams_OffsetOnly(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?offset=5", nil)
+	if !hasPaginationParams(r) {
+		t.Error("should return true when offset is present")
+	}
+}
+
+func TestHasPaginationParams_Both(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?limit=10&offset=5", nil)
+	if !hasPaginationParams(r) {
+		t.Error("should return true when both limit and offset are present")
+	}
+}
+
+func TestHasPaginationParams_OtherParams(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?search=foo&sort=name", nil)
+	if hasPaginationParams(r) {
+		t.Error("should return false when only non-pagination params present")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// parseSortParams tests
+// ---------------------------------------------------------------------------
+
+func TestParseSortParams_NoParams(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test", nil)
+	field, asc := parseSortParams(r, map[string]bool{"name": true})
+	if field != "" {
+		t.Errorf("expected empty field, got %q", field)
+	}
+	if asc {
+		t.Error("default order should be desc (asc=false)")
+	}
+}
+
+func TestParseSortParams_ValidField(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?sort=name&order=asc", nil)
+	field, asc := parseSortParams(r, map[string]bool{"name": true, "date": true})
+	if field != "name" {
+		t.Errorf("expected field=name, got %q", field)
+	}
+	if !asc {
+		t.Error("expected asc=true for order=asc")
+	}
+}
+
+func TestParseSortParams_InvalidField(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?sort=invalid&order=desc", nil)
+	field, _ := parseSortParams(r, map[string]bool{"name": true})
+	if field != "" {
+		t.Errorf("invalid field should return empty, got %q", field)
+	}
+}
+
+func TestParseSortParams_DescOrder(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?sort=name&order=desc", nil)
+	_, asc := parseSortParams(r, map[string]bool{"name": true})
+	if asc {
+		t.Error("expected asc=false for order=desc")
+	}
+}
+
+func TestParseSortParams_CaseInsensitiveOrder(t *testing.T) {
+	r := httptest.NewRequest("GET", "/test?sort=name&order=ASC", nil)
+	_, asc := parseSortParams(r, map[string]bool{"name": true})
+	if !asc {
+		t.Error("expected asc=true for order=ASC (case-insensitive)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// paginatedResponse tests
+// ---------------------------------------------------------------------------
+
+func TestPaginatedResponse_NotPaginated(t *testing.T) {
+	items := []string{"a", "b", "c"}
+	result := paginatedResponse(items, 3, 100, 0, false)
+	// Should return items directly (not a wrapper)
+	if arr, ok := result.([]string); !ok {
+		t.Errorf("expected raw array, got %T", result)
+	} else if len(arr) != 3 {
+		t.Errorf("expected 3 items, got %d", len(arr))
+	}
+}
+
+func TestPaginatedResponse_Paginated(t *testing.T) {
+	items := []string{"a", "b"}
+	result := paginatedResponse(items, 10, 2, 0, true)
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map wrapper, got %T", result)
+	}
+	if m["total"] != 10 {
+		t.Errorf("expected total=10, got %v", m["total"])
+	}
+	if m["limit"] != 2 {
+		t.Errorf("expected limit=2, got %v", m["limit"])
+	}
+	if m["offset"] != 0 {
+		t.Errorf("expected offset=0, got %v", m["offset"])
+	}
+	if arr, ok := m["items"].([]string); !ok || len(arr) != 2 {
+		t.Errorf("expected items array with 2 elements, got %v", m["items"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Builtin scanner history pagination tests
+// ---------------------------------------------------------------------------
+
+func TestBuiltinHistory_BackwardCompat_NoParams(t *testing.T) {
+	builtinHistoryMu.Lock()
+	builtinHistory = []builtinHistoryEntry{
+		{ID: "1", Timestamp: "2026-01-01T00:00:00Z", Profile: "aggressive", Findings: 5},
+		{ID: "2", Timestamp: "2026-01-02T00:00:00Z", Profile: "stealth", Findings: 3},
+	}
+	builtinHistoryMu.Unlock()
+
+	mux := http.NewServeMux()
+	RegisterBuiltinScannerRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/admin/api/scanner/builtin/history", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status: %d", rec.Code)
+	}
+
+	// Without pagination params, should return raw array
+	var arr []builtinHistoryEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &arr); err != nil {
+		t.Fatalf("expected raw array, got error: %v, body: %s", err, rec.Body.String())
+	}
+	if len(arr) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(arr))
+	}
+}
+
+func TestBuiltinHistory_Paginated(t *testing.T) {
+	builtinHistoryMu.Lock()
+	builtinHistory = []builtinHistoryEntry{
+		{ID: "1", Timestamp: "2026-01-01T00:00:00Z", Profile: "aggressive", Findings: 5},
+		{ID: "2", Timestamp: "2026-01-02T00:00:00Z", Profile: "stealth", Findings: 3},
+		{ID: "3", Timestamp: "2026-01-03T00:00:00Z", Profile: "nightmare", Findings: 10},
+	}
+	builtinHistoryMu.Unlock()
+
+	mux := http.NewServeMux()
+	RegisterBuiltinScannerRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/admin/api/scanner/builtin/history?limit=2&offset=0", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status: %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("expected wrapper object, got error: %v", err)
+	}
+	if resp["total"] != float64(3) {
+		t.Errorf("expected total=3, got %v", resp["total"])
+	}
+	if resp["limit"] != float64(2) {
+		t.Errorf("expected limit=2, got %v", resp["limit"])
+	}
+	items, ok := resp["items"].([]interface{})
+	if !ok {
+		t.Fatalf("expected items array, got %T", resp["items"])
+	}
+	if len(items) != 2 {
+		t.Errorf("expected 2 items on page, got %d", len(items))
+	}
+}
+
+func TestBuiltinHistory_PaginatedOffset(t *testing.T) {
+	builtinHistoryMu.Lock()
+	builtinHistory = []builtinHistoryEntry{
+		{ID: "1", Timestamp: "2026-01-01T00:00:00Z", Profile: "aggressive", Findings: 5},
+		{ID: "2", Timestamp: "2026-01-02T00:00:00Z", Profile: "stealth", Findings: 3},
+		{ID: "3", Timestamp: "2026-01-03T00:00:00Z", Profile: "nightmare", Findings: 10},
+	}
+	builtinHistoryMu.Unlock()
+
+	mux := http.NewServeMux()
+	RegisterBuiltinScannerRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/admin/api/scanner/builtin/history?limit=2&offset=2", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	items := resp["items"].([]interface{})
+	if len(items) != 1 {
+		t.Errorf("expected 1 item at offset 2, got %d", len(items))
+	}
+	if resp["total"] != float64(3) {
+		t.Errorf("expected total=3, got %v", resp["total"])
+	}
+}
+
+func TestBuiltinHistory_EmptyPaginated(t *testing.T) {
+	builtinHistoryMu.Lock()
+	builtinHistory = nil
+	builtinHistoryMu.Unlock()
+
+	mux := http.NewServeMux()
+	RegisterBuiltinScannerRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/admin/api/scanner/builtin/history?limit=10&offset=0", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["total"] != float64(0) {
+		t.Errorf("expected total=0, got %v", resp["total"])
+	}
+	items := resp["items"].([]interface{})
+	if len(items) != 0 {
+		t.Errorf("expected 0 items, got %d", len(items))
+	}
+}
