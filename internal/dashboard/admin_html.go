@@ -87,7 +87,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     border: 1px solid #00ff8833;
     border-radius: 8px;
     padding: 14px;
+    transition: border-color 0.2s, background 0.2s;
   }
+  .card[onclick]:hover { border-color: #00ff8866; background: #1a1a1a; }
   .card .label {
     color: #888;
     font-size: 0.75em;
@@ -572,7 +574,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   /* Mode status cards */
   .mode-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px; }
-  .mode-card { background: #111; border: 1px solid #222; border-radius: 10px; padding: 16px; position: relative; overflow: hidden; }
+  .mode-card { background: #111; border: 1px solid #222; border-radius: 10px; padding: 16px; position: relative; overflow: hidden; transition: border-color 0.2s, background 0.2s; }
+  .mode-card:hover { background: #1a1a1a; }
   .mode-card .mode-label { font-size: 0.7em; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 6px; font-weight: bold; }
   .mode-card .mode-status { font-size: 1.1em; margin-bottom: 4px; }
   .mode-card .mode-detail { color: #888; font-size: 0.78em; }
@@ -691,17 +694,17 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 <div id="panel-dashboard" class="panel active">
   <!-- Mode Status Cards -->
   <div class="mode-cards">
-    <div class="mode-card mc-server" id="dash-mode-server">
+    <div class="mode-card mc-server" id="dash-mode-server" onclick="showTab('server')" style="cursor:pointer">
       <div class="mode-label">Server</div>
       <div class="mode-status" id="dash-server-status">RUNNING</div>
       <div class="mode-detail" id="dash-server-detail">Loading...</div>
     </div>
-    <div class="mode-card mc-scanner" id="dash-mode-scanner">
+    <div class="mode-card mc-scanner" id="dash-mode-scanner" onclick="showTab('scanner')" style="cursor:pointer">
       <div class="mode-label">Scanner</div>
       <div class="mode-status" id="dash-scanner-status">IDLE</div>
       <div class="mode-detail" id="dash-scanner-detail">No active scans</div>
     </div>
-    <div class="mode-card mc-proxy" id="dash-mode-proxy">
+    <div class="mode-card mc-proxy" id="dash-mode-proxy" onclick="showTab('proxy')" style="cursor:pointer">
       <div class="mode-label">Proxy</div>
       <div class="mode-status" id="dash-proxy-status">--</div>
       <div class="mode-detail" id="dash-proxy-detail">Loading...</div>
@@ -716,7 +719,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-bottom: 18px;">
     <!-- Server Column -->
     <div class="section" style="border-left: 3px solid #00ff88;">
-      <h2 style="color:#00ff88; font-size:0.9em; margin-bottom:10px">// Server</h2>
+      <h2 style="color:#00ff88; font-size:0.9em; margin-bottom:10px; cursor:pointer" onclick="showTab('server')">// Server</h2>
       <div class="grid" style="grid-template-columns:1fr 1fr;" id="dash-srv-cards"></div>
       <div style="margin-top:10px">
         <div style="font-size:0.75em;color:#888;text-transform:uppercase;margin-bottom:4px">Status Codes</div>
@@ -729,13 +732,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
     <!-- Scanner Column -->
     <div class="section" style="border-left: 3px solid #00ccff;">
-      <h2 style="color:#00ccff; font-size:0.9em; margin-bottom:10px">// Scanner</h2>
+      <h2 style="color:#00ccff; font-size:0.9em; margin-bottom:10px; cursor:pointer" onclick="showTab('scanner')">// Scanner</h2>
       <div class="grid" style="grid-template-columns:1fr 1fr;" id="dash-scan-cards"></div>
       <div id="dash-scan-detail" style="margin-top:10px;font-size:0.82em;color:#888"></div>
     </div>
     <!-- Proxy Column -->
     <div class="section" style="border-left: 3px solid #ffaa00;">
-      <h2 style="color:#ffaa00; font-size:0.9em; margin-bottom:10px">// Proxy</h2>
+      <h2 style="color:#ffaa00; font-size:0.9em; margin-bottom:10px; cursor:pointer" onclick="showTab('proxy')">// Proxy</h2>
       <div class="grid" style="grid-template-columns:1fr 1fr;" id="dash-proxy-cards"></div>
       <div id="dash-proxy-detail-ext" style="margin-top:10px;font-size:0.82em;color:#888"></div>
     </div>
@@ -1880,9 +1883,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   });
 
   // ------ Server section toggle ------
-  window.toggleServerSection = function(name) {
+  window.toggleServerSection = function(name, forceOpen) {
     var sec = document.getElementById('srv-' + name);
-    if (sec) sec.classList.toggle('open');
+    if (!sec) return;
+    if (forceOpen) sec.classList.add('open');
+    else sec.classList.toggle('open');
   };
 
   // ------ Scanner sub-tab switch (3 tabs now) ------
@@ -1920,8 +1925,9 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     return d.innerHTML;
   }
 
-  function card(label, value, cls) {
-    return '<div class="card"><div class="label">' + label + '</div><div class="value ' + cls + '">' + value + '</div></div>';
+  function card(label, value, cls, onclick) {
+    var click = onclick ? ' onclick="' + onclick + '" style="cursor:pointer"' : '';
+    return '<div class="card"' + click + '><div class="label">' + label + '</div><div class="value ' + cls + '">' + value + '</div></div>';
   }
 
   function fmtCompact(n) {
@@ -1944,10 +1950,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     return b + ' B';
   }
 
-  function compactCard(label, n, cls) {
+  function compactCard(label, n, cls, onclick) {
     var compact = fmtCompact(n);
     var full = (typeof n === 'number') ? n.toLocaleString() : String(n);
-    return '<div class="card" title="' + full + '"><div class="label">' + label + '</div><div class="value ' + cls + '">' + compact + '</div></div>';
+    var click = onclick ? ' onclick="' + onclick + '" style="cursor:pointer"' : '';
+    return '<div class="card" title="' + full + '"' + click + '><div class="label">' + label + '</div><div class="value ' + cls + '">' + compact + '</div></div>';
   }
 
   function bytesCard(label, b, cls) {
@@ -2388,15 +2395,15 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var avgLatMs = m.avg_latency_ms || 0;
       var p95Lat = m.p95_latency_ms || avgLatMs * 2;
       document.getElementById('dash-metrics').innerHTML =
-        compactCard('Total Requests', totalReqs, 'v-ok') +
+        compactCard('Total Requests', totalReqs, 'v-ok', "showTab(\\x27server\\x27);toggleServerSection(\\x27overview\\x27,true)") +
         card('Req/s', avgRps, 'v-info') +
-        card('Active Connections', m.active_connections||0, 'v-info') +
+        card('Active Connections', m.active_connections||0, 'v-info', "showTab(\\x27server\\x27);toggleServerSection(\\x27sessions\\x27,true)") +
         compactCard('2xx', m.total_2xx||0, 'v-ok') +
-        compactCard('4xx', m.total_4xx||0, 'v-warn') +
-        compactCard('5xx', m.total_5xx||0, 'v-err') +
-        card('Error Rate', ((m.error_rate_pct||0).toFixed(1)) + '%%', (m.error_rate_pct||0) > 10 ? 'v-err' : 'v-ok') +
+        compactCard('4xx', m.total_4xx||0, 'v-warn', "showTab(\\x27server\\x27);toggleServerSection(\\x27errors\\x27,true)") +
+        compactCard('5xx', m.total_5xx||0, 'v-err', "showTab(\\x27server\\x27);toggleServerSection(\\x27errors\\x27,true)") +
+        card('Error Rate', ((m.error_rate_pct||0).toFixed(1)) + '%%', (m.error_rate_pct||0) > 10 ? 'v-err' : 'v-ok', "showTab(\\x27server\\x27);toggleServerSection(\\x27errors\\x27,true)") +
         compactCard('Labyrinth Hits', m.total_labyrinth||0, 'v-info') +
-        compactCard('Unique Clients', m.unique_clients||0, 'v-info') +
+        compactCard('Unique Clients', m.unique_clients||0, 'v-info', "showTab(\\x27server\\x27);toggleServerSection(\\x27sessions\\x27,true)") +
         bytesCard('Traffic (Session)', m.session_response_bytes||0, 'v-info') +
         bytesCard('Traffic (Total)', m.total_response_bytes||0, 'v-info') +
         card('Uptime', fmtUptime(m.uptime_seconds), 'v-ok');
