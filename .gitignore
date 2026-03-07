@@ -38,4 +38,9 @@ captures/
 
 # Deployment test folders
 deploy-test-*/
-.claude/worktrees/
+
+# Claude Code
+.claude/
+
+# Internal progress (not published)
+progress/
