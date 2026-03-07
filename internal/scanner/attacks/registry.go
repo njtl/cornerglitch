@@ -31,6 +31,7 @@ func AllModules() []scanner.AttackModule {
 		&SlowHTTPModule{},
 		&BreakageModule{},
 		&H3Module{},
+		&WAFModule{},
 	}
 }
 
