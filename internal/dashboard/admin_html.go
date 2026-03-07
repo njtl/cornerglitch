@@ -537,8 +537,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   .findings-group table { margin:0 }
   .findings-container { max-height:600px;overflow-y:auto }
   .findings-url { max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle }
-  #builtin-history-body tr.history-clickable { cursor:pointer }
-  #builtin-history-body tr.history-clickable:hover { background:#1a2a3a }
+  #builtin-history-gt .gt-clickable { cursor:pointer }
+  #builtin-history-gt .gt-clickable:hover { background:#1a2a3a }
   .history-viewing-banner { background:#1a2a3a;border:1px solid #0af;border-radius:6px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;color:#88ccff;font-size:0.85em }
   .history-viewing-banner button { background:#333;color:#aaa;border:1px solid #555;border-radius:4px;padding:4px 14px;cursor:pointer;font-family:inherit;font-size:0.82em }
   .history-viewing-banner button:hover { background:#444;color:#fff }
@@ -1115,17 +1115,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       </div>
       <div style="margin-bottom:12px">
         <span style="color:#00ccaa;font-size:0.8em;font-weight:bold">Endpoints</span>
-        <div style="margin-top:6px;max-height:220px;overflow-y:auto">
-          <table style="width:100%%;font-size:0.75em;border-collapse:collapse" id="mcp-endpoints-table">
-            <thead><tr style="color:#888;text-align:left;border-bottom:1px solid #333">
-              <th style="padding:4px">Name</th>
-              <th style="padding:4px">Type</th>
-              <th style="padding:4px">Category</th>
-              <th style="padding:4px">Status</th>
-            </tr></thead>
-            <tbody id="mcp-endpoints-body"></tbody>
-          </table>
-        </div>
+        <div id="mcp-endpoints-gt" style="margin-top:6px"></div>
       </div>
       <div style="margin-bottom:8px">
         <span style="color:#00ccaa;font-size:0.8em;font-weight:bold">Per-Tool Call Counts</span>
@@ -1133,18 +1123,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       </div>
       <div style="margin-top:12px">
         <span style="color:#00ccaa;font-size:0.8em;font-weight:bold">Recent Events</span>
-        <div style="margin-top:6px;max-height:200px;overflow-y:auto">
-          <table style="width:100%%;font-size:0.75em;border-collapse:collapse" id="mcp-events-table">
-            <thead><tr style="color:#888;text-align:left;border-bottom:1px solid #333">
-              <th style="padding:4px">Time</th>
-              <th style="padding:4px">Method</th>
-              <th style="padding:4px">Tool/URI</th>
-              <th style="padding:4px">Category</th>
-              <th style="padding:4px">Session</th>
-            </tr></thead>
-            <tbody id="mcp-events-body"></tbody>
-          </table>
-        </div>
+        <div id="mcp-events-gt" style="margin-top:6px"></div>
       </div>
     </div>
   </div>
@@ -1272,20 +1251,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <!-- 2. Scan History -->
     <div class="section">
       <h2>// Scan History</h2>
-      <div class="tbl-scroll" style="max-height:400px">
-        <table>
-          <thead><tr>
-            <th>Timestamp</th>
-            <th>Scanner</th>
-            <th>Duration</th>
-            <th>Grade</th>
-            <th>Detection</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr></thead>
-          <tbody id="scanner-history-body"></tbody>
-        </table>
-      </div>
+      <div id="scanner-history-gt"></div>
     </div>
 
     <!-- 3. Scan Results -->
@@ -1433,19 +1399,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <!-- Scan History -->
     <div class="section">
       <h2>// Scan History</h2>
-      <div class="tbl-scroll" style="max-height:300px">
-        <table>
-          <thead><tr>
-            <th>Timestamp</th>
-            <th>Profile</th>
-            <th>Duration</th>
-            <th>Findings</th>
-            <th>Coverage</th>
-            <th>Resilience</th>
-          </tr></thead>
-          <tbody id="builtin-history-body"></tbody>
-        </table>
-      </div>
+      <div id="builtin-history-gt"></div>
     </div>
 
   </div>
@@ -1493,12 +1447,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <div style="margin-bottom:12px">
         <button class="scanner-btn" onclick="refreshReplayFiles()">Refresh</button>
       </div>
-      <div class="tbl-scroll" style="max-height:300px">
-        <table>
-          <thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Action</th></tr></thead>
-          <tbody id="replay-files-body"></tbody>
-        </table>
-      </div>
+      <div id="replay-files-gt"></div>
     </div>
 
     <!-- PCAP Metadata -->
@@ -1816,18 +1765,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <div class="section">
     <h2>// Pipeline Stats</h2>
     <p style="color:#555;font-size:0.72em;margin-bottom:8px">Per-interceptor request/response counts and block rates in the proxy pipeline.</p>
-    <div class="tbl-scroll" style="max-height:300px">
-      <table>
-        <thead><tr>
-          <th>Interceptor</th>
-          <th>Requests</th>
-          <th>Responses</th>
-          <th>Blocked</th>
-          <th>Avg Latency</th>
-        </tr></thead>
-        <tbody id="proxy-pipeline-body"></tbody>
-      </table>
-    </div>
+    <div id="proxy-pipeline-gt"></div>
   </div>
 </div>
 
@@ -1910,20 +1848,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <input type="text" id="audit-filter-resource" placeholder="Resource filter...">
       <select id="audit-filter-status"><option value="">All Statuses</option></select>
     </div>
-    <div class="tbl-scroll" style="max-height:400px">
-      <table class="audit-table">
-        <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>&Delta;</th></tr></thead>
-        <tbody id="audit-log-body"></tbody>
-      </table>
-    </div>
-    <div class="audit-pager">
-      <span id="audit-pager-info">No entries</span>
-      <span>
-        <button id="audit-prev-btn" onclick="auditPage(-1)" disabled>&laquo; Prev</button>
-        <span id="audit-page-label" style="margin:0 8px"></span>
-        <button id="audit-next-btn" onclick="auditPage(1)" disabled>Next &raquo;</button>
-      </span>
-    </div>
+    <div id="audit-log-gt"></div>
   </div>
 </div>
 
@@ -2219,7 +2144,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         if (existTr && prev) {
           var changed = false;
           cells.forEach(function(val, ci) {
-            if (prev[ci] !== val) { changed = true; var td = existTr.children[ci]; if (td) td.textContent = val; }
+            if (prev[ci] !== val) { changed = true; var td = existTr.children[ci]; if (td) { var col = self.columns[ci]; if (col && col.html) td.innerHTML = val; else td.textContent = val; } }
           });
           if (changed) { existTr.classList.remove('gt-updated'); void existTr.offsetWidth; existTr.classList.add('gt-updated'); }
           usedEls.add(existTr); frag.appendChild(existTr);
@@ -2238,8 +2163,10 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       if (this.rowKey) tr.dataset.rowkey = rk;
       if (this.onRowClick) { tr.className = 'gt-clickable'; tr.addEventListener('click', function() { self.onRowClick(row); }); }
       cells.forEach(function(val, ci) {
-        var td = self._el('td'); td.textContent = val;
-        var col = self.columns[ci]; if (col && col.width) td.style.width = col.width;
+        var td = self._el('td');
+        var col = self.columns[ci];
+        if (col && col.html) td.innerHTML = val; else td.textContent = val;
+        if (col && col.width) td.style.width = col.width;
         tr.appendChild(td);
       });
       return tr;
@@ -2356,6 +2283,92 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     ],
     pageSize: 50, searchable: true, exportable: true, rowKey: 'id',
     emptyMessage: 'No vulnerabilities configured'
+  });
+
+  var mcpEndpointsTable = new GlitchTable('mcp-endpoints-gt', {
+    columns: [
+      {key: 'name', label: 'Name', sortable: true, filterable: true},
+      {key: 'type', label: 'Type', sortable: true, filterable: true},
+      {key: 'category', label: 'Category', sortable: true, filterable: true, html: true, format: function(v) { var c = v === 'honeypot' ? '#ff4444' : '#00ff88'; return '<span style="color:'+c+'">'+escapeHtml(v||'')+'</span>'; }},
+      {key: 'status', label: 'Status', sortable: true, filterable: true, html: true, format: function(v, row) { var on = row.enabled; return '<span style="color:'+(on?'#00ff88':'#ff4444')+'">'+(on?'Enabled':'Disabled')+'</span>'; }}
+    ],
+    pageSize: 25, searchable: true, rowKey: 'name',
+    emptyMessage: 'No endpoints'
+  });
+
+  var mcpEventsTable = new GlitchTable('mcp-events-gt', {
+    columns: [
+      {key: 'time_str', label: 'Time', sortable: true},
+      {key: 'method', label: 'Method', sortable: true, filterable: true},
+      {key: 'tool_name', label: 'Tool/URI', sortable: true, filterable: true},
+      {key: 'category', label: 'Category', sortable: true, filterable: true, html: true, format: function(v) { var c = v === 'honeypot' ? '#ff4444' : (v === 'legit' ? '#00ff88' : '#888'); return '<span style="color:'+c+'">'+escapeHtml(v||'')+'</span>'; }},
+      {key: 'session_short', label: 'Session', sortable: true}
+    ],
+    pageSize: 25, searchable: true, rowKey: '_idx',
+    emptyMessage: 'No events yet'
+  });
+
+  var scannerHistoryTable = new GlitchTable('scanner-history-gt', {
+    columns: [
+      {key: 'timestamp_str', label: 'Timestamp', sortable: true},
+      {key: 'scanner', label: 'Scanner', sortable: true, filterable: true},
+      {key: 'duration', label: 'Duration', sortable: true},
+      {key: 'grade', label: 'Grade', sortable: true, filterable: true, html: true, format: function(v, row) { var gc = row._gradeClass || ''; return '<span'+(gc?' class="'+gc+'"':'')+' style="font-weight:bold;font-size:1.2em">'+escapeHtml(v||'-')+'</span>'; }},
+      {key: 'detection_str', label: 'Detection', sortable: true, html: true},
+      {key: 'status_str', label: 'Status', sortable: true, html: true},
+      {key: 'actions_html', label: 'Actions', html: true}
+    ],
+    pageSize: 25, searchable: true, exportable: true, rowKey: '_idx',
+    emptyMessage: 'No scans yet'
+  });
+
+  var builtinHistoryTable = new GlitchTable('builtin-history-gt', {
+    columns: [
+      {key: 'timestamp_str', label: 'Timestamp', sortable: true},
+      {key: 'profile', label: 'Profile', sortable: true, filterable: true},
+      {key: 'duration_str', label: 'Duration', sortable: true},
+      {key: 'findings', label: 'Findings', sortable: true},
+      {key: 'coverage_str', label: 'Coverage', sortable: true},
+      {key: 'resilience_str', label: 'Resilience', sortable: true}
+    ],
+    pageSize: 25, searchable: true, rowKey: 'id',
+    emptyMessage: 'No scans yet',
+    onRowClick: function(row) { if (row.id) loadHistoryReport(row.id); }
+  });
+
+  var replayFilesTable = new GlitchTable('replay-files-gt', {
+    columns: [
+      {key: 'name', label: 'File', sortable: true, filterable: true},
+      {key: 'size', label: 'Size', sortable: true},
+      {key: 'modified', label: 'Modified', sortable: true},
+      {key: 'action_html', label: 'Action', html: true}
+    ],
+    pageSize: 25, searchable: true, rowKey: 'name',
+    emptyMessage: 'No capture files found'
+  });
+
+  var proxyPipelineTable = new GlitchTable('proxy-pipeline-gt', {
+    columns: [
+      {key: 'name', label: 'Interceptor', sortable: true, filterable: true},
+      {key: 'requests', label: 'Requests', sortable: true},
+      {key: 'responses', label: 'Responses', sortable: true},
+      {key: 'blocked', label: 'Blocked', sortable: true},
+      {key: 'avg_latency_str', label: 'Avg Latency', sortable: true}
+    ],
+    pageSize: 25, searchable: false, rowKey: 'name',
+    emptyMessage: 'No interceptors registered'
+  });
+
+  var auditLogTable = new GlitchTable('audit-log-gt', {
+    columns: [
+      {key: 'time_str', label: 'Time', sortable: true},
+      {key: 'actor', label: 'Actor', sortable: true, filterable: true},
+      {key: 'action', label: 'Action', sortable: true, filterable: true, html: true, format: function(v, row) { var sc = row._statusClass || ''; return '<span'+(sc?' class="'+sc+'"':'')+'>'+escapeHtml(v||'')+'</span>'; }},
+      {key: 'resource_short', label: 'Resource', sortable: true, filterable: true},
+      {key: 'delta_html', label: '\u0394', html: true}
+    ],
+    pageSize: 25, searchable: true, exportable: true, rowKey: '_eid',
+    emptyMessage: 'No audit entries'
   });
 
   // ------ Dashboard Tab ------
@@ -3671,28 +3684,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       }
     } catch(e) {}
 
-    // MCP endpoints table
+    // MCP endpoints table (GlitchTable)
     try {
       var epData = await api('/admin/api/mcp/endpoints');
       var endpoints = epData.endpoints || [];
-      var epBody = document.getElementById('mcp-endpoints-body');
-      if (epBody) {
-        if (endpoints.length === 0) {
-          epBody.innerHTML = '<tr><td colspan="4" style="color:#555;padding:8px;text-align:center">No endpoints</td></tr>';
-        } else {
-          epBody.innerHTML = endpoints.map(function(ep) {
-            var catColor = ep.category === 'honeypot' ? '#ff4444' : '#00ff88';
-            var statusColor = ep.enabled ? '#00ff88' : '#ff4444';
-            var statusText = ep.enabled ? 'Enabled' : 'Disabled';
-            return '<tr style="border-bottom:1px solid #222">' +
-              '<td style="padding:3px 4px;color:#ccc">' + esc(ep.name) + '</td>' +
-              '<td style="padding:3px 4px;color:#888">' + esc(ep.type) + '</td>' +
-              '<td style="padding:3px 4px;color:' + catColor + '">' + esc(ep.category) + '</td>' +
-              '<td style="padding:3px 4px;color:' + statusColor + '">' + statusText + '</td>' +
-              '</tr>';
-          }).join('');
-        }
-      }
+      mcpEndpointsTable.setData(endpoints);
     } catch(e) {}
 
     // Per-tool call breakdown from sessions
@@ -3722,29 +3718,17 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       }
     } catch(e) {}
 
-    // Recent events
+    // Recent events (GlitchTable)
     try {
-      var evData = await api('/admin/api/mcp/events?limit=20');
+      var evData = await api('/admin/api/mcp/events?limit=50');
       var events = evData.events || [];
-      var tbody = document.getElementById('mcp-events-body');
-      if (tbody) {
-        if (events.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" style="color:#555;padding:8px;text-align:center">No events yet</td></tr>';
-        } else {
-          tbody.innerHTML = events.map(function(ev) {
-            var t = new Date(ev.timestamp * 1000);
-            var ts = ('0'+t.getHours()).slice(-2) + ':' + ('0'+t.getMinutes()).slice(-2) + ':' + ('0'+t.getSeconds()).slice(-2);
-            var catColor = ev.category === 'honeypot' ? '#ff4444' : (ev.category === 'legit' ? '#00ff88' : '#888');
-            return '<tr style="border-bottom:1px solid #222">' +
-              '<td style="padding:3px 4px;color:#888">' + ts + '</td>' +
-              '<td style="padding:3px 4px;color:#ccc">' + esc(ev.method||'') + '</td>' +
-              '<td style="padding:3px 4px;color:#00ccaa">' + esc(ev.tool_name||'') + '</td>' +
-              '<td style="padding:3px 4px;color:' + catColor + '">' + esc(ev.category||'') + '</td>' +
-              '<td style="padding:3px 4px;color:#666;font-size:0.9em">' + esc((ev.session_id||'').substring(0,8)) + '</td>' +
-              '</tr>';
-          }).join('');
-        }
-      }
+      mcpEventsTable.setData(events.map(function(ev, idx) {
+        var t = new Date(ev.timestamp * 1000);
+        ev.time_str = ('0'+t.getHours()).slice(-2) + ':' + ('0'+t.getMinutes()).slice(-2) + ':' + ('0'+t.getSeconds()).slice(-2);
+        ev.session_short = (ev.session_id||'').substring(0,8);
+        ev._idx = idx;
+        return ev;
+      }));
     } catch(e) {}
   }
 
@@ -4321,20 +4305,22 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   }
 
   function renderServerHistory(completed, running) {
-    var tbody = document.getElementById('scanner-history-body');
-    var rows = [];
+    window._crashInfos = [];
+    var tableData = [];
 
     // Running scans first
-    (running || []).forEach(function(r) {
-      rows.push('<tr style="background:#1a1a00">' +
-        '<td style="color:#ffaa00">' + (r.started_at ? new Date(r.started_at).toLocaleString() : '-') + '</td>' +
-        '<td>' + escapeHtml(r.scanner || '') + '</td>' +
-        '<td style="color:#ffaa00">' + escapeHtml(r.elapsed || '-') + '</td>' +
-        '<td style="font-weight:bold;color:#ffaa00">...</td>' +
-        '<td style="color:#888">-</td>' +
-        '<td><span style="color:#ffaa00">RUNNING</span></td>' +
-        '<td></td>' +
-        '</tr>');
+    (running || []).forEach(function(r, idx) {
+      tableData.push({
+        _idx: 'run-' + idx,
+        timestamp_str: r.started_at ? new Date(r.started_at).toLocaleString() : '-',
+        scanner: r.scanner || '',
+        duration: r.elapsed || '-',
+        grade: '...',
+        _gradeClass: '',
+        detection_str: '<span style="color:#888">-</span>',
+        status_str: '<span style="color:#ffaa00">RUNNING</span>',
+        actions_html: ''
+      });
     });
 
     // Completed scans (newest first)
@@ -4362,28 +4348,27 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         actions += ' <button class="cfg-btn" style="padding:2px 8px;font-size:0.72em" onclick="compareScanRun(' + realIdx + ')">Compare</button>';
       }
 
-      var statusCell = escapeHtml(statusText) + escapeHtml(exitInfo);
+      var statusCell = '<span style="color:' + statusColor + '">' + escapeHtml(statusText) + escapeHtml(exitInfo) + '</span>';
       if (r.crashed || r.status === 'crashed') {
-        var hci = window._crashInfos ? window._crashInfos.length : 0;
-        if (!window._crashInfos) window._crashInfos = [];
+        var hci = window._crashInfos.length;
         window._crashInfos.push({scanner:r.scanner||'', status:'CRASHED', exit_code:r.exit_code||0, crash_signal:r.crash_signal||'', scanner_errors:(comp.scanner_errors||[]), crash_stderr:r.stderr_excerpt||'', error_output:r.error_output||''});
         statusCell = '<span class="crash-link" onclick="event.stopPropagation();showCrashModal(window._crashInfos['+hci+'])">' + escapeHtml(statusText) + escapeHtml(exitInfo) + '</span>';
       }
 
-      rows.push('<tr>' +
-        '<td style="color:#888">' + (r.completed_at ? new Date(r.completed_at).toLocaleString() : r.started_at ? new Date(r.started_at).toLocaleString() : '-') + '</td>' +
-        '<td>' + escapeHtml(r.scanner || '') + '</td>' +
-        '<td style="color:#aaa">' + escapeHtml(r.duration || '-') + '</td>' +
-        '<td' + (gradeClass ? ' class="' + gradeClass + '"' : '') + ' style="font-weight:bold;font-size:1.2em">' + escapeHtml(grade) + '</td>' +
-        '<td>' + detStr + '</td>' +
-        '<td style="color:' + statusColor + '">' + statusCell + '</td>' +
-        '<td>' + actions + '</td>' +
-        '</tr>');
+      tableData.push({
+        _idx: 'comp-' + idx,
+        timestamp_str: r.completed_at ? new Date(r.completed_at).toLocaleString() : (r.started_at ? new Date(r.started_at).toLocaleString() : '-'),
+        scanner: r.scanner || '',
+        duration: r.duration || '-',
+        grade: grade,
+        _gradeClass: gradeClass,
+        detection_str: detStr,
+        status_str: statusCell,
+        actions_html: actions
+      });
     });
 
-    tbody.innerHTML = rows.join('') || '<tr><td colspan="7" style="color:#555;text-align:center">No scans yet</td></tr>';
-
-    // Store for click-to-view
+    scannerHistoryTable.setData(tableData);
     window._completedRuns = completed || [];
   }
 
@@ -4767,33 +4752,28 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         }
       } catch(e) { /* status endpoint may not exist yet */ }
 
-      // Fetch history
+      // Fetch history (GlitchTable)
       try {
         var histData = await api('/admin/api/scanner/builtin/history');
         var history = histData.history || histData || [];
-        var tbody = document.getElementById('builtin-history-body');
-        if (Array.isArray(history) && history.length > 0) {
-          var rows = history.slice().reverse().map(function(h) {
+        if (Array.isArray(history)) {
+          builtinHistoryTable.setData(history.slice().reverse().map(function(h) {
             var covPct = h.coverage_pct !== undefined ? h.coverage_pct.toFixed(1) + '%%' : '-';
             var resPct = h.resilience_pct !== undefined ? h.resilience_pct.toFixed(1) + '%%' : '-';
             var dur = '-';
             if (h.duration_ms) { var s = Math.round(h.duration_ms/1000); dur = s >= 60 ? Math.floor(s/60)+'m '+s%%60+'s' : s+'s'; }
-            return '<tr class="history-clickable" onclick="loadHistoryReport(\'' + escapeHtml(h.id || '') + '\')">' +
-              '<td style="color:#888">' + (h.timestamp ? new Date(h.timestamp).toLocaleString() : '-') + '</td>' +
-              '<td>' + escapeHtml(h.profile || '-') + '</td>' +
-              '<td style="color:#aaa">' + dur + '</td>' +
-              '<td>' + (h.findings || 0) + '</td>' +
-              '<td>' + covPct + '</td>' +
-              '<td>' + resPct + '</td>' +
-              '</tr>';
-          }).join('');
-          tbody.innerHTML = rows;
-        } else {
-          tbody.innerHTML = '<tr><td colspan="6" style="color:#555;text-align:center">No scans yet</td></tr>';
+            return {
+              id: h.id || '',
+              timestamp_str: h.timestamp ? new Date(h.timestamp).toLocaleString() : '-',
+              profile: h.profile || '-',
+              duration_str: dur,
+              findings: h.findings || 0,
+              coverage_str: covPct,
+              resilience_str: resPct
+            };
+          }));
         }
-      } catch(e) {
-        document.getElementById('builtin-history-body').innerHTML = '<tr><td colspan="6" style="color:#555;text-align:center">No scans yet</td></tr>';
-      }
+      } catch(e) {}
 
       // Set default target
       var targetEl = document.getElementById('builtin-target');
@@ -4867,24 +4847,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
             var results = await api('/admin/api/scanner/builtin/results');
             renderBuiltinResults(results);
           } catch(e) { /* no results */ }
-          // Refresh history list only (not full scanner panel to avoid filter reset)
+          // Refresh history list via GlitchTable
           try {
             var histData = await api('/admin/api/scanner/builtin/history');
             var history = histData.history || histData || [];
-            var tbody = document.getElementById('builtin-history-body');
-            if (Array.isArray(history) && history.length > 0) {
-              var rows = history.slice().reverse().map(function(h) {
+            if (Array.isArray(history)) {
+              builtinHistoryTable.setData(history.slice().reverse().map(function(h) {
                 var covPct = h.coverage_pct !== undefined ? h.coverage_pct.toFixed(1) + '%%' : '-';
                 var resPct = h.resilience_pct !== undefined ? h.resilience_pct.toFixed(1) + '%%' : '-';
-                return '<tr class="history-clickable" onclick="loadHistoryReport(\'' + escapeHtml(h.id || '') + '\')">' +
-                  '<td style="color:#888">' + (h.timestamp ? new Date(h.timestamp).toLocaleString() : '-') + '</td>' +
-                  '<td>' + escapeHtml(h.profile || '-') + '</td>' +
-                  '<td>' + (h.findings || 0) + '</td>' +
-                  '<td>' + covPct + '</td>' +
-                  '<td>' + resPct + '</td>' +
-                  '</tr>';
-              }).join('');
-              tbody.innerHTML = rows;
+                var dur = '-';
+                if (h.duration_ms) { var s = Math.round(h.duration_ms/1000); dur = s >= 60 ? Math.floor(s/60)+'m '+s%%60+'s' : s+'s'; }
+                return { id: h.id||'', timestamp_str: h.timestamp ? new Date(h.timestamp).toLocaleString() : '-', profile: h.profile||'-', duration_str: dur, findings: h.findings||0, coverage_str: covPct, resilience_str: resPct };
+              }));
             }
           } catch(e) { /* history refresh failed */ }
         } else if (status.state === 'error') {
@@ -5257,22 +5231,16 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var blkEl = document.getElementById('proxy-blocked-reqs');
       if (blkEl) blkEl.textContent = fmtCompact(stats.requests_blocked || 0);
 
-      // Pipeline table
+      // Pipeline table (GlitchTable)
       var interceptors = data.interceptors || [];
-      var pipeBody = document.getElementById('proxy-pipeline-body');
-      if (interceptors.length > 0) {
-        pipeBody.innerHTML = interceptors.map(function(ic) {
-          return '<tr>' +
-            '<td>' + escapeHtml(ic.name || 'unknown') + '</td>' +
-            '<td>' + (ic.requests || 0) + '</td>' +
-            '<td>' + (ic.responses || 0) + '</td>' +
-            '<td>' + (ic.blocked || 0) + '</td>' +
-            '<td>' + (ic.avg_latency_ms || 0).toFixed(1) + ' ms</td>' +
-            '</tr>';
-        }).join('');
-      } else {
-        pipeBody.innerHTML = '<tr><td colspan="5" style="color:#555;text-align:center">No interceptors registered</td></tr>';
-      }
+      proxyPipelineTable.setData(interceptors.map(function(ic) {
+        ic.name = ic.name || 'unknown';
+        ic.requests = ic.requests || 0;
+        ic.responses = ic.responses || 0;
+        ic.blocked = ic.blocked || 0;
+        ic.avg_latency_str = (ic.avg_latency_ms || 0).toFixed(1) + ' ms';
+        return ic;
+      }));
 
       // Proxy runtime status
       try {
@@ -5373,15 +5341,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   window.refreshReplayFiles = async function() {
     try {
       const d = await api('/admin/api/replay/files');
-      const tb = document.getElementById('replay-files-body');
-      if (!d.files || d.files.length === 0) {
-        tb.innerHTML = '<tr><td colspan="4" style="color:#666">No capture files found</td></tr>';
-        return;
-      }
-      tb.innerHTML = d.files.map(f =>
-        '<tr><td>' + escapeHtml(f.name) + '</td><td>' + f.size + '</td><td>' + f.modified + '</td>' +
-        '<td><button class="scanner-btn" style="padding:4px 12px;font-size:0.78em" onclick="replayLoad(\'' + escapeHtml(f.name) + '\')">Load</button></td></tr>'
-      ).join('');
+      var files = (d.files || []).map(function(f) {
+        f.action_html = '<button class="scanner-btn" style="padding:4px 12px;font-size:0.78em" onclick="replayLoad(\'' + escapeHtml(f.name) + '\')">Load</button>';
+        return f;
+      });
+      replayFilesTable.setData(files);
     } catch(e) { console.error('refreshReplayFiles:', e); }
   };
 
@@ -5962,10 +5926,6 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   }
 
   // ------ Audit log ------
-  var auditOffset = 0;
-  var auditLimit = 50;
-  var auditTotal = 0;
-
   function auditStatusClass(status) {
     if (status === 'success') return 'audit-ok';
     if (status === 'error') return 'audit-err';
@@ -6025,12 +5985,6 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     sel.innerHTML = html;
   }
 
-  window.auditPage = function(dir) {
-    auditOffset += dir * auditLimit;
-    if (auditOffset < 0) auditOffset = 0;
-    refreshAuditLog();
-  };
-
   async function refreshAuditLog() {
     try {
       var actor = document.getElementById('audit-filter-actor').value;
@@ -6038,7 +5992,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var resource = document.getElementById('audit-filter-resource').value;
       var status = document.getElementById('audit-filter-status').value;
 
-      var qs = '?limit=' + auditLimit + '&offset=' + auditOffset;
+      var qs = '?limit=200&offset=0';
       if (actor) qs += '&actor=' + encodeURIComponent(actor);
       if (action) qs += '&action=' + encodeURIComponent(action);
       if (resource) qs += '&resource=' + encodeURIComponent(resource);
@@ -6046,7 +6000,6 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
       var data = await api('/admin/api/audit' + qs);
       var entries = data.entries || [];
-      auditTotal = data.total || 0;
 
       // Populate filter dropdowns (preserve current selection)
       if (data.filters) {
@@ -6055,65 +6008,30 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         populateSelect('audit-filter-status', data.filters.statuses || [], status);
       }
 
-      // Remember which rows are expanded so we can restore them after re-render
-      var expandedIds = {};
-      var oldDetails = document.querySelectorAll('.audit-detail');
-      for (var d = 0; d < oldDetails.length; d++) {
-        if (oldDetails[d].style.display === 'table-row') {
-          expandedIds[oldDetails[d].getAttribute('data-audit-id')] = true;
-        }
-      }
-
-      // Render table
-      var body = document.getElementById('audit-log-body');
-      var html = '';
-      for (var i = 0; i < entries.length; i++) {
-        var e = entries[i];
-        var sc = auditStatusClass(e.status);
-        var res = esc(truncate(e.resource || '', 30));
-        var resFull = esc(e.resource || '');
+      // Feed into GlitchTable
+      auditLogTable.setData(entries.map(function(e, i) {
         var delta = auditDelta(e.old_value, e.new_value);
-        var eid = String(e.id || i);
-        var isExpanded = !!expandedIds[eid];
-        html += '<tr class="audit-row" onclick="var dt=document.querySelector(\'[data-audit-id=\\x27' + eid + '\\x27]\');if(dt)dt.style.display=dt.style.display===\'table-row\'?\'none\':\'table-row\'">';
-        html += '<td title="' + esc(e.timestamp || '') + '">' + fmtAuditTime(e.timestamp) + '</td>';
-        html += '<td>' + esc(e.actor || '') + '</td>';
-        html += '<td class="' + sc + '">' + esc(e.action || '') + '</td>';
-        html += '<td title="' + resFull + '">' + res + '</td>';
-        html += '<td>' + delta + '</td>';
-        html += '</tr>';
-        html += '<tr class="audit-detail" data-audit-id="' + eid + '" style="display:' + (isExpanded ? 'table-row' : 'none') + '"><td colspan="5">';
-        html += '<strong style="color:#00ccaa">Old Value:</strong>\n' + esc(fmtJSON(e.old_value)) + '\n\n';
-        html += '<strong style="color:#00ccaa">New Value:</strong>\n' + esc(fmtJSON(e.new_value)) + '\n\n';
-        if (e.details) html += '<strong style="color:#00ccaa">Details:</strong>\n' + esc(fmtJSON(e.details)) + '\n\n';
-        if (e.client_ip) html += '<strong style="color:#00ccaa">Client IP:</strong> ' + esc(e.client_ip) + '\n';
-        html += '</td></tr>';
-      }
-      if (entries.length === 0) {
-        html = '<tr><td colspan="5" style="color:#555;text-align:center;padding:20px">No audit entries</td></tr>';
-      }
-      body.innerHTML = html;
-
-      // Pager
-      var start = auditTotal > 0 ? auditOffset + 1 : 0;
-      var end = Math.min(auditOffset + auditLimit, auditTotal);
-      var totalPages = Math.ceil(auditTotal / auditLimit) || 1;
-      var curPage = Math.floor(auditOffset / auditLimit) + 1;
-      document.getElementById('audit-pager-info').textContent = 'Showing ' + start + '-' + end + ' of ' + auditTotal;
-      document.getElementById('audit-page-label').textContent = 'Page ' + curPage + ' of ' + totalPages;
-      document.getElementById('audit-prev-btn').disabled = auditOffset <= 0;
-      document.getElementById('audit-next-btn').disabled = auditOffset + auditLimit >= auditTotal;
+        return {
+          _eid: String(e.id || i),
+          time_str: fmtAuditTime(e.timestamp),
+          actor: e.actor || '',
+          action: e.action || '',
+          _statusClass: auditStatusClass(e.status),
+          resource_short: truncate(e.resource || '', 40),
+          delta_html: delta
+        };
+      }));
     } catch(e) {}
   }
 
-  // Reset offset when filters change
-  document.getElementById('audit-filter-actor').onchange = function() { auditOffset = 0; refreshAuditLog(); };
-  document.getElementById('audit-filter-action').onchange = function() { auditOffset = 0; refreshAuditLog(); };
-  document.getElementById('audit-filter-status').onchange = function() { auditOffset = 0; refreshAuditLog(); };
+  // Reset filters trigger refresh
+  document.getElementById('audit-filter-actor').onchange = function() { refreshAuditLog(); };
+  document.getElementById('audit-filter-action').onchange = function() { refreshAuditLog(); };
+  document.getElementById('audit-filter-status').onchange = function() { refreshAuditLog(); };
   var auditResTimer = null;
   document.getElementById('audit-filter-resource').oninput = function() {
     clearTimeout(auditResTimer);
-    auditResTimer = setTimeout(function() { auditOffset = 0; refreshAuditLog(); }, 300);
+    auditResTimer = setTimeout(function() { refreshAuditLog(); }, 300);
   };
 
   // ------ Settings refresh ------
