@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"time"
 )
@@ -49,6 +50,7 @@ func (r *ToolRegistry) List() []*Tool {
 	for _, t := range r.tools {
 		result = append(result, t)
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
 

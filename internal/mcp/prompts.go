@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -57,6 +58,7 @@ func (r *PromptRegistry) List() []*Prompt {
 	for _, p := range r.prompts {
 		result = append(result, p)
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
 

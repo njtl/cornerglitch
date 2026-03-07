@@ -3,6 +3,7 @@ package mcp
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 )
 
@@ -46,6 +47,7 @@ func (r *ResourceRegistry) List() []*Resource {
 	for _, res := range r.resources {
 		result = append(result, res)
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].URI < result[j].URI })
 	return result
 }
 
