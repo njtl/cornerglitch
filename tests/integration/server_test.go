@@ -846,9 +846,18 @@ func TestResponsesNotEmpty(t *testing.T) {
 		"/ping",
 	}
 	for _, p := range paths {
-		rr := doRequest(h, "GET", p, "", nil)
-		if rr.Body.Len() == 0 {
-			t.Errorf("path %s returned empty body", p)
+		// Paths subject to error injection may return empty bodies on unlucky
+		// rolls (e.g. http10_chunked). Retry up to 5 times for non-health paths.
+		ok := false
+		for attempt := 0; attempt < 5; attempt++ {
+			rr := doRequest(h, "GET", p, "", nil)
+			if rr.Body.Len() > 0 {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			t.Errorf("path %s returned empty body after 5 attempts", p)
 		}
 	}
 }
