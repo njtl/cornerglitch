@@ -2131,6 +2131,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       this._updateSortArrows();
     }
     _renderEmpty(tbody) {
+      if (tbody.children.length === 1 && tbody.children[0].querySelector('.gt-empty')) return;
       while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
       var tr = this._el('tr'), td = this._el('td', 'gt-empty');
       td.colSpan = this.columns.length; td.textContent = this.emptyMessage;
@@ -2138,30 +2139,71 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       this.prevRowMap = new Map();
     }
     _renderRows(tbody, pageRows) {
-      var self = this, newMap = new Map(), usedEls = new Set(), existingByKey = new Map();
-      if (this.rowKey) {
-        tbody.querySelectorAll('tr[data-rowkey]').forEach(function(tr) { existingByKey.set(tr.dataset.rowkey, tr); });
-      }
-      var frag = document.createDocumentFragment();
-      pageRows.forEach(function(row, idx) {
+      var self = this, newMap = new Map();
+      // Build expected row keys and cell values for this render
+      var expected = pageRows.map(function(row, idx) {
         var rk = self.rowKey ? String(row[self.rowKey]) : String(idx);
-        var prev = self.prevRowMap.get(rk), existTr = existingByKey.get(rk);
         var cells = self.columns.map(function(col) { return self._fmtCell(row, col); });
         newMap.set(rk, cells);
+        return { rk: rk, row: row, cells: cells };
+      });
+      // Fast path: if row keys and all cell values match current DOM exactly, skip DOM work
+      var children = tbody.children;
+      var isEmptyRow = children.length === 1 && children[0].querySelector('.gt-empty');
+      if (!isEmptyRow && children.length === expected.length) {
+        var allMatch = true;
+        for (var ci = 0; ci < expected.length; ci++) {
+          var tr = children[ci];
+          if (!tr || tr.dataset.rowkey !== expected[ci].rk) { allMatch = false; break; }
+          var prev = this.prevRowMap.get(expected[ci].rk);
+          if (!prev) { allMatch = false; break; }
+          for (var vi = 0; vi < expected[ci].cells.length; vi++) {
+            if (prev[vi] !== expected[ci].cells[vi]) { allMatch = false; break; }
+          }
+          if (!allMatch) break;
+        }
+        if (allMatch) { this.prevRowMap = newMap; return; }
+      }
+      // Slow path: rebuild via DOM diffing
+      var existingByKey = new Map();
+      if (this.rowKey) {
+        for (var ei = 0; ei < children.length; ei++) {
+          var ch = children[ei];
+          if (ch.dataset && ch.dataset.rowkey) existingByKey.set(ch.dataset.rowkey, ch);
+        }
+      }
+      var newChildren = [];
+      var anyDomChange = false;
+      expected.forEach(function(e) {
+        var prev = self.prevRowMap.get(e.rk), existTr = existingByKey.get(e.rk);
         if (existTr && prev) {
           var changed = false;
-          cells.forEach(function(val, ci) {
+          e.cells.forEach(function(val, ci) {
             if (prev[ci] !== val) { changed = true; var td = existTr.children[ci]; if (td) { var col = self.columns[ci]; if (col && col.html) td.innerHTML = val; else td.textContent = val; } }
           });
-          if (changed) { existTr.classList.remove('gt-updated'); void existTr.offsetWidth; existTr.classList.add('gt-updated'); }
-          usedEls.add(existTr); frag.appendChild(existTr);
+          if (changed) { existTr.classList.remove('gt-updated'); void existTr.offsetWidth; existTr.classList.add('gt-updated'); anyDomChange = true; }
+          newChildren.push(existTr);
         } else {
-          var tr = self._mkRow(row, rk, cells);
+          var tr = self._mkRow(e.row, e.rk, e.cells);
           if (prev === undefined && self.prevRowMap.size > 0) tr.classList.add('gt-updated');
-          usedEls.add(tr); frag.appendChild(tr);
+          newChildren.push(tr);
+          anyDomChange = true;
         }
       });
-      Array.from(tbody.children).forEach(function(ch) { if (!usedEls.has(ch)) tbody.removeChild(ch); });
+      // Check if order changed or rows were added/removed
+      if (!anyDomChange) {
+        var sameOrder = children.length === newChildren.length;
+        if (sameOrder) {
+          for (var oi = 0; oi < children.length; oi++) {
+            if (children[oi] !== newChildren[oi]) { sameOrder = false; break; }
+          }
+        }
+        if (sameOrder) { this.prevRowMap = newMap; return; }
+      }
+      // Apply DOM changes: remove old, append in new order
+      while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+      var frag = document.createDocumentFragment();
+      newChildren.forEach(function(tr) { frag.appendChild(tr); });
       tbody.appendChild(frag);
       this.prevRowMap = newMap;
     }
@@ -2185,10 +2227,12 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }
     _updateFooter(start, end, total) {
       var info = this._refs.pageInfo;
-      if (info) info.textContent = total === 0 ? '0 rows' : (start + 1) + '-' + end + ' of ' + total;
+      var txt = total === 0 ? '0 rows' : (start + 1) + '-' + end + ' of ' + total;
+      if (info && info.textContent !== txt) info.textContent = txt;
       var maxPage = Math.max(0, Math.ceil(total / this.pageSize) - 1);
-      if (this._refs.prevBtn) this._refs.prevBtn.disabled = (this.page <= 0);
-      if (this._refs.nextBtn) this._refs.nextBtn.disabled = (this.page >= maxPage);
+      var prevDis = (this.page <= 0), nextDis = (this.page >= maxPage);
+      if (this._refs.prevBtn && this._refs.prevBtn.disabled !== prevDis) this._refs.prevBtn.disabled = prevDis;
+      if (this._refs.nextBtn && this._refs.nextBtn.disabled !== nextDis) this._refs.nextBtn.disabled = nextDis;
     }
     _updateSortArrows() {
       var self = this, ths = this._refs.thead.querySelectorAll('tr:first-child th');
@@ -3019,95 +3063,122 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     accept_then_fin: 'Accept connection and immediately send FIN'
   };
 
+  var _controlsBuilt = false;
   async function refreshControls() {
     try {
       const features = await api('/admin/api/features');
       const el = document.getElementById('toggles');
-      el.innerHTML = Object.keys(FEATURE_LABELS).map(key => {
-        const on = features[key] ? 'checked' : '';
-        const tip = FEATURE_TIPS[key] || '';
-        return '<div class="toggle-row">' +
-          '<div class="toggle-name has-tip">' + FEATURE_LABELS[key] +
-          (tip ? '<span class="tip-icon">?</span><span class="tip-box">' + tip + '</span>' : '') +
-          '</div>' +
-          '<label class="toggle-sw">' +
-          '<input type="checkbox" ' + on + ' onchange="toggleFeature(\'' + key + '\', this.checked)">' +
-          '<div class="toggle-track"></div>' +
-          '<div class="toggle-knob"></div>' +
-          '</label></div>';
-      }).join('');
+      if (!_controlsBuilt || el.children.length === 0) {
+        el.innerHTML = Object.keys(FEATURE_LABELS).map(key => {
+          const on = features[key] ? 'checked' : '';
+          const tip = FEATURE_TIPS[key] || '';
+          return '<div class="toggle-row" data-fkey="' + key + '">' +
+            '<div class="toggle-name has-tip">' + FEATURE_LABELS[key] +
+            (tip ? '<span class="tip-icon">?</span><span class="tip-box">' + tip + '</span>' : '') +
+            '</div>' +
+            '<label class="toggle-sw">' +
+            '<input type="checkbox" ' + on + ' onchange="toggleFeature(\'' + key + '\', this.checked)">' +
+            '<div class="toggle-track"></div>' +
+            '<div class="toggle-knob"></div>' +
+            '</label></div>';
+        }).join('');
+      } else {
+        // Diff-update: only change checked state
+        el.querySelectorAll('[data-fkey]').forEach(function(row) {
+          var key = row.getAttribute('data-fkey');
+          var cb = row.querySelector('input[type="checkbox"]');
+          if (cb && cb.checked !== !!features[key]) cb.checked = !!features[key];
+        });
+      }
 
       const cfg = await api('/admin/api/config');
-      document.getElementById('sliders').innerHTML =
-        slider('error_rate_multiplier', 'Error Rate Multiplier', cfg.error_rate_multiplier, 0, 5, 0.1) +
-        slider('block_chance', 'Random Block Chance', cfg.block_chance, 0, 1, 0.01) +
-        slider('block_duration_sec', 'Block Duration (sec)', cfg.block_duration_sec, 1, 3600, 1) +
-        slider('header_corrupt_level', 'Header Corruption Level (0-4)', cfg.header_corrupt_level, 0, 4, 1) +
-        slider('protocol_glitch_level', 'Protocol Glitch Level (0-4)', cfg.protocol_glitch_level || 2, 0, 4, 1) +
-        '<div class="toggle-row" style="margin-top:8px">' +
-          '<div class="toggle-name has-tip">Protocol Glitch Enabled' +
-            '<span class="tip-icon">?</span><span class="tip-box">Enable HTTP protocol-level glitches (version violations, encoding conflicts, header corruption)</span>' +
-          '</div>' +
-          '<label class="toggle-sw">' +
-          '<input type="checkbox" ' + (cfg.protocol_glitch_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'protocol_glitch_enabled\', this.checked ? 1 : 0)">' +
-          '<div class="toggle-track"></div>' +
-          '<div class="toggle-knob"></div>' +
-          '</label></div>' +
-        slider('tls_chaos_level', 'TLS Chaos Level (0-4)', cfg.tls_chaos_level || 0, 0, 4, 1) +
-        '<div class="toggle-row" style="margin-top:8px">' +
-          '<div class="toggle-name has-tip">TLS Chaos Enabled' +
-            '<span class="tip-icon">?</span><span class="tip-box">Enable TLS chaos (version downgrade, weak ciphers, cert rotation, ALPN lies)</span>' +
-          '</div>' +
-          '<label class="toggle-sw">' +
-          '<input type="checkbox" ' + (cfg.tls_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'tls_chaos_enabled\', this.checked ? 1 : 0)">' +
-          '<div class="toggle-track"></div>' +
-          '<div class="toggle-knob"></div>' +
-          '</label></div>' +
-        '<div class="toggle-row" style="margin-top:8px">' +
-          '<div class="toggle-name has-tip">HSTS Chaos Enabled' +
-            '<span class="tip-icon">?</span><span class="tip-box">Inject random Strict-Transport-Security headers (max-age variations, conflicting directives)</span>' +
-          '</div>' +
-          '<label class="toggle-sw">' +
-          '<input type="checkbox" ' + (cfg.hsts_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'hsts_chaos_enabled\', this.checked ? 1 : 0)">' +
-          '<div class="toggle-track"></div>' +
-          '<div class="toggle-knob"></div>' +
-          '</label></div>' +
-
-        '<div class="toggle-row" style="margin-top:8px">' +
-          '<div class="toggle-name has-tip">H3/QUIC Chaos Enabled' +
-            '<span class="tip-icon">?</span><span class="tip-box">Inject fake HTTP/3 Alt-Svc headers and run a fake QUIC UDP listener to confuse clients</span>' +
-          '</div>' +
-          '<label class="toggle-sw">' +
-          '<input type="checkbox" ' + (cfg.h3_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'h3_chaos_enabled\', this.checked ? 1 : 0)">' +
-          '<div class="toggle-track"></div>' +
-          '<div class="toggle-knob"></div>' +
-          '</label></div>' +
-        slider('h3_chaos_level', 'H3 Chaos Level (0-4)', cfg.h3_chaos_level || 0, 0, 4, 1);
+      var slidersEl = document.getElementById('sliders');
+      if (!_controlsBuilt || slidersEl.children.length === 0) {
+        slidersEl.innerHTML =
+          slider('error_rate_multiplier', 'Error Rate Multiplier', cfg.error_rate_multiplier, 0, 5, 0.1) +
+          slider('block_chance', 'Random Block Chance', cfg.block_chance, 0, 1, 0.01) +
+          slider('block_duration_sec', 'Block Duration (sec)', cfg.block_duration_sec, 1, 3600, 1) +
+          slider('header_corrupt_level', 'Header Corruption Level (0-4)', cfg.header_corrupt_level, 0, 4, 1) +
+          slider('protocol_glitch_level', 'Protocol Glitch Level (0-4)', cfg.protocol_glitch_level || 2, 0, 4, 1) +
+          '<div class="toggle-row" style="margin-top:8px">' +
+            '<div class="toggle-name has-tip">Protocol Glitch Enabled' +
+              '<span class="tip-icon">?</span><span class="tip-box">Enable HTTP protocol-level glitches (version violations, encoding conflicts, header corruption)</span>' +
+            '</div>' +
+            '<label class="toggle-sw">' +
+            '<input type="checkbox" data-cfgkey="protocol_glitch_enabled" ' + (cfg.protocol_glitch_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'protocol_glitch_enabled\', this.checked ? 1 : 0)">' +
+            '<div class="toggle-track"></div>' +
+            '<div class="toggle-knob"></div>' +
+            '</label></div>' +
+          slider('tls_chaos_level', 'TLS Chaos Level (0-4)', cfg.tls_chaos_level || 0, 0, 4, 1) +
+          '<div class="toggle-row" style="margin-top:8px">' +
+            '<div class="toggle-name has-tip">TLS Chaos Enabled' +
+              '<span class="tip-icon">?</span><span class="tip-box">Enable TLS chaos (version downgrade, weak ciphers, cert rotation, ALPN lies)</span>' +
+            '</div>' +
+            '<label class="toggle-sw">' +
+            '<input type="checkbox" data-cfgkey="tls_chaos_enabled" ' + (cfg.tls_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'tls_chaos_enabled\', this.checked ? 1 : 0)">' +
+            '<div class="toggle-track"></div>' +
+            '<div class="toggle-knob"></div>' +
+            '</label></div>' +
+          '<div class="toggle-row" style="margin-top:8px">' +
+            '<div class="toggle-name has-tip">HSTS Chaos Enabled' +
+              '<span class="tip-icon">?</span><span class="tip-box">Inject random Strict-Transport-Security headers (max-age variations, conflicting directives)</span>' +
+            '</div>' +
+            '<label class="toggle-sw">' +
+            '<input type="checkbox" data-cfgkey="hsts_chaos_enabled" ' + (cfg.hsts_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'hsts_chaos_enabled\', this.checked ? 1 : 0)">' +
+            '<div class="toggle-track"></div>' +
+            '<div class="toggle-knob"></div>' +
+            '</label></div>' +
+          '<div class="toggle-row" style="margin-top:8px">' +
+            '<div class="toggle-name has-tip">H3/QUIC Chaos Enabled' +
+              '<span class="tip-icon">?</span><span class="tip-box">Inject fake HTTP/3 Alt-Svc headers and run a fake QUIC UDP listener to confuse clients</span>' +
+            '</div>' +
+            '<label class="toggle-sw">' +
+            '<input type="checkbox" data-cfgkey="h3_chaos_enabled" ' + (cfg.h3_chaos_enabled ? 'checked' : '') + ' onchange="sliderCommit(\'h3_chaos_enabled\', this.checked ? 1 : 0)">' +
+            '<div class="toggle-track"></div>' +
+            '<div class="toggle-knob"></div>' +
+            '</label></div>' +
+          slider('h3_chaos_level', 'H3 Chaos Level (0-4)', cfg.h3_chaos_level || 0, 0, 4, 1);
+      } else {
+        // Diff-update: only sync slider values and toggle states
+        _diffSliders(slidersEl, cfg);
+      }
 
       // Labyrinth sliders
       var labEl = document.getElementById('labyrinth-sliders');
-      if (labEl) labEl.innerHTML =
-        slider('max_labyrinth_depth', 'Max Labyrinth Depth', cfg.max_labyrinth_depth, 1, 100, 1) +
-        slider('labyrinth_link_density', 'Labyrinth Links/Page', cfg.labyrinth_link_density, 1, 20, 1) +
-        slider('adaptive_labyrinth_paths', 'Adaptive Labyrinth Paths', cfg.adaptive_labyrinth_paths || 5, 1, 50, 1);
+      if (labEl) {
+        if (!_controlsBuilt || labEl.children.length === 0) {
+          labEl.innerHTML =
+            slider('max_labyrinth_depth', 'Max Labyrinth Depth', cfg.max_labyrinth_depth, 1, 100, 1) +
+            slider('labyrinth_link_density', 'Labyrinth Links/Page', cfg.labyrinth_link_density, 1, 20, 1) +
+            slider('adaptive_labyrinth_paths', 'Adaptive Labyrinth Paths', cfg.adaptive_labyrinth_paths || 5, 1, 50, 1);
+        } else { _diffSliders(labEl, cfg); }
+      }
 
       // Adaptive behavior sliders
       var adaptEl = document.getElementById('adaptive-sliders');
-      if (adaptEl) adaptEl.innerHTML =
-        slider('adaptive_interval_sec', 'Adaptive Re-eval Interval (sec)', cfg.adaptive_interval_sec, 5, 300, 5) +
-        slider('adaptive_aggressive_rps', 'Adaptive Aggressive RPS', cfg.adaptive_aggressive_rps || 10, 1, 100, 1) +
-        slider('delay_min_ms', 'Delay Min (ms)', cfg.delay_min_ms, 0, 10000, 100) +
-        slider('delay_max_ms', 'Delay Max (ms)', cfg.delay_max_ms, 0, 30000, 100);
+      if (adaptEl) {
+        if (!_controlsBuilt || adaptEl.children.length === 0) {
+          adaptEl.innerHTML =
+            slider('adaptive_interval_sec', 'Adaptive Re-eval Interval (sec)', cfg.adaptive_interval_sec, 5, 300, 5) +
+            slider('adaptive_aggressive_rps', 'Adaptive Aggressive RPS', cfg.adaptive_aggressive_rps || 10, 1, 100, 1) +
+            slider('delay_min_ms', 'Delay Min (ms)', cfg.delay_min_ms, 0, 10000, 100) +
+            slider('delay_max_ms', 'Delay Max (ms)', cfg.delay_max_ms, 0, 30000, 100);
+        } else { _diffSliders(adaptEl, cfg); }
+      }
 
       // Traps & detection sliders
       var trapsEl = document.getElementById('traps-sliders');
-      if (trapsEl) trapsEl.innerHTML =
-        slider('captcha_trigger_thresh', 'CAPTCHA Trigger Threshold', cfg.captcha_trigger_thresh, 0, 500, 1) +
-        slider('cookie_trap_frequency', 'Cookie Trap Frequency', cfg.cookie_trap_frequency || 3, 0, 20, 1) +
-        slider('js_trap_difficulty', 'JS Trap Difficulty', cfg.js_trap_difficulty || 2, 0, 5, 1) +
-        slider('bot_score_threshold', 'Bot Score Threshold', cfg.bot_score_threshold, 0, 100, 1) +
-        slider('content_cache_ttl_sec', 'Content Cache TTL (sec)', cfg.content_cache_ttl_sec || 60, 0, 3600, 10) +
-        slider('budget_trap_threshold', 'Budget Trap Threshold', cfg.budget_trap_threshold || 10, 1, 10000, 1);
+      if (trapsEl) {
+        if (!_controlsBuilt || trapsEl.children.length === 0) {
+          trapsEl.innerHTML =
+            slider('captcha_trigger_thresh', 'CAPTCHA Trigger Threshold', cfg.captcha_trigger_thresh, 0, 500, 1) +
+            slider('cookie_trap_frequency', 'Cookie Trap Frequency', cfg.cookie_trap_frequency || 3, 0, 20, 1) +
+            slider('js_trap_difficulty', 'JS Trap Difficulty', cfg.js_trap_difficulty || 2, 0, 5, 1) +
+            slider('bot_score_threshold', 'Bot Score Threshold', cfg.bot_score_threshold, 0, 100, 1) +
+            slider('content_cache_ttl_sec', 'Content Cache TTL (sec)', cfg.content_cache_ttl_sec || 60, 0, 3600, 10) +
+            slider('budget_trap_threshold', 'Budget Trap Threshold', cfg.budget_trap_threshold || 10, 1, 10000, 1);
+        } else { _diffSliders(trapsEl, cfg); }
+      }
 
       // Dropdowns
       if (cfg.honeypot_response_style) {
@@ -3133,7 +3204,35 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       refreshPageTypeWeights();
       // Spider config
       refreshSpiderConfig();
+      _controlsBuilt = true;
     } catch(e) { console.error('controls:', e); }
+  }
+
+  // Diff-update sliders and inline toggles: only change values that differ
+  function _diffSliders(container, cfg) {
+    container.querySelectorAll('input[type="range"]').forEach(function(inp) {
+      var key = null;
+      var onchange = inp.getAttribute('onchange');
+      if (onchange) { var m = onchange.match(/sliderCommit\('([^']+)'/); if (m) key = m[1]; }
+      if (key && cfg[key] !== undefined) {
+        var sv = parseFloat(cfg[key]);
+        if (Math.abs(parseFloat(inp.value) - sv) > 0.001) {
+          inp.value = sv;
+          var valEl = document.getElementById('sv-' + key);
+          if (valEl) {
+            var step = parseFloat(inp.step);
+            valEl.textContent = step < 1 ? sv.toFixed(1) : Math.round(sv);
+          }
+        }
+      }
+    });
+    container.querySelectorAll('input[type="checkbox"][data-cfgkey]').forEach(function(cb) {
+      var key = cb.getAttribute('data-cfgkey');
+      if (key && cfg[key] !== undefined) {
+        var expected = !!cfg[key];
+        if (cb.checked !== expected) cb.checked = expected;
+      }
+    });
   }
 
   const EW_PRESETS = [
@@ -3144,20 +3243,48 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     {label:'MAX', value:0.5}
   ];
 
+  var _ewBuilt = false;
   async function refreshErrorWeights() {
     try {
       const data = await api('/admin/api/error-weights');
       const weights = data.weights || {};
       const httpEl = document.getElementById('http-error-grid');
-      if (httpEl) httpEl.innerHTML = HTTP_ERROR_TYPES.map(t => {
-        var val = weights[t] !== undefined ? weights[t] : 0;
-        return ewRow(t, val);
-      }).join('');
       const tcpEl = document.getElementById('tcp-error-grid');
-      if (tcpEl) tcpEl.innerHTML = TCP_ERROR_TYPES.map(t => {
-        var val = weights[t] !== undefined ? weights[t] : 0;
-        return ewRow(t, val);
-      }).join('');
+      if (!_ewBuilt || (httpEl && httpEl.children.length === 0)) {
+        if (httpEl) httpEl.innerHTML = HTTP_ERROR_TYPES.map(t => {
+          var val = weights[t] !== undefined ? weights[t] : 0;
+          return ewRow(t, val);
+        }).join('');
+        if (tcpEl) tcpEl.innerHTML = TCP_ERROR_TYPES.map(t => {
+          var val = weights[t] !== undefined ? weights[t] : 0;
+          return ewRow(t, val);
+        }).join('');
+        _ewBuilt = true;
+      } else {
+        // Diff-update: only change active radio state
+        [httpEl, tcpEl].forEach(function(grid) {
+          if (!grid) return;
+          grid.querySelectorAll('.ew-row').forEach(function(row) {
+            var nameSpan = row.querySelector('.ew-name');
+            if (!nameSpan) return;
+            var name = nameSpan.title || nameSpan.textContent.replace(/ /g, '_').trim();
+            var val = weights[name] !== undefined ? weights[name] : 0;
+            var closest = 0, minDist = 999;
+            EW_PRESETS.forEach(function(p, i) {
+              var d = Math.abs(p.value - val);
+              if (d < minDist) { minDist = d; closest = i; }
+            });
+            row.querySelectorAll('.ew-opt').forEach(function(opt, i) {
+              var shouldBeActive = (i === closest);
+              if (opt.classList.contains('active') !== shouldBeActive) {
+                opt.classList.toggle('active', shouldBeActive);
+                var radio = opt.querySelector('input[type="radio"]');
+                if (radio) radio.checked = shouldBeActive;
+              }
+            });
+          });
+        });
+      }
     } catch(e) { console.error('error-weights:', e); }
   }
 
@@ -3197,7 +3324,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({reset: true})
-    }).then(() => { toast('Error weights reset'); refreshErrorWeights(); });
+    }).then(() => { toast('Error weights reset'); _ewBuilt = false; refreshErrorWeights(); });
   };
 
   // Page type weight controls
@@ -3210,15 +3337,39 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     {label:'MAX', value:0.5}
   ];
 
+  var _ptBuilt = false;
   async function refreshPageTypeWeights() {
     try {
       const data = await api('/admin/api/page-type-weights');
       const weights = data.weights || {};
       const el = document.getElementById('page-type-grid');
-      el.innerHTML = PAGE_TYPES.map(function(t) {
-        var val = weights[t] !== undefined ? weights[t] : 0;
-        return ptRow(t, val);
-      }).join('');
+      if (!_ptBuilt || el.children.length === 0) {
+        el.innerHTML = PAGE_TYPES.map(function(t) {
+          var val = weights[t] !== undefined ? weights[t] : 0;
+          return ptRow(t, val);
+        }).join('');
+        _ptBuilt = true;
+      } else {
+        el.querySelectorAll('.ew-row').forEach(function(row) {
+          var nameSpan = row.querySelector('.ew-name');
+          if (!nameSpan) return;
+          var name = nameSpan.title || nameSpan.textContent.trim();
+          var val = weights[name] !== undefined ? weights[name] : 0;
+          var closest = 0, minDist = 999;
+          PT_PRESETS.forEach(function(p, i) {
+            var d = Math.abs(p.value - val);
+            if (d < minDist) { minDist = d; closest = i; }
+          });
+          row.querySelectorAll('.ew-opt').forEach(function(opt, i) {
+            var shouldBeActive = (i === closest);
+            if (opt.classList.contains('active') !== shouldBeActive) {
+              opt.classList.toggle('active', shouldBeActive);
+              var radio = opt.querySelector('input[type="radio"]');
+              if (radio) radio.checked = shouldBeActive;
+            }
+          });
+        });
+      }
     } catch(e) { console.error('page-type-weights:', e); }
   }
 
@@ -3254,7 +3405,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({reset: true})
-    }).then(() => { toast('Page type weights reset'); refreshPageTypeWeights(); });
+    }).then(() => { toast('Page type weights reset'); _ptBuilt = false; refreshPageTypeWeights(); });
   };
 
   window.setConfigKey = function(key, val) {
@@ -3266,15 +3417,34 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   };
 
   // Spider config
+  var _spiderBuilt = false;
   async function refreshSpiderConfig() {
     try {
       const cfg = await api('/admin/api/spider');
-      document.getElementById('spider-sliders').innerHTML =
-        spiderSlider('sitemap_error_rate', 'Sitemap Error Rate', cfg.sitemap_error_rate || 0, 0, 1, 0.01) +
-        spiderSlider('sitemap_gzip_error_rate', 'Sitemap Gzip Error Rate', cfg.sitemap_gzip_error_rate || 0, 0, 1, 0.01) +
-        spiderSlider('favicon_error_rate', 'Favicon Error Rate', cfg.favicon_error_rate || 0, 0, 1, 0.01) +
-        spiderSlider('robots_error_rate', 'Robots.txt Error Rate', cfg.robots_error_rate || 0, 0, 1, 0.01) +
-        spiderSlider('meta_error_rate', 'Meta Files Error Rate', cfg.meta_error_rate || 0, 0, 1, 0.01);
+      var el = document.getElementById('spider-sliders');
+      if (!_spiderBuilt || el.children.length === 0) {
+        el.innerHTML =
+          spiderSlider('sitemap_error_rate', 'Sitemap Error Rate', cfg.sitemap_error_rate || 0, 0, 1, 0.01) +
+          spiderSlider('sitemap_gzip_error_rate', 'Sitemap Gzip Error Rate', cfg.sitemap_gzip_error_rate || 0, 0, 1, 0.01) +
+          spiderSlider('favicon_error_rate', 'Favicon Error Rate', cfg.favicon_error_rate || 0, 0, 1, 0.01) +
+          spiderSlider('robots_error_rate', 'Robots.txt Error Rate', cfg.robots_error_rate || 0, 0, 1, 0.01) +
+          spiderSlider('meta_error_rate', 'Meta Files Error Rate', cfg.meta_error_rate || 0, 0, 1, 0.01);
+        _spiderBuilt = true;
+      } else {
+        // Diff-update spider sliders
+        el.querySelectorAll('input[type="range"]').forEach(function(inp) {
+          var onchange = inp.getAttribute('onchange');
+          if (!onchange) return;
+          var m = onchange.match(/sliderCommitSpider\('([^']+)'/);
+          if (!m) return;
+          var key = m[1], sv = parseFloat(cfg[key] || 0);
+          if (Math.abs(parseFloat(inp.value) - sv) > 0.001) {
+            inp.value = sv;
+            var valEl = document.getElementById('sp-' + key);
+            if (valEl) valEl.textContent = sv.toFixed(2);
+          }
+        });
+      }
     } catch(e) { console.error('spider-config:', e); }
   }
 
@@ -3438,10 +3608,15 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
       var catCounts = p.category_counts || {};
       const sev = p.by_severity || p.severity_counts || {};
-      document.getElementById('vuln-overview-cards').innerHTML =
-        card('Total Vulns', p.total_vulns || 0, 'v-ok') +
-        card('Total Endpoints', p.total_endpoints || 0, 'v-info') +
-        card('Groups Active', Object.values(vc.groups || {}).filter(v => v).length + '/' + Object.keys(vc.groups || {}).length, 'v-ok');
+      var vocEl = document.getElementById('vuln-overview-cards');
+      var vocSig = (p.total_vulns||0) + ',' + (p.total_endpoints||0) + ',' + Object.values(vc.groups || {}).filter(v => v).length + '/' + Object.keys(vc.groups || {}).length;
+      if (vocEl._lastSig !== vocSig) {
+        vocEl._lastSig = vocSig;
+        vocEl.innerHTML =
+          card('Total Vulns', p.total_vulns || 0, 'v-ok') +
+          card('Total Endpoints', p.total_endpoints || 0, 'v-info') +
+          card('Groups Active', Object.values(vc.groups || {}).filter(v => v).length + '/' + Object.keys(vc.groups || {}).length, 'v-ok');
+      }
 
       // Group toggles
       var groups = vc.groups || {};
@@ -3456,22 +3631,39 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         specialized: 'Specialized',
         dashboard: 'Dashboard'
       };
-      document.getElementById('vuln-group-toggles').innerHTML =
-        Object.keys(VULN_GROUPS).map(g => {
-          var on = groups[g] !== false ? 'checked' : '';
-          return '<div class="group-toggle">' +
-            '<div class="toggle-name">' + VULN_GROUPS[g] + '</div>' +
-            '<label class="toggle-sw">' +
-            '<input type="checkbox" ' + on + ' onchange="toggleVulnGroup(\'' + g + '\', this.checked)">' +
-            '<div class="toggle-track"></div>' +
-            '<div class="toggle-knob"></div>' +
-            '</label></div>';
-        }).join('');
+      var vgtEl = document.getElementById('vuln-group-toggles');
+      if (!vgtEl._vgBuilt || vgtEl.children.length === 0) {
+        vgtEl.innerHTML =
+          Object.keys(VULN_GROUPS).map(g => {
+            var on = groups[g] !== false ? 'checked' : '';
+            return '<div class="group-toggle">' +
+              '<div class="toggle-name">' + VULN_GROUPS[g] + '</div>' +
+              '<label class="toggle-sw">' +
+              '<input type="checkbox" data-vgkey="' + g + '" ' + on + ' onchange="toggleVulnGroup(\'' + g + '\', this.checked)">' +
+              '<div class="toggle-track"></div>' +
+              '<div class="toggle-knob"></div>' +
+              '</label></div>';
+          }).join('');
+        vgtEl._vgBuilt = true;
+      } else {
+        vgtEl.querySelectorAll('input[type="checkbox"][data-vgkey]').forEach(function(cb) {
+          var key = cb.getAttribute('data-vgkey');
+          if (key) {
+            var expected = groups[key] !== false;
+            if (cb.checked !== expected) cb.checked = expected;
+          }
+        });
+      }
 
       const sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
-      document.getElementById('vuln-severity-badges').innerHTML = sevOrder.map(function(s) {
-        return '<span class="sev sev-' + s + '" style="margin-right:10px">' + s + ': ' + (sev[s] || 0) + '</span>';
-      }).join('');
+      var vsbEl = document.getElementById('vuln-severity-badges');
+      var vsbSig = sevOrder.map(function(s){ return s + ':' + (sev[s]||0); }).join(',');
+      if (vsbEl._lastSig !== vsbSig) {
+        vsbEl._lastSig = vsbSig;
+        vsbEl.innerHTML = sevOrder.map(function(s) {
+          return '<span class="sev sev-' + s + '" style="margin-right:10px">' + s + ': ' + (sev[s] || 0) + '</span>';
+        }).join('');
+      }
 
       // Populate GlitchTable for vulns
       var catState = vc.categories || {};
@@ -3668,7 +3860,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       if (el('mcp-prompts-count')) el('mcp-prompts-count').textContent = stats.prompts_registered || 0;
     } catch(e) {}
 
-    // MCP settings toggles
+    // MCP settings toggles (build-once, then diff)
     try {
       var cfg = await api('/admin/api/config');
       var togglesRow = document.getElementById('mcp-toggles-row');
@@ -3678,16 +3870,27 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           {key: 'mcp_fingerprint_enabled', label: 'Fingerprinting'},
           {key: 'mcp_trap_prompts_enabled', label: 'Trap Prompts'}
         ];
-        togglesRow.innerHTML = mcpToggles.map(function(t) {
-          var on = cfg[t.key] ? 'checked' : '';
-          return '<div class="group-toggle">' +
-            '<div class="toggle-name">' + t.label + '</div>' +
-            '<label class="toggle-sw">' +
-            '<input type="checkbox" ' + on + ' onchange="sliderCommit(\'' + t.key + '\', this.checked ? 1 : 0)">' +
-            '<div class="toggle-track"></div>' +
-            '<div class="toggle-knob"></div>' +
-            '</label></div>';
-        }).join('');
+        if (!togglesRow._mcpBuilt || togglesRow.children.length === 0) {
+          togglesRow.innerHTML = mcpToggles.map(function(t) {
+            var on = cfg[t.key] ? 'checked' : '';
+            return '<div class="group-toggle">' +
+              '<div class="toggle-name">' + t.label + '</div>' +
+              '<label class="toggle-sw">' +
+              '<input type="checkbox" data-mcpkey="' + t.key + '" ' + on + ' onchange="sliderCommit(\'' + t.key + '\', this.checked ? 1 : 0)">' +
+              '<div class="toggle-track"></div>' +
+              '<div class="toggle-knob"></div>' +
+              '</label></div>';
+          }).join('');
+          togglesRow._mcpBuilt = true;
+        } else {
+          togglesRow.querySelectorAll('input[type="checkbox"][data-mcpkey]').forEach(function(cb) {
+            var key = cb.getAttribute('data-mcpkey');
+            if (key && cfg[key] !== undefined) {
+              var expected = !!cfg[key];
+              if (cb.checked !== expected) cb.checked = expected;
+            }
+          });
+        }
       }
     } catch(e) {}
 
@@ -3713,14 +3916,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       var bd = document.getElementById('mcp-tool-breakdown');
       if (bd) {
         var keys = Object.keys(toolCounts).sort(function(a,b){ return toolCounts[b]-toolCounts[a]; });
-        if (keys.length === 0) {
-          bd.innerHTML = '<span style="color:#555">No tool calls yet</span>';
-        } else {
-          bd.innerHTML = keys.map(function(k) {
-            return '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #222">' +
-              '<span style="color:#ccc">' + esc(k) + '</span>' +
-              '<span style="color:#ff6600;font-weight:bold">' + toolCounts[k] + '</span></div>';
-          }).join('');
+        var newSig = keys.map(function(k){ return k + ':' + toolCounts[k]; }).join(',');
+        if (bd._lastSig !== newSig) {
+          bd._lastSig = newSig;
+          if (keys.length === 0) {
+            bd.innerHTML = '<span style="color:#555">No tool calls yet</span>';
+          } else {
+            bd.innerHTML = keys.map(function(k) {
+              return '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #222">' +
+                '<span style="color:#ccc">' + esc(k) + '</span>' +
+                '<span style="color:#ff6600;font-weight:bold">' + toolCounts[k] + '</span></div>';
+            }).join('');
+          }
         }
       }
     } catch(e) {}
@@ -5181,14 +5388,19 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       }
 
       // Update metric cards with colored mode badge
-      document.getElementById('proxy-metrics').innerHTML =
-        '<div class="card"><div class="label">Current Mode</div><div class="value" style="color:' + modeColor + '">' +
-          '<span style="display:inline-block;background:' + modeColor + '22;border:1px solid ' + modeColor + ';padding:4px 14px;border-radius:20px;font-size:0.75em;letter-spacing:1px">' +
-          (mode || 'transparent').toUpperCase() + '</span></div></div>' +
-        compactCard('Requests Processed', stats.requests_processed || 0, 'v-ok') +
-        compactCard('Responses Processed', stats.responses_processed || 0, 'v-ok') +
-        compactCard('Requests Blocked', stats.requests_blocked || 0, (stats.requests_blocked || 0) > 0 ? 'v-err' : 'v-ok') +
-        compactCard('Responses Modified', stats.responses_modified || 0, 'v-warn');
+      var pmEl = document.getElementById('proxy-metrics');
+      var pmSig = mode + ',' + (stats.requests_processed||0) + ',' + (stats.responses_processed||0) + ',' + (stats.requests_blocked||0) + ',' + (stats.responses_modified||0);
+      if (pmEl._lastSig !== pmSig) {
+        pmEl._lastSig = pmSig;
+        pmEl.innerHTML =
+          '<div class="card"><div class="label">Current Mode</div><div class="value" style="color:' + modeColor + '">' +
+            '<span style="display:inline-block;background:' + modeColor + '22;border:1px solid ' + modeColor + ';padding:4px 14px;border-radius:20px;font-size:0.75em;letter-spacing:1px">' +
+            (mode || 'transparent').toUpperCase() + '</span></div></div>' +
+          compactCard('Requests Processed', stats.requests_processed || 0, 'v-ok') +
+          compactCard('Responses Processed', stats.responses_processed || 0, 'v-ok') +
+          compactCard('Requests Blocked', stats.requests_blocked || 0, (stats.requests_blocked || 0) > 0 ? 'v-err' : 'v-ok') +
+          compactCard('Responses Modified', stats.responses_modified || 0, 'v-warn');
+      }
 
       // Update radio buttons
       var radios = document.querySelectorAll('input[name="proxy-mode"]');
@@ -5223,12 +5435,24 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         if (wafSettingsEl) wafSettingsEl.style.display = 'none';
       }
 
-      // Chaos sliders
-      document.getElementById('proxy-chaos-sliders').innerHTML =
-        slider('proxy_latency_prob', 'Latency Probability', chaosConf.latency_prob || 0, 0, 1, 0.01) +
-        slider('proxy_corrupt_prob', 'Corruption Probability', chaosConf.corrupt_prob || 0, 0, 1, 0.01) +
-        slider('proxy_drop_prob', 'Drop Probability', chaosConf.drop_prob || 0, 0, 1, 0.01) +
-        slider('proxy_reset_prob', 'Reset Probability', chaosConf.reset_prob || 0, 0, 1, 0.01);
+      // Chaos sliders (build-once, then diff)
+      var pcsEl = document.getElementById('proxy-chaos-sliders');
+      if (!pcsEl._pcsBuilt || pcsEl.children.length === 0) {
+        pcsEl.innerHTML =
+          slider('proxy_latency_prob', 'Latency Probability', chaosConf.latency_prob || 0, 0, 1, 0.01) +
+          slider('proxy_corrupt_prob', 'Corruption Probability', chaosConf.corrupt_prob || 0, 0, 1, 0.01) +
+          slider('proxy_drop_prob', 'Drop Probability', chaosConf.drop_prob || 0, 0, 1, 0.01) +
+          slider('proxy_reset_prob', 'Reset Probability', chaosConf.reset_prob || 0, 0, 1, 0.01);
+        pcsEl._pcsBuilt = true;
+      } else {
+        var pcsConfig = {
+          proxy_latency_prob: chaosConf.latency_prob || 0,
+          proxy_corrupt_prob: chaosConf.corrupt_prob || 0,
+          proxy_drop_prob: chaosConf.drop_prob || 0,
+          proxy_reset_prob: chaosConf.reset_prob || 0
+        };
+        _diffSliders(pcsEl, pcsConfig);
+      }
 
       // Connection info
       var connEl = document.getElementById('proxy-active-conns');
