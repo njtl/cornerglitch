@@ -1104,6 +1104,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
     <div class="srv-section-body">
       <p style="color:#666;font-size:0.8em;margin-bottom:8px">Fake MCP server with honeypot tools, poisoned resources, and trap prompts for testing AI agent security.</p>
+      <div style="margin-bottom:10px;padding:8px 12px;background:#0a1a1a;border:1px solid #1a3a3a;border-radius:6px;font-size:0.8em">
+        <span style="color:#888">Endpoint:</span>
+        <code id="mcp-endpoint-url" style="color:#00ffcc;margin-left:6px;user-select:all">http://localhost:8765/mcp</code>
+        <span style="color:#333;margin:0 8px">|</span>
+        <span style="color:#888">Discovery:</span>
+        <code id="mcp-discovery-url" style="color:#4488ff;margin-left:6px;user-select:all">http://localhost:8765/.well-known/mcp.json</code>
+      </div>
       <div class="grid" id="mcp-stats" style="margin-bottom:14px">
         <div class="card"><div class="label">Sessions</div><div class="value" id="mcp-sessions-count">0</div></div>
         <div class="card"><div class="label">Tool Calls</div><div class="value" id="mcp-tool-calls">0</div></div>
@@ -3849,6 +3856,14 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   // ------ MCP Honeypot ------
   async function refreshMCP() {
+    // Set MCP endpoint URLs dynamically on first refresh
+    var mcpUrlEl = document.getElementById('mcp-endpoint-url');
+    if (mcpUrlEl && !mcpUrlEl._urlSet) {
+      var base = 'http://' + window.location.hostname + ':8765';
+      mcpUrlEl.textContent = base + '/mcp';
+      document.getElementById('mcp-discovery-url').textContent = base + '/.well-known/mcp.json';
+      mcpUrlEl._urlSet = true;
+    }
     try {
       var stats = await api('/admin/api/mcp/stats');
       var el = function(id) { return document.getElementById(id); };

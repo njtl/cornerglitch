@@ -86,6 +86,9 @@ var sitemapPaths = []string{
 	"/media/stream/vod/manifest.mpd",
 	"/uploads/documents/report.png",
 	"/content/media/gallery/photo-001.jpg",
+	// MCP (Model Context Protocol) endpoints
+	"/mcp",
+	"/.well-known/mcp.json",
 }
 
 // serveSitemap generates and serves /sitemap.xml with URL entries.
