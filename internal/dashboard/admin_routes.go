@@ -2709,11 +2709,24 @@ func applyServerNightmare() {
 	globalConfig.Set("delay_max_ms", 10000)
 	globalConfig.Set("max_labyrinth_depth", 100)
 	globalConfig.Set("labyrinth_link_density", 20)
+	globalConfig.Set("adaptive_labyrinth_paths", 50)
 	globalConfig.Set("captcha_trigger_thresh", 10)
 	globalConfig.Set("cookie_trap_frequency", 15)
 	globalConfig.Set("js_trap_difficulty", 5)
 	globalConfig.Set("bot_score_threshold", 20)
 	globalConfig.Set("adaptive_aggressive_rps", 2)
+	globalConfig.Set("adaptive_interval_sec", 5)
+	globalConfig.Set("budget_trap_threshold", 5)
+	globalConfig.Set("content_cache_ttl_sec", 0)
+	// Protocol-level chaos
+	globalConfig.Set("protocol_glitch_enabled", 1)
+	globalConfig.Set("protocol_glitch_level", 4)
+	// TLS chaos
+	globalConfig.Set("tls_chaos_enabled", 1)
+	globalConfig.Set("tls_chaos_level", 4)
+	// HSTS chaos
+	globalConfig.Set("hsts_chaos_enabled", 1)
+	// HTTP/3 QUIC chaos
 	globalConfig.Set("h3_chaos_enabled", 1)
 	globalConfig.Set("h3_chaos_level", 4)
 }

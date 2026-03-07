@@ -871,7 +871,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <span style="color:#888">Error Rate: <span id="srv-status-errrate" style="color:#ffaa00">--</span></span>
     <span style="color:#888">Clients: <span id="srv-status-clients" style="color:#00ccff">--</span></span>
     <span style="color:#888">Features: <span id="srv-status-features" style="color:#00ff88">--</span></span>
-    <button class="nightmare-btn" onclick="toggleNightmareMode('server')" id="srv-nightmare-btn" style="padding:4px 12px;font-size:0.85em">Nightmare: OFF</button>
+    <button class="nightmare-btn" onclick="toggleNightmareMode('server')" id="srv-nightmare-btn" style="padding:4px 12px;font-size:0.85em" title="Server nightmare: max error rates, all features enabled, protocol chaos level 4, TLS/HSTS/H3 chaos, extreme delays, low bot thresholds, fast budget traps">Nightmare: OFF</button>
   </div>
 
   <!-- ====== Traffic Recording ====== -->
@@ -881,6 +881,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <span class="srv-arrow">&#9654;</span>
     </div>
     <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Record server traffic to JSONL or PCAP files for later replay or analysis. Set limits to auto-stop, or leave at 0 for unlimited.</p>
       <div style="display:grid;grid-template-columns:auto auto auto auto 1fr;gap:12px;align-items:end">
         <div>
           <div class="label" style="margin-bottom:4px">Format</div>
@@ -1188,6 +1189,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <span class="srv-arrow">&#9654;</span>
     </div>
     <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Emulated vulnerability endpoints across all OWASP Top 10 lists. Toggle groups on/off to control which vulnerability categories are active.</p>
       <div class="grid" id="vuln-overview-cards" style="margin-bottom:14px">
         <div class="card"><div class="label">Loading...</div><div class="value v-info">--</div></div>
       </div>
@@ -1208,6 +1210,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       <span class="srv-arrow">&#9654;</span>
     </div>
     <div class="srv-section-body">
+      <p style="color:#666;font-size:0.8em;margin-bottom:8px">Per-client session tracking with fingerprinting, adaptive behavior modes, and manual overrides.</p>
       <h2 style="font-size:0.9em;margin-bottom:8px">// Active Client Sessions</h2>
     <p style="color:#666;font-size:0.8em;margin-bottom:10px">Click a client to view details. Sort by any column, search by client ID.</p>
     <div id="srv-sessions-gt"></div>
@@ -1246,7 +1249,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <div style="display:flex;align-items:center;justify-content:space-between;background:#111;border:1px solid #00ccff33;border-radius:6px;padding:10px 16px;margin-bottom:14px;font-size:0.82em">
     <span style="color:#00ccff;font-weight:bold">SCANNER STATUS: <span id="scan-status-text">IDLE</span></span>
     <span style="color:#888" id="scan-status-detail">No active scans</span>
-    <button class="nightmare-btn" onclick="toggleNightmareMode('scanner')" id="scan-nightmare-btn" style="padding:4px 12px;font-size:0.85em">Nightmare: OFF</button>
+    <button class="nightmare-btn" onclick="toggleNightmareMode('scanner')" id="scan-nightmare-btn" style="padding:4px 12px;font-size:0.85em" title="Scanner nightmare: auto-selects nightmare profile with unlimited rate, all attack modules, maximum evasion, and extreme concurrency">Nightmare: OFF</button>
   </div>
 
   <!-- Sub-tab navigation -->
@@ -1397,6 +1400,18 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
           <div class="profile-name" style="color:#ff4444">Nightmare</div>
           <div class="profile-desc" style="color:#ff8866">Unlimited rate, full evasion, maximum chaos. <strong style="color:#ff4444">Will generate extreme load.</strong></div>
           <div class="profile-stats" style="color:#ff6644">Workers: 100 | Rate: unlimited | Evasion: nightmare</div>
+        </div>
+        <div class="profile-card" onclick="selectBuiltinProfile(this,'destroyer')">
+          <input type="radio" name="builtin-profile" value="destroyer" style="display:none">
+          <div class="profile-name" style="color:#ff2200">Destroyer</div>
+          <div class="profile-desc" style="color:#ff6644">Raw TCP attacks, connection exhaustion, malformed requests. Targets server stability, not vulnerabilities.</div>
+          <div class="profile-stats" style="color:#ff4422">Workers: 200 | Rate: unlimited | Crawl: none | TCP attacks</div>
+        </div>
+        <div class="profile-card" onclick="selectBuiltinProfile(this,'waf-buster')">
+          <input type="radio" name="builtin-profile" value="waf-buster" style="display:none">
+          <div class="profile-name" style="color:#ffaa00">WAF Buster</div>
+          <div class="profile-desc">WAF bypass specialist. Encoding tricks, request smuggling, parser confusion, CVE payloads, and resource exhaustion.</div>
+          <div class="profile-stats" style="color:#ff8800">Workers: 50 | Rate: 100 req/s | Evasion: nightmare | No crawl</div>
         </div>
       </div>
     </div>
@@ -1628,7 +1643,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     <span style="color:#ffaa00;font-weight:bold">PROXY STATUS: <span id="proxy-status-text">TRANSPARENT</span></span>
     <span style="color:#888" id="proxy-status-detail">--</span>
     <span id="proxy-runtime-badge" style="padding:3px 10px;border-radius:12px;font-size:0.78em;background:#33000033;border:1px solid #333;color:#666">STOPPED</span>
-    <button class="nightmare-btn" onclick="toggleNightmareMode('proxy')" id="proxy-nightmare-btn" style="padding:4px 12px;font-size:0.85em">Nightmare: OFF</button>
+    <button class="nightmare-btn" onclick="toggleNightmareMode('proxy')" id="proxy-nightmare-btn" style="padding:4px 12px;font-size:0.85em" title="Proxy nightmare: WAF + chaos + client killer all active simultaneously, maximum latency/corruption/drop/reset probabilities on every proxied response">Nightmare: OFF</button>
   </div>
 
   <!-- Runtime Controls -->
@@ -1748,6 +1763,13 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       </label>
       <label class="toggle-row" style="cursor:pointer;">
         <div>
+          <div class="toggle-name">KILLER</div>
+          <div style="color:#555;font-size:0.72em;margin-top:2px;">Weaponize every response to crash clients</div>
+        </div>
+        <input type="radio" name="proxy-mode" value="killer" onchange="setProxyMode(this.value)" style="accent-color:#00ff88;">
+      </label>
+      <label class="toggle-row" style="cursor:pointer;">
+        <div>
           <div class="toggle-name">MIRROR SERVER</div>
           <div style="color:#555;font-size:0.72em;margin-top:2px;">Copy server behavior settings</div>
         </div>
@@ -1771,6 +1793,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <!-- WAF Settings -->
   <div class="section">
     <h2>// WAF Settings</h2>
+    <p style="color:#555;font-size:0.72em;margin-bottom:8px">Simulated WAF with SQL injection, XSS, path traversal, and command injection signatures. Configure block action and rate limiting.</p>
     <div id="proxy-waf-status">
       <div style="color:#555">WAF not enabled. Select WAF, Gateway, or Nightmare mode to activate.</div>
     </div>
@@ -5433,6 +5456,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     chaos: 'Chaos engineering mode. Randomly injects latency, corrupts responses, drops connections, and resets sockets based on configured probabilities. Useful for resilience testing.',
     gateway: 'API gateway mode. Combines WAF filtering with rate limiting. Requests exceeding the rate limit are throttled or rejected.',
     nightmare: 'Maximum chaos mode. Activates WAF, chaos injection, and all glitch behaviors simultaneously. Every request is subjected to the full gauntlet of unreliability.',
+    killer: 'Client killer mode. Every response is weaponized — H3 Alt-Svc confusion, header corruption, connection manipulation, and extreme chaos are applied to every proxied response. Designed to crash, hang, or confuse HTTP clients.',
     mirror: 'Mirror server mode. The proxy copies the server\'s behavior settings (error weights, page types, delays, corruption level) and applies them to proxied responses. Use "Refresh from Server" to re-snapshot.'
   };
 
@@ -5444,7 +5468,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       const mode = data.mode || 'transparent';
 
       // Mode badge color
-      var modeColors = {transparent:'#00ff88',waf:'#ffaa00',chaos:'#ff4444',gateway:'#4488ff',nightmare:'#ff44ff',mirror:'#44ddff'};
+      var modeColors = {transparent:'#00ff88',waf:'#ffaa00',chaos:'#ff4444',gateway:'#4488ff',nightmare:'#ff44ff',killer:'#ff2200',mirror:'#44ddff'};
       var modeColor = modeColors[mode] || '#888';
 
       // Show/hide mirror settings section
