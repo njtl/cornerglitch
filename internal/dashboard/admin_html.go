@@ -680,7 +680,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 </div>
 
 <h1>// GLITCH ADMIN PANEL</h1>
-<div class="subtitle">Control center for the glitch web server &middot; <span id="header-uptime" style="color:#00ccff">uptime: --</span> &middot; <label style="font-size:0.9em;color:#555">Refresh: <select id="refresh-rate" style="background:#111;color:#888;border:1px solid #333;padding:2px 6px;border-radius:3px;font-family:inherit;font-size:0.9em" onchange="setRefreshRate(this.value)"><option value="1000">1s</option><option value="3000" selected>3s</option><option value="5000">5s</option><option value="10000">10s</option><option value="30000">30s</option><option value="0">Off</option></select></label></div>
+<div class="subtitle">Control center for the glitch web server &middot; <span id="header-uptime" style="color:#00ccff">uptime: --</span> &middot; <span id="last-refreshed" style="color:#444">updated: --</span> &middot; <label style="font-size:0.9em;color:#555">Refresh: <select id="refresh-rate" style="background:#111;color:#888;border:1px solid #333;padding:2px 6px;border-radius:3px;font-family:inherit;font-size:0.9em" onchange="setRefreshRate(this.value)"><option value="1000">1s</option><option value="3000" selected>3s</option><option value="5000">5s</option><option value="10000">10s</option><option value="30000">30s</option><option value="0">Off</option></select></label></div>
 
 <div class="tabs">
   <button class="tab active" onclick="showTab('dashboard')" data-mode="">Dashboard</button>
@@ -6082,6 +6082,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     }
     else if (id === 'panel-proxy') await refreshProxy();
     else if (id === 'panel-settings') await refreshSettings();
+    var lr = document.getElementById('last-refreshed');
+    if (lr) { var now = new Date(); lr.textContent = 'updated: ' + ('0'+now.getHours()).slice(-2)+':'+('0'+now.getMinutes()).slice(-2)+':'+('0'+now.getSeconds()).slice(-2); }
   }
 
   // Initial load — restore tab from URL hash
