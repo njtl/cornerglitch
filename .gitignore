@@ -38,3 +38,4 @@ captures/
 
 # Deployment test folders
 deploy-test-*/
+.claude/worktrees/
