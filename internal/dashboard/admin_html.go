@@ -634,6 +634,39 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   .audit-pager button { background: #222; color: #aaa; border: 1px solid #333; padding: 4px 14px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.85em; }
   .audit-pager button:hover:not(:disabled) { background: #333; color: #ccc; }
   .audit-pager button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* GlitchTable component */
+  .glitch-table-wrap { position: relative; }
+  .glitch-table-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .glitch-table-toolbar input[type="text"] { background: #111; border: 1px solid #333; color: #ccc; padding: 4px 10px; border-radius: 4px; font-family: inherit; font-size: 0.8em; min-width: 180px; }
+  .glitch-table-toolbar input[type="text"]:focus { border-color: #00ff8866; outline: none; }
+  .glitch-table-toolbar button { background: #222; color: #aaa; border: 1px solid #333; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.78em; }
+  .glitch-table-toolbar button:hover { background: #333; color: #ccc; }
+  .glitch-table-toolbar button.active { border-color: #00ff8866; color: #00ff88; }
+  .glitch-table-container { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+  .glitch-table { width: 100%%; border-collapse: collapse; }
+  .glitch-table thead { position: sticky; top: 0; z-index: 2; }
+  .glitch-table th { padding: 7px 10px; text-align: left; border-bottom: 1px solid #1a1a1a; font-size: 0.75em; color: #00ccaa; background: #0d0d0d; text-transform: uppercase; letter-spacing: 0.5px; font-weight: normal; white-space: nowrap; user-select: none; }
+  .glitch-table th.gt-sortable { cursor: pointer; }
+  .glitch-table th.gt-sortable:hover { color: #00ffcc; }
+  .glitch-table th .gt-sort-arrow { margin-left: 4px; font-size: 0.9em; opacity: 0.4; }
+  .glitch-table th .gt-sort-arrow.asc, .glitch-table th .gt-sort-arrow.desc { opacity: 1; color: #00ff88; }
+  .glitch-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #111; font-size: 0.78em; color: #ccc; }
+  .glitch-table tbody tr:nth-child(even) { background: #0e0e0e; }
+  .glitch-table tbody tr:nth-child(odd) { background: #0a0a0a; }
+  .glitch-table tbody tr:hover { background: #1a1a1a; }
+  .glitch-table tbody tr.gt-clickable { cursor: pointer; }
+  .glitch-table .gt-filter-row th { padding: 4px 4px; background: #0a0a0a; }
+  .glitch-table .gt-filter-row input { width: 100%%; background: #111; border: 1px solid #222; color: #ccc; padding: 3px 6px; border-radius: 3px; font-family: inherit; font-size: 0.85em; }
+  .glitch-table .gt-filter-row input:focus { border-color: #00ff8866; outline: none; }
+  .glitch-table-footer { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 0.78em; color: #666; flex-wrap: wrap; gap: 8px; }
+  .glitch-table-footer select { background: #111; border: 1px solid #333; color: #ccc; padding: 2px 6px; border-radius: 3px; font-family: inherit; font-size: 1em; }
+  .glitch-table-footer button { background: #222; color: #aaa; border: 1px solid #333; padding: 3px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 1em; }
+  .glitch-table-footer button:hover:not(:disabled) { background: #333; color: #ccc; }
+  .glitch-table-footer button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .glitch-table .gt-empty { text-align: center; padding: 30px 10px; color: #555; font-size: 0.85em; }
+  @keyframes gt-flash { 0%% { background: #00ff8833; } 100%% { background: transparent; } }
+  .glitch-table tbody tr.gt-updated { animation: gt-flash 1.2s ease-out; }
 </style>
 </head>
 <body>
@@ -644,7 +677,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 </div>
 
 <h1>// GLITCH ADMIN PANEL</h1>
-<div class="subtitle">Control center for the glitch web server &middot; <span id="header-uptime" style="color:#00ccff">uptime: --</span></div>
+<div class="subtitle">Control center for the glitch web server &middot; <span id="header-uptime" style="color:#00ccff">uptime: --</span> &middot; <label style="font-size:0.9em;color:#555">Refresh: <select id="refresh-rate" style="background:#111;color:#888;border:1px solid #333;padding:2px 6px;border-radius:3px;font-family:inherit;font-size:0.9em" onchange="setRefreshRate(this.value)"><option value="1000">1s</option><option value="3000" selected>3s</option><option value="5000">5s</option><option value="10000">10s</option><option value="30000">30s</option><option value="0">Off</option></select></label></div>
 
 <div class="tabs">
   <button class="tab active" onclick="showTab('dashboard')" data-mode="">Dashboard</button>
@@ -723,18 +756,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <!-- Calculated Stats -->
   <div class="grid" id="dash-calc-stats"></div>
 
-  <!-- Connected Clients (clickable) -->
+  <!-- Connected Clients (clickable, GlitchTable) -->
   <div class="section">
     <h2>// Connected Clients</h2>
-    <p style="color:#555;font-size:0.72em;margin-bottom:8px">Click any client to view details and override adaptive behavior mode.</p>
-    <div class="tbl-scroll" style="max-height:300px">
-      <table>
-        <thead><tr>
-          <th>Client</th><th>Requests</th><th>Req/s</th><th>Errors</th><th>Mode</th><th>Last Seen</th>
-        </tr></thead>
-        <tbody id="dash-clients-body"></tbody>
-      </table>
-    </div>
+    <p style="color:#555;font-size:0.72em;margin-bottom:8px">Click any client to view details and override adaptive behavior mode. Sort by any column, search by client ID.</p>
+    <div id="dash-clients-gt"></div>
   </div>
 
   <!-- Client Detail Panel (shared - works from dashboard and server) -->
@@ -776,18 +802,11 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- Request Log -->
+  <!-- Request Log (GlitchTable) -->
   <div class="section">
     <h2>// Request Log</h2>
-    <p style="color:#555;font-size:0.72em;margin-bottom:6px">Live feed of recent requests. Use the filter to narrow by status code, client, path, type, or user agent.</p>
-    <input type="text" class="search-box" id="dash-log-filter" placeholder="Filter by status, client, path, type..." oninput="filterDashLog()">
-    <div class="tbl-scroll" style="max-height: 500px;">
-      <table>
-        <thead><tr><th>Time</th><th>Client</th><th>Method</th><th>Path</th><th>Status</th><th>Latency</th><th>Type</th><th>Mode</th><th>User Agent</th></tr></thead>
-        <tbody id="dash-log-body"></tbody>
-      </table>
-    </div>
-    <button id="dash-log-load-more" class="cfg-btn" onclick="dashLogLoadMore()" style="display:none;margin-top:8px;width:100%%">Load More</button>
+    <p style="color:#555;font-size:0.72em;margin-bottom:6px">Live feed of recent requests. Sort by any column. Search and filter built-in.</p>
+    <div id="dash-log-gt"></div>
   </div>
 
   <!-- Quick Actions -->
@@ -1146,13 +1165,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       </div>
       <div class="group-toggles" id="vuln-group-toggles" style="margin-bottom:14px"></div>
       <div id="vuln-severity-badges" style="margin-bottom:14px"></div>
-      <input type="text" class="search-box" id="vuln-filter" placeholder="Filter by name, severity, CWE, category..." oninput="filterVulns()">
-      <div class="tbl-scroll" style="max-height: 500px;">
-        <table>
-          <thead><tr><th>Name</th><th>Severity</th><th>CWE</th><th>Category</th><th>Endpoints</th><th>Status</th></tr></thead>
-          <tbody id="vuln-body"></tbody>
-        </table>
-      </div>
+      <div id="vuln-gt"></div>
     </div>
   </div>
 
@@ -1164,24 +1177,8 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     </div>
     <div class="srv-section-body">
       <h2 style="font-size:0.9em;margin-bottom:8px">// Active Client Sessions</h2>
-    <p style="color:#666;font-size:0.8em;margin-bottom:10px">Click a client ID to view details and set behavior overrides.</p>
-    <div class="tbl-scroll">
-      <table>
-        <thead><tr>
-          <th>Client ID</th>
-          <th>Requests</th>
-          <th>Req/s</th>
-          <th>Errors</th>
-          <th>Paths</th>
-          <th>Lab Depth</th>
-          <th>Mode</th>
-          <th>Last Seen</th>
-          <th>Actions</th>
-        </tr></thead>
-        <tbody id="sess-body"></tbody>
-      </table>
-    </div>
-    <button id="sess-load-more" class="cfg-btn" onclick="sessLoadMore()" style="display:none;margin-top:8px;width:100%%">Load More Clients</button>
+    <p style="color:#666;font-size:0.8em;margin-bottom:10px">Click a client to view details. Sort by any column, search by client ID.</p>
+    <div id="srv-sessions-gt"></div>
   </div>
   <div class="section" id="client-detail" style="display:none">
     <h2>// Client Detail: <span id="detail-cid" style="color:#00ffcc"></span></h2>
@@ -2052,6 +2049,315 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     return Math.floor(s/3600) + 'h ago';
   }
 
+  // ------ GlitchTable Component ------
+  // Reusable sortable/filterable/paginated table with stable diff-based updates.
+  // Usage: const t = new GlitchTable('container-id', { columns, pageSize, searchable, exportable, emptyMessage, rowKey, onRowClick });
+  //        t.setData(rows);
+  class GlitchTable {
+    constructor(containerId, config) {
+      this.containerId = containerId;
+      this.columns = config.columns || [];
+      this.pageSize = config.pageSize || 25;
+      this.searchable = config.searchable !== false;
+      this.exportable = config.exportable || false;
+      this.emptyMessage = config.emptyMessage || 'No data';
+      this.rowKey = config.rowKey || null;
+      this.onRowClick = config.onRowClick || null;
+      this.allData = []; this.filteredData = [];
+      this.sortCol = null; this.sortDir = null;
+      this.page = 0; this.searchTerm = '';
+      this.colFilters = {}; this.filtersVisible = false;
+      this.prevRowMap = new Map();
+      this._debounceTimer = null; this._built = false; this._refs = {};
+      this._build();
+    }
+    _el(tag, cls) { var e = document.createElement(tag); if (cls) e.className = cls; return e; }
+    _build() {
+      var root = document.getElementById(this.containerId);
+      if (!root) return;
+      root.innerHTML = '';
+      var wrap = this._el('div', 'glitch-table-wrap');
+      var toolbar = this._el('div', 'glitch-table-toolbar');
+      var self = this;
+      if (this.searchable) {
+        var si = this._el('input'); si.type = 'text'; si.placeholder = 'Search...';
+        si.addEventListener('input', this._onSearch.bind(this));
+        toolbar.appendChild(si); this._refs.searchInput = si;
+      }
+      if (this.columns.some(function(c) { return c.filterable; })) {
+        var fb = this._el('button'); fb.textContent = 'Filters';
+        fb.addEventListener('click', this._toggleFilters.bind(this));
+        toolbar.appendChild(fb); this._refs.filterBtn = fb;
+      }
+      if (this.exportable) {
+        var eb = this._el('button'); eb.textContent = 'CSV';
+        eb.addEventListener('click', this._exportCSV.bind(this));
+        toolbar.appendChild(eb);
+      }
+      wrap.appendChild(toolbar);
+      var container = this._el('div', 'glitch-table-container');
+      var table = this._el('table', 'glitch-table');
+      var thead = this._el('thead');
+      var headerRow = this._el('tr');
+      this.columns.forEach(function(col) {
+        var th = self._el('th');
+        if (col.width) th.style.width = col.width;
+        th.textContent = col.label || col.key;
+        if (col.sortable) {
+          th.className = 'gt-sortable';
+          var arrow = self._el('span', 'gt-sort-arrow'); arrow.textContent = '\u2195';
+          th.appendChild(arrow);
+          th.addEventListener('click', function() { self._onSort(col.key); });
+        }
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      var filterRow = this._el('tr', 'gt-filter-row');
+      filterRow.style.display = 'none';
+      this.columns.forEach(function(col) {
+        var th = self._el('th');
+        if (col.filterable) {
+          var inp = self._el('input'); inp.type = 'text';
+          inp.placeholder = col.label || col.key; inp.dataset.key = col.key;
+          inp.addEventListener('input', function() { self._onFilter(col.key, inp.value); });
+          th.appendChild(inp);
+        }
+        filterRow.appendChild(th);
+      });
+      thead.appendChild(filterRow);
+      this._refs.filterRow = filterRow;
+      table.appendChild(thead);
+      var tbody = this._el('tbody');
+      table.appendChild(tbody);
+      this._refs.tbody = tbody; this._refs.thead = thead;
+      container.appendChild(table);
+      wrap.appendChild(container); this._refs.container = container;
+      var footer = this._el('div', 'glitch-table-footer');
+      var info = this._el('span'); this._refs.pageInfo = info; footer.appendChild(info);
+      var pc = this._el('span'); pc.style.cssText = 'display:flex;align-items:center;gap:6px';
+      var prevBtn = this._el('button'); prevBtn.textContent = '\u25C0 Prev';
+      prevBtn.addEventListener('click', function() { self._changePage(-1); });
+      this._refs.prevBtn = prevBtn;
+      var nextBtn = this._el('button'); nextBtn.textContent = 'Next \u25B6';
+      nextBtn.addEventListener('click', function() { self._changePage(1); });
+      this._refs.nextBtn = nextBtn;
+      var sel = this._el('select');
+      [10, 25, 50, 100].forEach(function(n) {
+        var o = self._el('option'); o.value = n; o.textContent = n + ' rows';
+        if (n === self.pageSize) o.selected = true; sel.appendChild(o);
+      });
+      sel.addEventListener('change', function() { self.pageSize = parseInt(sel.value, 10); self.page = 0; self._render(); });
+      pc.appendChild(prevBtn); pc.appendChild(sel); pc.appendChild(nextBtn);
+      footer.appendChild(pc); wrap.appendChild(footer);
+      root.appendChild(wrap); this._built = true;
+    }
+    setData(rows) {
+      this.allData = rows || [];
+      this._applyFiltersAndSort();
+      this._render();
+    }
+    _applyFiltersAndSort() {
+      var data = this.allData.slice(), self = this;
+      if (this.searchTerm) {
+        var term = this.searchTerm.toLowerCase();
+        data = data.filter(function(row) {
+          return self.columns.some(function(col) {
+            var v = row[col.key]; return v != null && String(v).toLowerCase().indexOf(term) !== -1;
+          });
+        });
+      }
+      Object.keys(this.colFilters).forEach(function(key) {
+        var ft = self.colFilters[key]; if (!ft) return;
+        var lc = ft.toLowerCase();
+        data = data.filter(function(row) {
+          var v = row[key]; return v != null && String(v).toLowerCase().indexOf(lc) !== -1;
+        });
+      });
+      if (this.sortCol && this.sortDir) {
+        var dir = this.sortDir === 'asc' ? 1 : -1, key = this.sortCol;
+        data.sort(function(a, b) {
+          var va = a[key], vb = b[key];
+          if (va == null && vb == null) return 0;
+          if (va == null) return dir; if (vb == null) return -dir;
+          if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+          return String(va).localeCompare(String(vb)) * dir;
+        });
+      }
+      this.filteredData = data;
+      var maxPage = Math.max(0, Math.ceil(data.length / this.pageSize) - 1);
+      if (this.page > maxPage) this.page = maxPage;
+    }
+    _render() {
+      var tbody = this._refs.tbody; if (!tbody) return;
+      var total = this.filteredData.length;
+      var start = this.page * this.pageSize;
+      var end = Math.min(start + this.pageSize, total);
+      var pageRows = this.filteredData.slice(start, end);
+      if (total === 0) this._renderEmpty(tbody);
+      else this._renderRows(tbody, pageRows);
+      this._updateFooter(start, end, total);
+      this._updateSortArrows();
+    }
+    _renderEmpty(tbody) {
+      while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+      var tr = this._el('tr'), td = this._el('td', 'gt-empty');
+      td.colSpan = this.columns.length; td.textContent = this.emptyMessage;
+      tr.appendChild(td); tbody.appendChild(tr);
+      this.prevRowMap = new Map();
+    }
+    _renderRows(tbody, pageRows) {
+      var self = this, newMap = new Map(), usedEls = new Set(), existingByKey = new Map();
+      if (this.rowKey) {
+        tbody.querySelectorAll('tr[data-rowkey]').forEach(function(tr) { existingByKey.set(tr.dataset.rowkey, tr); });
+      }
+      var frag = document.createDocumentFragment();
+      pageRows.forEach(function(row, idx) {
+        var rk = self.rowKey ? String(row[self.rowKey]) : String(idx);
+        var prev = self.prevRowMap.get(rk), existTr = existingByKey.get(rk);
+        var cells = self.columns.map(function(col) { return self._fmtCell(row, col); });
+        newMap.set(rk, cells);
+        if (existTr && prev) {
+          var changed = false;
+          cells.forEach(function(val, ci) {
+            if (prev[ci] !== val) { changed = true; var td = existTr.children[ci]; if (td) td.textContent = val; }
+          });
+          if (changed) { existTr.classList.remove('gt-updated'); void existTr.offsetWidth; existTr.classList.add('gt-updated'); }
+          usedEls.add(existTr); frag.appendChild(existTr);
+        } else {
+          var tr = self._mkRow(row, rk, cells);
+          if (prev === undefined && self.prevRowMap.size > 0) tr.classList.add('gt-updated');
+          usedEls.add(tr); frag.appendChild(tr);
+        }
+      });
+      Array.from(tbody.children).forEach(function(ch) { if (!usedEls.has(ch)) tbody.removeChild(ch); });
+      tbody.appendChild(frag);
+      this.prevRowMap = newMap;
+    }
+    _mkRow(row, rk, cells) {
+      var self = this, tr = this._el('tr');
+      if (this.rowKey) tr.dataset.rowkey = rk;
+      if (this.onRowClick) { tr.className = 'gt-clickable'; tr.addEventListener('click', function() { self.onRowClick(row); }); }
+      cells.forEach(function(val, ci) {
+        var td = self._el('td'); td.textContent = val;
+        var col = self.columns[ci]; if (col && col.width) td.style.width = col.width;
+        tr.appendChild(td);
+      });
+      return tr;
+    }
+    _fmtCell(row, col) {
+      var val = row[col.key];
+      if (col.format) { try { return String(col.format(val, row)); } catch(e) { return String(val != null ? val : ''); } }
+      return val == null ? '' : String(val);
+    }
+    _updateFooter(start, end, total) {
+      var info = this._refs.pageInfo;
+      if (info) info.textContent = total === 0 ? '0 rows' : (start + 1) + '-' + end + ' of ' + total;
+      var maxPage = Math.max(0, Math.ceil(total / this.pageSize) - 1);
+      if (this._refs.prevBtn) this._refs.prevBtn.disabled = (this.page <= 0);
+      if (this._refs.nextBtn) this._refs.nextBtn.disabled = (this.page >= maxPage);
+    }
+    _updateSortArrows() {
+      var self = this, ths = this._refs.thead.querySelectorAll('tr:first-child th');
+      this.columns.forEach(function(col, i) {
+        if (!col.sortable) return;
+        var arrow = ths[i] ? ths[i].querySelector('.gt-sort-arrow') : null; if (!arrow) return;
+        arrow.className = 'gt-sort-arrow';
+        if (self.sortCol === col.key && self.sortDir) {
+          arrow.className = 'gt-sort-arrow ' + self.sortDir;
+          arrow.textContent = self.sortDir === 'asc' ? '\u25B2' : '\u25BC';
+        } else { arrow.textContent = '\u2195'; }
+      });
+    }
+    _onSort(key) {
+      if (this.sortCol === key) {
+        if (this.sortDir === 'asc') this.sortDir = 'desc';
+        else if (this.sortDir === 'desc') { this.sortCol = null; this.sortDir = null; }
+        else this.sortDir = 'asc';
+      } else { this.sortCol = key; this.sortDir = 'asc'; }
+      this.page = 0; this._applyFiltersAndSort(); this._render();
+    }
+    _onSearch(evt) {
+      var self = this, val = evt.target.value;
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = setTimeout(function() {
+        self.searchTerm = val; self.page = 0; self._applyFiltersAndSort(); self._render();
+      }, 300);
+    }
+    _onFilter(key, val) { this.colFilters[key] = val; this.page = 0; this._applyFiltersAndSort(); this._render(); }
+    _toggleFilters() {
+      this.filtersVisible = !this.filtersVisible;
+      if (this._refs.filterRow) this._refs.filterRow.style.display = this.filtersVisible ? '' : 'none';
+      if (this._refs.filterBtn) this._refs.filterBtn.classList.toggle('active', this.filtersVisible);
+    }
+    _changePage(d) {
+      var mp = Math.max(0, Math.ceil(this.filteredData.length / this.pageSize) - 1);
+      var np = this.page + d; if (np < 0 || np > mp) return;
+      this.page = np; this._render();
+    }
+    _exportCSV() {
+      var self = this, lines = [];
+      lines.push(this.columns.map(function(c) { return '"' + (c.label || c.key).replace(/"/g, '""') + '"'; }).join(','));
+      this.filteredData.forEach(function(row) {
+        lines.push(self.columns.map(function(col) { return '"' + self._fmtCell(row, col).replace(/"/g, '""') + '"'; }).join(','));
+      });
+      var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+      var url = URL.createObjectURL(blob);
+      var a = this._el('a'); a.href = url; a.download = 'glitch-export.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+    destroy() {
+      var root = document.getElementById(this.containerId);
+      if (root) root.innerHTML = '';
+      this.allData = []; this.filteredData = [];
+      this.prevRowMap = new Map(); this._refs = {}; this._built = false;
+    }
+  }
+
+  // ------ GlitchTable instances ------
+  var dashClientsTable = new GlitchTable('dash-clients-gt', {
+    columns: [
+      {key: 'client_short', label: 'Client', sortable: true, filterable: true},
+      {key: 'total_requests', label: 'Requests', sortable: true},
+      {key: 'rps', label: 'Req/s', sortable: true, format: function(v) { return (v||0).toFixed(1); }},
+      {key: 'errors_received', label: 'Errors', sortable: true},
+      {key: 'adaptive_mode', label: 'Mode', sortable: true, filterable: true},
+      {key: 'last_seen_ago', label: 'Last Seen', sortable: true}
+    ],
+    pageSize: 25, searchable: true, exportable: true, rowKey: 'client_id',
+    emptyMessage: 'No clients connected',
+    onRowClick: function(row) { dashViewClient(row.client_id); }
+  });
+
+  var dashLogTable = new GlitchTable('dash-log-gt', {
+    columns: [
+      {key: 'time_short', label: 'Time', sortable: true},
+      {key: 'client_short', label: 'Client', sortable: true, filterable: true},
+      {key: 'method', label: 'Method', sortable: true, filterable: true},
+      {key: 'path_short', label: 'Path', sortable: true, filterable: true},
+      {key: 'status_code', label: 'Status', sortable: true, filterable: true},
+      {key: 'latency_display', label: 'Latency', sortable: true},
+      {key: 'response_type', label: 'Type', sortable: true, filterable: true},
+      {key: 'mode', label: 'Mode', sortable: true, filterable: true},
+      {key: 'ua_short', label: 'User Agent', sortable: true}
+    ],
+    pageSize: 50, searchable: true, exportable: true, rowKey: '_rowid',
+    emptyMessage: 'No requests recorded yet'
+  });
+
+  var vulnTable = new GlitchTable('vuln-gt', {
+    columns: [
+      {key: 'name', label: 'Name', sortable: true, filterable: true},
+      {key: 'severity', label: 'Severity', sortable: true, filterable: true},
+      {key: 'cwe', label: 'CWE', sortable: true, filterable: true},
+      {key: 'category', label: 'Category', sortable: true, filterable: true},
+      {key: 'endpoints', label: 'Endpoints', sortable: true},
+      {key: 'status', label: 'Status', sortable: true, filterable: true}
+    ],
+    pageSize: 50, searchable: true, exportable: true, rowKey: 'id',
+    emptyMessage: 'No vulnerabilities configured'
+  });
+
   // ------ Dashboard Tab ------
   async function refreshDashboard() {
     try {
@@ -2257,80 +2563,49 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         }).join('') || '<div style="color:#555">No data yet</div>';
       } catch(oe2) {}
 
-      // Clickable clients table
-      const clients = (cl.clients || []).sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen) || (a.client_id || '').localeCompare(b.client_id || ''));
-      document.getElementById('dash-clients-body').innerHTML = clients.slice(0, 20).map(function(c) {
-        var cid = escapeHtml(c.client_id);
-        var short = escapeHtml(shortID(c.client_id));
-        var ago = timeSince(c.last_seen);
-        return '<tr style="cursor:pointer" onclick="dashViewClient(\'' + cid + '\')">' +
-        '<td><a href="#" onclick="event.stopPropagation();dashViewClient(\'' + cid + '\');return false" style="color:#44aaff">' + short + '</a></td>' +
-        '<td>' + c.total_requests + '</td>' +
-        '<td>' + (c.requests_per_sec||0).toFixed(1) + '</td>' +
-        '<td class="' + (c.errors_received > 0 ? 's5' : '') + '">' + c.errors_received + '</td>' +
-        '<td class="' + mClass(c.adaptive_mode) + '">' + (c.adaptive_mode||'pending') + '</td>' +
-        '<td style="color:#888">' + ago + '</td>' +
-        '</tr>';
-      }).join('');
+      // Clickable clients table (GlitchTable)
+      var clientRows = (cl.clients || cl.data || []).map(function(c) {
+        return {
+          client_id: c.client_id,
+          client_short: shortID(c.client_id),
+          total_requests: c.total_requests || 0,
+          rps: c.requests_per_sec || 0,
+          errors_received: c.errors_received || 0,
+          adaptive_mode: c.adaptive_mode || 'pending',
+          last_seen_ago: timeSince(c.last_seen)
+        };
+      });
+      dashClientsTable.setData(clientRows);
 
-      // Request log (dashboard)
+      // Request log (GlitchTable)
       try {
-        var logResp = await api('/admin/api/log?limit=200&offset=0');
-        dashLogData = logResp.records || logResp.data || [];
-        dashLogTotal = logResp.total || dashLogData.length;
-        dashLogOffset = dashLogData.length;
-        renderDashLog(dashLogData);
-        var loadMoreBtn = document.getElementById('dash-log-load-more');
-        if (loadMoreBtn) loadMoreBtn.style.display = dashLogOffset < dashLogTotal ? '' : 'none';
+        var logResp = await api('/admin/api/log?limit=500&offset=0');
+        var logRecords = logResp.records || logResp.data || [];
+        var logRows = logRecords.map(function(r, idx) {
+          return {
+            _rowid: r.timestamp + '-' + idx,
+            time_short: new Date(r.timestamp).toLocaleTimeString(),
+            timestamp: r.timestamp,
+            client_short: shortID(r.client_id),
+            client_id: r.client_id,
+            method: r.method,
+            path_short: r.path.length > 45 ? r.path.substring(0, 45) + '\u2026' : r.path,
+            path: r.path,
+            status_code: r.status_code,
+            latency_display: r.latency_ms + 'ms',
+            latency_ms: r.latency_ms,
+            response_type: r.response_type || '',
+            mode: r.mode || '-',
+            ua_short: shortUA(r.user_agent),
+            user_agent: r.user_agent || ''
+          };
+        });
+        dashLogTable.setData(logRows);
       } catch(le) {}
     } catch(e) { console.error('dashboard:', e); }
   }
 
-  // ------ Dashboard Log + Client Detail ------
-  var dashLogData = [];
-  var dashLogTotal = 0;
-  var dashLogOffset = 0;
-
-  window.dashLogLoadMore = async function() {
-    try {
-      var logResp = await api('/admin/api/log?limit=200&offset=' + dashLogOffset);
-      var more = logResp.records || logResp.data || [];
-      dashLogData = dashLogData.concat(more);
-      dashLogTotal = logResp.total || dashLogData.length;
-      dashLogOffset += more.length;
-      renderDashLog(dashLogData);
-      var loadMoreBtn = document.getElementById('dash-log-load-more');
-      if (loadMoreBtn) loadMoreBtn.style.display = dashLogOffset < dashLogTotal ? '' : 'none';
-    } catch(e) { console.error('dash log load more:', e); }
-  };
-
-  function renderDashLog(records) {
-    var tbody = document.getElementById('dash-log-body');
-    if (!tbody) return;
-    tbody.innerHTML = records.map(function(r) {
-      return '<tr class="log-row" data-search="' + escapeHtml((r.status_code + ' ' + r.client_id + ' ' + r.path + ' ' + r.response_type + ' ' + r.user_agent + ' ' + r.mode).toLowerCase()) + '">' +
-        '<td>' + new Date(r.timestamp).toLocaleTimeString() + '</td>' +
-        '<td><a href="#" onclick="event.stopPropagation();dashViewClient(\'' + escapeHtml(r.client_id) + '\');return false" style="color:#44aaff">' + escapeHtml(shortID(r.client_id)) + '</a></td>' +
-        '<td>' + r.method + '</td>' +
-        '<td title="' + escapeHtml(r.path) + '">' + escapeHtml(r.path.substring(0, 45)) + '</td>' +
-        '<td class="' + sClass(r.status_code) + '">' + r.status_code + '</td>' +
-        '<td>' + r.latency_ms + 'ms</td>' +
-        '<td>' + escapeHtml(r.response_type) + '</td>' +
-        '<td class="' + mClass(r.mode) + '">' + (r.mode || '-') + '</td>' +
-        '<td title="' + escapeHtml(r.user_agent || '') + '">' + escapeHtml(shortUA(r.user_agent)) + '</td>' +
-        '</tr>';
-    }).join('');
-  }
-
-  window.filterDashLog = function() {
-    var q = document.getElementById('dash-log-filter').value.toLowerCase().trim();
-    if (!q) { renderDashLog(dashLogData); return; }
-    var filtered = dashLogData.filter(function(r) {
-      var haystack = (r.status_code + ' ' + r.client_id + ' ' + r.path + ' ' + r.response_type + ' ' + r.user_agent + ' ' + r.mode).toLowerCase();
-      return haystack.indexOf(q) !== -1;
-    });
-    renderDashLog(filtered);
-  };
+  // ------ Dashboard Client Detail ------
 
   var dashSelectedClient = null;
   window.dashViewClient = async function(clientID) {
@@ -2395,57 +2670,44 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
 
   // ------ Sessions ------
   let selectedClient = null;
-  let sessClients = [];
-  let sessTotal = 0;
-  let sessOffset = 0;
 
-  function renderSessionRows(clients) {
-    return clients.map(c => {
-      const ago = timeSince(c.last_seen);
-      const cid = escapeHtml(c.client_id);
-      const short = escapeHtml(shortID(c.client_id));
-      return '<tr>' +
-        '<td><a href="#" onclick="viewClient(\'' + cid + '\');return false" style="color:#44aaff">' + short + '</a></td>' +
-        '<td>' + c.total_requests + '</td>' +
-        '<td>' + (c.requests_per_sec||0).toFixed(1) + '</td>' +
-        '<td class="' + (c.errors_received > 0 ? 's5' : '') + '">' + c.errors_received + '</td>' +
-        '<td>' + c.unique_paths + '</td>' +
-        '<td>' + (c.labyrinth_depth||0) + '</td>' +
-        '<td class="' + mClass(c.adaptive_mode) + '">' + (c.adaptive_mode||'pending') + '</td>' +
-        '<td style="color:#888">' + ago + '</td>' +
-        '<td><a href="#" onclick="viewClient(\'' + cid + '\');return false" style="color:#888;font-size:0.8em">details</a></td>' +
-        '</tr>';
-    }).join('');
-  }
+  var srvSessionsTable = new GlitchTable('srv-sessions-gt', {
+    columns: [
+      {key: 'client_short', label: 'Client ID', sortable: true, filterable: true},
+      {key: 'total_requests', label: 'Requests', sortable: true},
+      {key: 'rps', label: 'Req/s', sortable: true, format: function(v) { return (v||0).toFixed(1); }},
+      {key: 'errors_received', label: 'Errors', sortable: true},
+      {key: 'unique_paths', label: 'Paths', sortable: true},
+      {key: 'labyrinth_depth', label: 'Lab Depth', sortable: true},
+      {key: 'adaptive_mode', label: 'Mode', sortable: true, filterable: true},
+      {key: 'last_seen_ago', label: 'Last Seen', sortable: true}
+    ],
+    pageSize: 25, searchable: true, exportable: true, rowKey: 'client_id',
+    emptyMessage: 'No client sessions',
+    onRowClick: function(row) { viewClient(row.client_id); }
+  });
 
   async function refreshSessions() {
     try {
-      const data = await api('/api/clients?limit=100&offset=0');
-      sessClients = (data.clients || data.data || []);
-      sessClients.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen) || (a.client_id || '').localeCompare(b.client_id || ''));
-      sessTotal = data.total || sessClients.length;
-      sessOffset = sessClients.length;
-      const tbody = document.getElementById('sess-body');
-      tbody.innerHTML = renderSessionRows(sessClients);
-      var btn = document.getElementById('sess-load-more');
-      if (btn) btn.style.display = sessOffset < sessTotal ? '' : 'none';
+      const data = await api('/api/clients');
+      var clients = (data.clients || data.data || []);
+      var rows = clients.map(function(c) {
+        return {
+          client_id: c.client_id,
+          client_short: shortID(c.client_id),
+          total_requests: c.total_requests || 0,
+          rps: c.requests_per_sec || 0,
+          errors_received: c.errors_received || 0,
+          unique_paths: c.unique_paths || 0,
+          labyrinth_depth: c.labyrinth_depth || 0,
+          adaptive_mode: c.adaptive_mode || 'pending',
+          last_seen_ago: timeSince(c.last_seen),
+          last_seen: c.last_seen
+        };
+      });
+      srvSessionsTable.setData(rows);
     } catch(e) { console.error('sessions:', e); }
   }
-
-  window.sessLoadMore = async function() {
-    try {
-      const data = await api('/api/clients?limit=100&offset=' + sessOffset);
-      const more = (data.clients || data.data || []);
-      sessClients = sessClients.concat(more);
-      sessClients.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen) || (a.client_id || '').localeCompare(b.client_id || ''));
-      sessTotal = data.total || sessClients.length;
-      sessOffset += more.length;
-      const tbody = document.getElementById('sess-body');
-      tbody.innerHTML = renderSessionRows(sessClients);
-      var btn = document.getElementById('sess-load-more');
-      if (btn) btn.style.display = sessOffset < sessTotal ? '' : 'none';
-    } catch(e) { console.error('sess load more:', e); }
-  };
 
   window.viewClient = async function(clientID) {
     selectedClient = clientID;
@@ -3191,35 +3453,23 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
         return '<span class="sev sev-' + s + '" style="margin-right:10px">' + s + ': ' + (sev[s] || 0) + '</span>';
       }).join('');
 
-      renderVulnTable(vulnData, vc.categories || {});
+      // Populate GlitchTable for vulns
+      var catState = vc.categories || {};
+      var vulnRows = vulnData.map(function(v) {
+        var catEnabled = catState[v.id] !== false;
+        var isActive = v.active !== false && v.detectable !== false;
+        return {
+          id: v.id || v.name,
+          name: v.name,
+          severity: v.severity,
+          cwe: v.cwe || '',
+          category: v.owasp || v.category || v.id || '',
+          endpoints: (v.endpoints || []).length,
+          status: (isActive && catEnabled) ? 'ACTIVE' : 'DISABLED'
+        };
+      });
+      vulnTable.setData(vulnRows);
     } catch(e) { console.error('vulns:', e); }
-  }
-
-  function renderVulnTable(vulns, catState) {
-    var mainPort = 8765;
-    var tbody = document.getElementById('vuln-body');
-    tbody.innerHTML = vulns.map(function(v) {
-      var endpoints = (v.endpoints || []).map(function(ep) {
-        return '<a class="vuln-endpoint" href="http://' + window.location.hostname + ':' + mainPort + ep + '" target="_blank" title="' + escapeHtml(ep) + '">' + escapeHtml(ep.length > 60 ? ep.substring(0, 57) + '...' : ep) + '</a>';
-      }).join('');
-      var catEnabled = catState[v.id] !== false;
-      var isActive = v.active !== false && v.detectable !== false;
-      var statusClass = (isActive && catEnabled) ? 'vuln-status-active' : 'vuln-status-disabled';
-      var statusText = (isActive && catEnabled) ? 'ACTIVE' : 'DISABLED';
-      var toggleBtn = '<label class="toggle-sw" style="display:inline-block;vertical-align:middle;margin-left:8px">' +
-        '<input type="checkbox" ' + (catEnabled ? 'checked' : '') + ' onchange="toggleVulnCat(\'' + escapeHtml(v.id || v.name) + '\', this.checked)">' +
-        '<div class="toggle-track"></div>' +
-        '<div class="toggle-knob"></div>' +
-        '</label>';
-      return '<tr>' +
-        '<td>' + escapeHtml(v.name) + '</td>' +
-        '<td><span class="sev sev-' + v.severity + '">' + v.severity + '</span></td>' +
-        '<td style="color:#888">' + escapeHtml(v.cwe || '') + '</td>' +
-        '<td>' + escapeHtml(v.owasp || v.category || v.id || '') + '</td>' +
-        '<td>' + endpoints + '</td>' +
-        '<td><span class="' + statusClass + '">' + statusText + '</span>' + toggleBtn + '</td>' +
-        '</tr>';
-    }).join('');
   }
 
   window.toggleVulnGroup = function(group, enabled) {
@@ -3497,19 +3747,6 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       }
     } catch(e) {}
   }
-
-  window.filterVulns = function() {
-    var q = document.getElementById('vuln-filter').value.toLowerCase().trim();
-    if (!q) {
-      renderVulnTable(vulnData, {});
-      return;
-    }
-    var filtered = vulnData.filter(function(v) {
-      var haystack = (v.name + ' ' + v.severity + ' ' + v.cwe + ' ' + v.category + ' ' + (v.endpoints || []).join(' ')).toLowerCase();
-      return haystack.indexOf(q) !== -1;
-    });
-    renderVulnTable(filtered, {});
-  };
 
   // ------ Config Import/Export ------
   window.exportConfig = async function() {
@@ -5923,6 +6160,28 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   }
 
   // Initial load — restore tab from URL hash
+  // Configurable auto-refresh
+  var refreshTimer = null;
+  var refreshRate = 3000;
+
+  window.setRefreshRate = function(ms) {
+    refreshRate = parseInt(ms, 10);
+    if (refreshTimer) clearInterval(refreshTimer);
+    if (refreshRate > 0) refreshTimer = setInterval(refresh, refreshRate);
+  };
+
+  // Pause refresh when tab is hidden
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+      if (refreshTimer) clearInterval(refreshTimer);
+    } else {
+      if (refreshRate > 0) {
+        refresh();
+        refreshTimer = setInterval(refresh, refreshRate);
+      }
+    }
+  });
+
   (async function init() {
     var hash = window.location.hash.replace('#', '');
     if (hash && document.getElementById('panel-' + hash)) {
@@ -5931,7 +6190,7 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     await refresh();
   })();
 
-  setInterval(refresh, 3000);
+  refreshTimer = setInterval(refresh, refreshRate);
 })();
 </script>
 </body>

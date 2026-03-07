@@ -447,10 +447,37 @@ func adminAPIBuiltinHistory(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if builtinHistory == nil {
-		json.NewEncoder(w).Encode([]interface{}{})
+		// Backward compat: no pagination params → raw array
+		if !hasPaginationParams(r) {
+			json.NewEncoder(w).Encode([]interface{}{})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"items":  []interface{}{},
+			"total":  0,
+			"limit":  100,
+			"offset": 0,
+		})
 		return
 	}
-	json.NewEncoder(w).Encode(builtinHistory)
+
+	// Backward compatibility: no pagination params → return raw array
+	if !hasPaginationParams(r) {
+		json.NewEncoder(w).Encode(builtinHistory)
+		return
+	}
+
+	limit, offset := parsePagination(r)
+	total := len(builtinHistory)
+	start, end := paginateSlice(total, limit, offset)
+	page := builtinHistory[start:end]
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"items":  page,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
 }
 
 func persistScanToDB(store *storage.Store, profile string, report *scanner.Report) {

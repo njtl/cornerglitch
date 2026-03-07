@@ -24,7 +24,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Pagination helpers
+// Pagination / sorting / filtering helpers
 // ---------------------------------------------------------------------------
 
 // parsePagination extracts limit and offset query parameters.
@@ -48,6 +48,27 @@ func parsePagination(r *http.Request) (limit, offset int) {
 	return
 }
 
+// hasPaginationParams returns true if the request explicitly includes
+// limit or offset query parameters. Used for backward-compatible responses:
+// when no pagination params are provided, endpoints return a raw array;
+// when params are present, they return a {items, total, limit, offset} wrapper.
+func hasPaginationParams(r *http.Request) bool {
+	q := r.URL.Query()
+	return q.Get("limit") != "" || q.Get("offset") != ""
+}
+
+// parseSortParams extracts sort field and order from query parameters.
+// Returns the field name and true if ascending order (false = descending).
+// allowedFields is a set of valid field names; unknown fields return "".
+func parseSortParams(r *http.Request, allowedFields map[string]bool) (field string, asc bool) {
+	field = r.URL.Query().Get("sort")
+	if field != "" && !allowedFields[field] {
+		field = ""
+	}
+	asc = strings.EqualFold(r.URL.Query().Get("order"), "asc")
+	return
+}
+
 // paginateSlice applies offset and limit to a slice length, returning
 // the start and end indices to use for slicing.
 func paginateSlice(total, limit, offset int) (start, end int) {
@@ -60,6 +81,20 @@ func paginateSlice(total, limit, offset int) (start, end int) {
 		end = total
 	}
 	return
+}
+
+// paginatedResponse returns either the raw items array (backward compat)
+// or a wrapper with total/limit/offset when pagination params are present.
+func paginatedResponse(items interface{}, total, limit, offset int, paginated bool) interface{} {
+	if !paginated {
+		return items
+	}
+	return map[string]interface{}{
+		"items":  items,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -689,19 +724,30 @@ func adminAPILog(w http.ResponseWriter, r *http.Request, s *Server) {
 	w.Header().Set("Content-Type", "application/json")
 
 	limit, offset := parsePagination(r)
-	filter := strings.ToLower(r.URL.Query().Get("filter"))
+	q := r.URL.Query()
+	// Support both "filter" (legacy) and "search" (new) parameter names
+	search := strings.ToLower(q.Get("search"))
+	if search == "" {
+		search = strings.ToLower(q.Get("filter"))
+	}
+
+	sortField, sortAsc := parseSortParams(r, map[string]bool{
+		"timestamp": true, "client": true, "method": true,
+		"path": true, "status": true, "latency": true,
+	})
 
 	// Fetch a large window of records for filtering
 	records := s.collector.RecentRecords(1000)
 
 	all := make([]map[string]interface{}, 0, len(records))
 	for _, rec := range records {
-		if filter != "" {
-			match := strings.Contains(strings.ToLower(rec.Path), filter) ||
-				strings.Contains(strings.ToLower(rec.ClientID), filter) ||
-				strings.Contains(strings.ToLower(rec.ResponseType), filter) ||
-				strings.Contains(strings.ToLower(rec.UserAgent), filter) ||
-				strings.Contains(strconv.Itoa(rec.StatusCode), filter)
+		if search != "" {
+			match := strings.Contains(strings.ToLower(rec.Path), search) ||
+				strings.Contains(strings.ToLower(rec.ClientID), search) ||
+				strings.Contains(strings.ToLower(rec.ResponseType), search) ||
+				strings.Contains(strings.ToLower(rec.UserAgent), search) ||
+				strings.Contains(strings.ToLower(rec.Method), search) ||
+				strings.Contains(strconv.Itoa(rec.StatusCode), search)
 			if !match {
 				continue
 			}
@@ -723,6 +769,33 @@ func adminAPILog(w http.ResponseWriter, r *http.Request, s *Server) {
 			"response_type": rec.ResponseType,
 			"user_agent":    rec.UserAgent,
 			"mode":          mode,
+		})
+	}
+
+	// Sort if requested (default: timestamp desc — already in reverse-chronological order from collector)
+	if sortField != "" {
+		sort.Slice(all, func(i, j int) bool {
+			var less bool
+			switch sortField {
+			case "timestamp":
+				less = all[i]["timestamp"].(string) < all[j]["timestamp"].(string)
+			case "client":
+				less = all[i]["client_id"].(string) < all[j]["client_id"].(string)
+			case "method":
+				less = all[i]["method"].(string) < all[j]["method"].(string)
+			case "path":
+				less = all[i]["path"].(string) < all[j]["path"].(string)
+			case "status":
+				less = all[i]["status_code"].(int) < all[j]["status_code"].(int)
+			case "latency":
+				less = all[i]["latency_ms"].(int64) < all[j]["latency_ms"].(int64)
+			default:
+				return false
+			}
+			if sortAsc {
+				return less
+			}
+			return !less
 		})
 	}
 
@@ -1584,6 +1657,36 @@ func adminAPIScannerHistory(w http.ResponseWriter, r *http.Request, s *Server) {
 		entries = comparisonHistory.GetByScanner(scannerFilter)
 	} else {
 		entries = comparisonHistory.GetAll()
+	}
+
+	// Sort if requested (default: timestamp desc — already in reverse-chronological order)
+	sortField, sortAsc := parseSortParams(r, map[string]bool{
+		"timestamp": true, "scanner": true, "duration": true,
+		"grade": true, "detection": true,
+	})
+	if sortField != "" {
+		sorted := make([]scaneval.HistoryEntry, len(entries))
+		copy(sorted, entries)
+		sort.Slice(sorted, func(i, j int) bool {
+			var less bool
+			switch sortField {
+			case "timestamp":
+				less = sorted[i].Timestamp < sorted[j].Timestamp
+			case "scanner":
+				less = sorted[i].Scanner < sorted[j].Scanner
+			case "grade":
+				less = sorted[i].Grade < sorted[j].Grade
+			case "detection":
+				less = sorted[i].Detection < sorted[j].Detection
+			default:
+				return false
+			}
+			if sortAsc {
+				return less
+			}
+			return !less
+		})
+		entries = sorted
 	}
 
 	total := len(entries)

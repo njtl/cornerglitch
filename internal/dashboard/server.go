@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/glitchWebServer/internal/adaptive"
@@ -103,13 +105,26 @@ func (s *Server) apiClients(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
+	paginated := hasPaginationParams(r)
 	limit, offset := parsePagination(r)
+	q := r.URL.Query()
+	search := strings.ToLower(q.Get("search"))
+	sortField, sortAsc := parseSortParams(r, map[string]bool{
+		"requests": true, "rps": true, "errors": true, "paths": true,
+		"lab_depth": true, "mode": true, "last_seen": true,
+	})
 
 	profiles := s.collector.GetAllClientProfiles()
 	allClients := make([]map[string]interface{}, 0, len(profiles))
 
 	for _, p := range profiles {
 		snap := p.Snapshot()
+
+		// Search filter: match client ID substring
+		if search != "" && !strings.Contains(strings.ToLower(snap.ClientID), search) {
+			continue
+		}
+
 		behavior := s.adapt.GetBehavior(snap.ClientID)
 		var mode, reason string
 		if behavior != nil {
@@ -158,17 +173,60 @@ func (s *Server) apiClients(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Sort (default: requests desc)
+	if sortField != "" {
+		sort.Slice(allClients, func(i, j int) bool {
+			var less bool
+			switch sortField {
+			case "requests":
+				less = allClients[i]["total_requests"].(int) < allClients[j]["total_requests"].(int)
+			case "rps":
+				less = allClients[i]["requests_per_sec"].(float64) < allClients[j]["requests_per_sec"].(float64)
+			case "errors":
+				less = allClients[i]["errors_received"].(int) < allClients[j]["errors_received"].(int)
+			case "paths":
+				less = allClients[i]["unique_paths"].(int) < allClients[j]["unique_paths"].(int)
+			case "lab_depth":
+				less = allClients[i]["labyrinth_depth"].(int) < allClients[j]["labyrinth_depth"].(int)
+			case "mode":
+				less = allClients[i]["adaptive_mode"].(string) < allClients[j]["adaptive_mode"].(string)
+			case "last_seen":
+				less = allClients[i]["last_seen"].(string) < allClients[j]["last_seen"].(string)
+			default:
+				return false
+			}
+			if sortAsc {
+				return less
+			}
+			return !less
+		})
+	}
+
 	total := len(allClients)
+
+	// Backward compatibility: no pagination params → return legacy format
+	if !paginated {
+		start, end := paginateSlice(total, limit, offset)
+		page := allClients[start:end]
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"data":    page,
+			"clients": page,
+			"total":   total,
+			"limit":   limit,
+			"offset":  offset,
+			"count":   len(page),
+		})
+		return
+	}
+
 	start, end := paginateSlice(total, limit, offset)
 	page := allClients[start:end]
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"data":    page,
-		"clients": page,
-		"total":   total,
-		"limit":   limit,
-		"offset":  offset,
-		"count":   len(page),
+		"items":  page,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
 	})
 }
 
@@ -194,9 +252,54 @@ func (s *Server) apiRecent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	records := s.collector.RecentRecords(100)
+	paginated := hasPaginationParams(r)
+	q := r.URL.Query()
+	statusFilter := q.Get("status")
+	methodFilter := strings.ToUpper(q.Get("method"))
+	pathFilter := q.Get("path")
+
+	// Default limit for recent: 200
+	recentLimit := 200
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			recentLimit = n
+			if recentLimit > 1000 {
+				recentLimit = 1000
+			}
+		}
+	}
+	recentOffset := 0
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			recentOffset = n
+		}
+	}
+
+	// Fetch enough records to filter from (use larger window when filtering)
+	fetchSize := 200
+	if statusFilter != "" || methodFilter != "" || pathFilter != "" || paginated {
+		fetchSize = 1000
+	}
+	records := s.collector.RecentRecords(fetchSize)
+
+	var statusCode int
+	if statusFilter != "" {
+		statusCode, _ = strconv.Atoi(statusFilter)
+	}
+
 	data := make([]map[string]interface{}, 0, len(records))
 	for _, rec := range records {
+		// Apply filters
+		if statusFilter != "" && rec.StatusCode != statusCode {
+			continue
+		}
+		if methodFilter != "" && rec.Method != methodFilter {
+			continue
+		}
+		if pathFilter != "" && !strings.HasPrefix(rec.Path, pathFilter) {
+			continue
+		}
+
 		data = append(data, map[string]interface{}{
 			"timestamp":     rec.Timestamp.Format(time.RFC3339),
 			"client_id":     rec.ClientID,
@@ -209,7 +312,22 @@ func (s *Server) apiRecent(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{"records": data})
+	// Backward compatibility: no pagination params → return legacy format
+	if !paginated {
+		json.NewEncoder(w).Encode(map[string]interface{}{"records": data})
+		return
+	}
+
+	total := len(data)
+	start, end := paginateSlice(total, recentLimit, recentOffset)
+	page := data[start:end]
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"items":  page,
+		"total":  total,
+		"limit":  recentLimit,
+		"offset": recentOffset,
+	})
 }
 
 func (s *Server) apiBehaviors(w http.ResponseWriter, r *http.Request) {
