@@ -85,14 +85,18 @@ func (s *Server) mcpConfig() (honeypotOn, fingerprintOn, trapPromptsOn bool) {
 
 // ShouldHandle returns true if the path is an MCP endpoint.
 func (s *Server) ShouldHandle(path string) bool {
-	return path == "/mcp" || strings.HasPrefix(path, "/mcp/")
+	return path == "/mcp" || strings.HasPrefix(path, "/mcp/") || path == "/.well-known/mcp.json"
 }
 
 // ServeHTTP handles MCP requests per the Streamable HTTP transport spec.
 // POST /mcp — JSON-RPC request/response
 // GET  /mcp — SSE event stream
 // DELETE /mcp — close session
+// GET  /.well-known/mcp.json — MCP discovery document
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
+	if r.URL.Path == "/.well-known/mcp.json" {
+		return s.handleDiscovery(w, r)
+	}
 	switch r.Method {
 	case http.MethodPost:
 		return s.handlePost(w, r)
@@ -105,6 +109,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) int {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return http.StatusMethodNotAllowed
 	}
+}
+
+// handleDiscovery serves the MCP discovery document at /.well-known/mcp.json.
+// This is the standard way for clients to discover MCP server capabilities.
+func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) int {
+	w.Header().Set("Content-Type", "application/json")
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+	if host == "" {
+		host = "localhost:8765"
+	}
+	discovery := map[string]interface{}{
+		"mcp": map[string]interface{}{
+			"version":   "2025-03-26",
+			"transport": "streamable-http",
+			"url":       scheme + "://" + host + "/mcp",
+		},
+	}
+	data, _ := json.Marshal(discovery)
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+	return http.StatusOK
 }
 
 // handlePost processes a JSON-RPC 2.0 request over HTTP POST.

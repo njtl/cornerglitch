@@ -984,6 +984,7 @@ func allPrefetchEntries() []prefetchEntry {
 		{rel: "prefetch", href: "/api/newsletter/status"},
 		{rel: "dns-prefetch", href: "/api/autocomplete"},
 		{rel: "prefetch", href: "/api/search/suggest"},
+		{rel: "prefetch", href: "/.well-known/mcp.json"},
 	}
 }
 
@@ -1029,6 +1030,8 @@ func allHiddenLinks() []hiddenLinkEntry {
 		{href: "/api/v1/admin", label: "Admin API"},
 		{href: "/api/v1/debug", label: "Debug Console"},
 		{href: "/.well-known/openid-configuration", label: "OpenID Config"},
+		{href: "/.well-known/mcp.json", label: "MCP Configuration"},
+		{href: "/mcp", label: "Model Context Protocol"},
 		{href: "/api/v1/webhooks", label: "Webhooks"},
 	}
 }

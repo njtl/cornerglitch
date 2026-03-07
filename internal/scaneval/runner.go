@@ -668,6 +668,9 @@ func (r *Runner) generateWordlist() string {
 		"404", "500", "403", "401",
 		"error", "errors", "not-found",
 
+		// MCP (Model Context Protocol)
+		"mcp", ".well-known/mcp.json",
+
 		// Misc discovery paths
 		"README.md", "CHANGELOG.md", "LICENSE",
 		"release-notes", "changelog",
