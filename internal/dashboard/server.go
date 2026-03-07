@@ -94,7 +94,8 @@ func (s *Server) apiMetrics(w http.ResponseWriter, r *http.Request) {
 
 	total := s.collector.TotalRequests.Load()
 	if total > 0 {
-		resp["error_rate_pct"] = float64(s.collector.TotalErrors.Load()) / float64(total) * 100
+		totalNon2xx := s.collector.Total4xx.Load() + s.collector.Total5xx.Load()
+		resp["error_rate_pct"] = float64(totalNon2xx) / float64(total) * 100
 		resp["labyrinth_rate_pct"] = float64(s.collector.TotalLabyrinth.Load()) / float64(total) * 100
 	}
 

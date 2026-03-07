@@ -159,6 +159,37 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
     border-radius: 4px;
     overflow: hidden;
   }
+  .sparkline-container {
+    position: relative;
+  }
+  .spark-axis-y {
+    position: absolute;
+    top: 0;
+    right: 4px;
+    font-size: 0.65em;
+    color: #555;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .spark-axis-y-zero {
+    position: absolute;
+    bottom: 2px;
+    right: 4px;
+    font-size: 0.65em;
+    color: #444;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .spark-axis-x {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.65em;
+    color: #555;
+    margin-top: 2px;
+    padding: 0 2px;
+  }
   .spark-bar {
     position: absolute;
     bottom: 0;
@@ -748,11 +779,23 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
   <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
     <div class="section">
       <h2>// Throughput (last 60s)</h2>
-      <div class="sparkline-wrap" id="dash-sparkline" style="height:100px"></div>
+      <div class="sparkline-container">
+        <div class="sparkline-wrap" id="dash-sparkline" style="height:100px">
+          <div class="spark-axis-y" id="spark-y-max"></div>
+          <div class="spark-axis-y-zero">0</div>
+        </div>
+        <div class="spark-axis-x"><span>-60s</span><span>-45s</span><span>-30s</span><span>-15s</span><span>now</span></div>
+      </div>
     </div>
     <div class="section">
       <h2>// Error Rate (last 60s)</h2>
-      <div class="sparkline-wrap" id="dash-err-sparkline" style="height:100px"></div>
+      <div class="sparkline-container">
+        <div class="sparkline-wrap" id="dash-err-sparkline" style="height:100px">
+          <div class="spark-axis-y" id="spark-err-y-max"></div>
+          <div class="spark-axis-y-zero">0</div>
+        </div>
+        <div class="spark-axis-x"><span>-60s</span><span>-45s</span><span>-30s</span><span>-15s</span><span>now</span></div>
+      </div>
     </div>
   </div>
 
@@ -2511,11 +2554,17 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       if (series.length > 0) {
         const maxR = Math.max(...series.map(s => s.requests), 1);
         const bw = Math.max(2, Math.floor(wrap.clientWidth / series.length) - 1);
-        wrap.innerHTML = series.map((s, i) => {
+        var barsHtml = series.map((s, i) => {
           const h = Math.max(2, (s.requests / maxR) * 100);
           const cls = s.errors > 0 ? 'spark-bar err' : 'spark-bar';
-          return '<div class="' + cls + '" style="left:' + (i*(bw+1)) + 'px;width:' + bw + 'px;height:' + h + '%%;" title="' + s.requests + ' req"></div>';
+          return '<div class="' + cls + '" style="left:' + (i*(bw+1)) + 'px;width:' + bw + 'px;height:' + h + '%%;" title="' + s.requests + ' req, ' + (s.errors||0) + ' err"></div>';
         }).join('');
+        // Preserve axis labels, only replace bars
+        var existingBars = wrap.querySelectorAll('.spark-bar');
+        existingBars.forEach(function(b) { b.remove(); });
+        wrap.insertAdjacentHTML('beforeend', barsHtml);
+        var yMaxEl = document.getElementById('spark-y-max');
+        if (yMaxEl) yMaxEl.textContent = fmtCompact(maxR) + ' req';
       }
 
       // Error rate sparkline
@@ -2523,10 +2572,15 @@ var adminPage = fmt.Sprintf(`<!DOCTYPE html>
       if (series.length > 0 && errWrap) {
         const maxE = Math.max(...series.map(s => s.errors || 0), 1);
         const ebw = Math.max(2, Math.floor(errWrap.clientWidth / series.length) - 1);
-        errWrap.innerHTML = series.map((s, i) => {
+        var errBarsHtml = series.map((s, i) => {
           const h = Math.max(2, ((s.errors || 0) / maxE) * 100);
           return '<div class="spark-bar err" style="left:' + (i*(ebw+1)) + 'px;width:' + ebw + 'px;height:' + h + '%%;" title="' + (s.errors||0) + ' err"></div>';
         }).join('');
+        var existingErrBars = errWrap.querySelectorAll('.spark-bar');
+        existingErrBars.forEach(function(b) { b.remove(); });
+        errWrap.insertAdjacentHTML('beforeend', errBarsHtml);
+        var errYMaxEl = document.getElementById('spark-err-y-max');
+        if (errYMaxEl) errYMaxEl.textContent = fmtCompact(maxE) + ' err';
       }
 
       // Calculated statistics
