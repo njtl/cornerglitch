@@ -55,6 +55,8 @@ import (
 	"github.com/cornerglitch/internal/storage"
 	"github.com/cornerglitch/internal/vuln"
 	"github.com/cornerglitch/internal/websocket"
+
+	"github.com/getsentry/sentry-go"
 )
 
 // loadEnvFile reads a .env file and sets environment variables that are not
@@ -149,6 +151,21 @@ func main() {
 	adminPass := flag.String("admin-password", "", "Admin panel password (env: GLITCH_ADMIN_PASSWORD)")
 	dbURL := flag.String("db-url", "", "PostgreSQL connection URL (env: GLITCH_DB_URL)")
 	flag.Parse()
+
+	// Initialize Sentry error tracking (optional — skipped if no DSN configured).
+	if dsn := os.Getenv("SENTRY_DSN"); dsn != "" {
+		err := sentry.Init(sentry.ClientOptions{
+			Dsn:              dsn,
+			TracesSampleRate: 0.1,
+			Environment:      "production",
+		})
+		if err != nil {
+			log.Printf("\033[33m[glitch]\033[0m Sentry init failed: %v", err)
+		} else {
+			log.Printf("\033[36m[glitch]\033[0m Sentry error tracking enabled")
+			defer sentry.Flush(2 * time.Second)
+		}
+	}
 
 	// Configure admin password.
 	pw := *adminPass

@@ -99,7 +99,7 @@ func (e *Engine) ShouldCorrupt(clientClass string) bool {
 //
 // This method must be called BEFORE the response body is written, except
 // for hijack-based techniques which take over the connection.
-func (e *Engine) Apply(w http.ResponseWriter, r *http.Request, clientID string, level CorruptionLevel) {
+func (e *Engine) Apply(w http.ResponseWriter, r *http.Request, clientID string, level CorruptionLevel) (hijacked bool) {
 	if level == LevelNone {
 		return
 	}
@@ -115,13 +115,20 @@ func (e *Engine) Apply(w http.ResponseWriter, r *http.Request, clientID string, 
 	case LevelAggressive:
 		e.applySubtle(w, r, seed)
 		e.applyModerate(w, r, seed)
-		e.applyAggressive(w, r, seed)
+		if e.applyAggressive(w, r, seed) {
+			return true
+		}
 	case LevelChaos:
 		e.applySubtle(w, r, seed)
 		e.applyModerate(w, r, seed)
-		e.applyAggressive(w, r, seed)
-		e.applyChaos(w, r, seed)
+		if e.applyAggressive(w, r, seed) {
+			return true
+		}
+		if e.applyChaos(w, r, seed) {
+			return true
+		}
 	}
+	return false
 }
 
 // deterministicSeed produces a uint64 from clientID + path for repeatable
@@ -247,7 +254,7 @@ func (e *Engine) applyModerate(w http.ResponseWriter, r *http.Request, seed uint
 // Aggressive techniques  (most scrapers break)
 // --------------------------------------------------------------------------
 
-func (e *Engine) applyAggressive(w http.ResponseWriter, r *http.Request, seed uint64) {
+func (e *Engine) applyAggressive(w http.ResponseWriter, r *http.Request, seed uint64) bool {
 	// 1. Content-Length mismatch: claim more bytes than will be sent.
 	//    Scrapers that trust Content-Length will hang waiting for the rest.
 	if bit(seed, 200, 0.5) {
@@ -263,12 +270,41 @@ func (e *Engine) applyAggressive(w http.ResponseWriter, r *http.Request, seed ui
 	}
 
 	// 3. 50+ garbage padding headers to bloat response
+	//    At chaos level, use 200+ headers to overflow nginx proxy_buffer_size (default 4k/8k)
 	if bit(seed, 220, 0.5) {
-		for i := 0; i < 55; i++ {
+		count := 55
+		valLen := 128
+		if e.GetCorruptionLevel() >= 4 {
+			count = 200
+			valLen = 512 // each header ~1KB, total ~200KB — overflows most proxy buffers
+		}
+		for i := 0; i < count; i++ {
 			key := fmt.Sprintf("X-Pad-%03d", i)
-			val := strings.Repeat(fmt.Sprintf("%02x", (nth(seed, 220+i))%256), 128)
+			val := strings.Repeat(fmt.Sprintf("%02x", (nth(seed, 220+i))%256), valLen)
 			w.Header().Set(key, val)
 		}
+	}
+
+	// 3b. Response header buffer overflow — many Set-Cookie headers
+	//     nginx allocates per-header buffers; flooding Set-Cookie exhausts proxy_buffers
+	if bit(seed, 221, 0.4) {
+		for i := 0; i < 50; i++ {
+			cookie := fmt.Sprintf("_trap_%d=%s; Path=/; Domain=.example.com; Secure; HttpOnly; SameSite=Strict; Max-Age=%d",
+				i, strings.Repeat(fmt.Sprintf("%x", nth(seed, 2210+i)%256), 64), nth(seed, 2220+i)%999999)
+			w.Header().Add("Set-Cookie", cookie)
+		}
+	}
+
+	// 3c. Duplicate response headers that confuse WAF analysis
+	//     WAFs must decide which value to analyze — duplicates create ambiguity
+	if bit(seed, 222, 0.5) {
+		w.Header()["Content-Type"] = []string{
+			"text/html; charset=utf-8",
+			"application/json",
+			"text/xml; charset=iso-8859-1",
+		}
+		w.Header()["Content-Encoding"] = []string{"identity", "gzip", "br"}
+		w.Header()["X-Frame-Options"] = []string{"DENY", "SAMEORIGIN", "ALLOW-FROM http://evil.com"}
 	}
 
 	// 4. Transfer-Encoding: chunked with chunk extensions.
@@ -287,13 +323,14 @@ func (e *Engine) applyAggressive(w http.ResponseWriter, r *http.Request, seed ui
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Keep-Alive", "timeout=300, max=1000")
 	}
+	return false
 }
 
 // --------------------------------------------------------------------------
 // Chaos techniques  (breaks almost everything)
 // --------------------------------------------------------------------------
 
-func (e *Engine) applyChaos(w http.ResponseWriter, r *http.Request, seed uint64) {
+func (e *Engine) applyChaos(w http.ResponseWriter, r *http.Request, seed uint64) bool {
 	// 1. Extra contradictory headers — always applied before any early-return
 	//    techniques so they are present regardless of which chaos path fires.
 	w.Header().Set("Content-Disposition", "attachment; filename=\"response.html\"")
@@ -347,7 +384,7 @@ func (e *Engine) applyChaos(w http.ResponseWriter, r *http.Request, seed uint64)
 				buf.WriteString("0;final=true\r\n\r\n")
 				buf.Flush()
 				conn.Close()
-				return
+				return true
 			}
 		}
 	}
@@ -445,7 +482,78 @@ func (e *Engine) applyChaos(w http.ResponseWriter, r *http.Request, seed uint64)
 		}
 	}
 
-	// 9. Drip-feed with interleaved garbage via Flusher
+	// 9. WAF response header confusion — techniques targeting reverse proxy parsers
+	if bit(seed, 390, 0.5) {
+		// Duplicate Content-Length in response (proxy must decide which to trust)
+		w.Header()["Content-Length"] = []string{"0", "999999"}
+		// Status line injection via trailer-like headers
+		w.Header().Set("X-Status", "HTTP/1.1 200 OK")
+		// Via header chain suggesting multiple proxies (confuses proxy detection)
+		w.Header()["Via"] = []string{
+			"1.1 proxy1.internal",
+			"1.0 gateway.cdn",
+			"1.1 waf.edge",
+			"2.0 upstream\x00.evil",
+		}
+		// X-Accel headers (nginx internal redirect — if WAF processes these, it may redirect internally)
+		w.Header().Set("X-Accel-Redirect", "/internal-secret-path")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.Header().Set("X-Accel-Charset", "utf-8")
+		w.Header().Set("X-Accel-Expires", "0")
+	}
+
+	// 9b. Response splitting via headers — inject CRLFCRLF to end headers early
+	if bit(seed, 391, 0.3) {
+		w.Header().Set("X-Split", "value\r\n\r\n<html>injected</html>")
+		w.Header().Set("X-Inject", "a]]\r\nX-Fake: injected\r\nX-More: data")
+	}
+
+	// 9c. Massive Link headers (RFC 8288) — WAFs that parse Link can be DoS'd
+	if bit(seed, 392, 0.4) {
+		var links []string
+		for i := 0; i < 100; i++ {
+			links = append(links, fmt.Sprintf("</page/%d>; rel=\"preload\"; as=\"document\"; type=\"text/html\"", i))
+		}
+		w.Header().Set("Link", strings.Join(links, ", "))
+	}
+
+	// 10. Raw response header injection via Hijack — bypasses Go's header sanitization
+	//     This sends headers that Go's http.ResponseWriter would refuse to write,
+	//     specifically targeting nginx upstream response parsing.
+	if bit(seed, 393, 0.35) {
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, buf, err := hj.Hijack()
+			if err == nil {
+				buf.WriteString("HTTP/1.1 200 OK\r\n")
+				buf.WriteString("Content-Type: text/html\r\n")
+				// Null byte in multiple header values
+				buf.WriteString("Server: nginx/1.25\x00.corrupted\r\n")
+				buf.WriteString("X-Cache: HIT\x00MISS\r\n")
+				buf.WriteString("Set-Cookie: sess=abc\x00def; Path=/\r\n")
+				// Header with just whitespace value
+				buf.WriteString("X-Empty:   \t  \r\n")
+				// Very long single header line (64KB+ overflows nginx default buffer)
+				buf.WriteString("X-Overflow: " + strings.Repeat("A", 32768) + "\r\n")
+				// Duplicate Content-Length
+				buf.WriteString("Content-Length: 13\r\n")
+				buf.WriteString("Content-Length: 99999\r\n")
+				// Header with bare LF (no CR)
+				buf.WriteString("X-BareLF: first\nsecond\r\n")
+				// Header name with spaces
+				buf.WriteString("X Bad Name: bad\r\n")
+				// Colon-only header
+				buf.WriteString(": no-name\r\n")
+				// End headers
+				buf.WriteString("\r\n")
+				buf.WriteString("Hello, WAF!\r\n")
+				buf.Flush()
+				conn.Close()
+				return true
+			}
+		}
+	}
+
+	// 11. Drip-feed with interleaved garbage via Flusher
 	if bit(seed, 320, 0.3) {
 		if flusher, ok := w.(http.Flusher); ok {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -467,7 +575,8 @@ func (e *Engine) applyChaos(w http.ResponseWriter, r *http.Request, seed uint64)
 				// Tiny delay between flushes to mess with streaming parsers
 				time.Sleep(time.Duration(nth(seed, 325)%50+10) * time.Millisecond)
 			}
-			return
+			return true
 		}
 	}
+	return false
 }

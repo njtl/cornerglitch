@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+
 	"github.com/cornerglitch/internal/adaptive"
 	"github.com/cornerglitch/internal/analytics"
 	"github.com/cornerglitch/internal/api"
@@ -242,6 +244,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				panic(rv)
 			}
 			log.Printf("\033[31m[PANIC]\033[0m %s %s: %v\n%s", r.Method, r.URL.Path, rv, debug.Stack())
+			if hub := sentry.CurrentHub(); hub != nil {
+				hub.WithScope(func(scope *sentry.Scope) {
+					scope.SetTag("method", r.Method)
+					scope.SetTag("path", r.URL.Path)
+					scope.SetExtra("stack", string(debug.Stack()))
+					hub.RecoverWithContext(r.Context(), rv)
+				})
+			}
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
 	}()
@@ -290,7 +300,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.headerEng != nil && h.flags.IsHeaderCorruptEnabled() {
 		if h.headerEng.ShouldCorrupt(string(clientClass)) {
 			level := h.headerEng.GetLevel()
-			h.headerEng.Apply(mrw, r, clientID, level)
+			if h.headerEng.Apply(mrw, r, clientID, level) {
+				// Connection was hijacked or response fully written by header corruption.
+				// Do not continue — the ResponseWriter is no longer usable.
+				latency := time.Since(start)
+				h.collector.Record(metrics.RequestRecord{
+					Timestamp: start, ClientID: clientID, Method: r.Method,
+					Path: r.URL.Path, StatusCode: 200, Latency: latency,
+					ResponseType: "header_corrupt_hijack", UserAgent: r.UserAgent(), RemoteAddr: r.RemoteAddr,
+					RequestBytes: reqBytes,
+				})
+				log.Printf("%s[header_corrupt_hijack]%s %s %s 200 %s (client=%s class=%s)",
+					purple, reset, r.Method, r.URL.Path, latency, clientID[:16], clientClass)
+				return
+			}
 		}
 	}
 
