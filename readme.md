@@ -235,8 +235,10 @@ cp .env.example .env    # then edit with your values
 | `GLITCH_ADMIN_PASSWORD` | Recommended | Dashboard login password | Auto-generated (printed to stderr) |
 | `GLITCH_DB_URL` | **Yes** for persistence | PostgreSQL connection string | None (memory-only mode) |
 | `PASSWORD_RESET_FROM_ENV` | No | Set to `1` to force-reset password from env | `0` (disabled) |
+| `GLITCH_HEALTH_SECRET` | No | Secret path for internal health endpoint | Auto-generated (printed to stderr) |
 | `GLITCH_TLS_CERT` | No | Path to TLS certificate file | Auto-generated self-signed |
 | `GLITCH_TLS_KEY` | No | Path to TLS private key file | Auto-generated self-signed |
+| `SENTRY_DSN` | No | Sentry error tracking DSN | Disabled |
 
 > **Password persistence**: Password changes via the admin UI are saved to the database. On restart, the DB password takes priority over the `.env` value. To recover from a forgotten password, set `PASSWORD_RESET_FROM_ENV=1` — this overwrites the DB password with `GLITCH_ADMIN_PASSWORD` on next startup. Remove the flag after resetting.
 
@@ -416,7 +418,7 @@ See [`docs/real-world-findings.md`](docs/real-world-findings.md) for detailed ca
 
 ## Contributing
 
-Glitch uses Go stdlib plus `github.com/lib/pq` (PostgreSQL driver). Build with `go build ./...`, run static analysis with `go vet ./...`, and test with `go test ./...`. Storage tests require a running PostgreSQL instance (skipped automatically if unavailable).
+Glitch uses Go stdlib plus two dependencies: `github.com/lib/pq` (PostgreSQL driver) and `github.com/getsentry/sentry-go` (error tracking, optional). Build with `go build ./...`, run static analysis with `go vet ./...`, and test with `go test ./...`. Storage tests require a running PostgreSQL instance (skipped automatically if unavailable).
 
 ## License
 

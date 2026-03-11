@@ -77,6 +77,7 @@ The server auto-loads `.env` from the working directory on startup. No need to m
 | `GLITCH_HEALTH_SECRET` | Secret path segment for internal health endpoint | Auto-generated (printed to stderr) |
 | `GLITCH_TLS_CERT` | Path to TLS certificate file for HTTPS listener | None (self-signed auto-generated) |
 | `GLITCH_TLS_KEY` | Path to TLS private key file for HTTPS listener | None (self-signed auto-generated) |
+| `SENTRY_DSN` | Sentry error tracking DSN | None (disabled) |
 
 **Password persistence**: When a database is configured, password changes via the admin UI are saved to PostgreSQL. On restart, the DB password takes priority over the `.env` value. To recover from a forgotten password, set `PASSWORD_RESET_FROM_ENV=1` — this overwrites the DB password with `GLITCH_ADMIN_PASSWORD` on next startup. Remove the flag after resetting.
 
@@ -84,7 +85,7 @@ The server auto-loads `.env` from the working directory on startup. No need to m
 
 **Warning**: Without `GLITCH_DB_URL`, the server runs in memory-only mode — all metrics, scan history, and client profiles are lost on restart. The server logs a warning when no DB URL is configured.
 
-One external dependency: `github.com/lib/pq` (PostgreSQL driver). Otherwise stdlib only, go 1.24+.
+Two external dependencies: `github.com/lib/pq` (PostgreSQL driver) and `github.com/getsentry/sentry-go` (error tracking, optional). Otherwise stdlib only, go 1.24+.
 
 ## Project Layout
 
@@ -172,7 +173,7 @@ tests/
 
 ## Key Conventions
 
-- **Minimal external deps.** Only `github.com/lib/pq` (PostgreSQL driver) is allowed. Everything else uses Go stdlib.
+- **Minimal external deps.** Only `github.com/lib/pq` (PostgreSQL driver) and `github.com/getsentry/sentry-go` (error tracking) are allowed. Everything else uses Go stdlib.
 - **All logic is in `internal/`.** Nothing in `internal/` is meant to be imported by external code.
 - **Error profiles are probability maps** (`map[ErrorType]float64`). Weights should sum to ~1.0. Includes HTTP errors, TCP-level errors, protocol-level glitches, HTTP/2 frame-level chaos (h2_goaway, h2_rst_stream, h2_settings_flood, h2_window_exhaust, h2_continuation_flood, h2_ping_flood), and scanner-destroying payloads. Protocol glitches are togglable via admin config (`protocol_glitch_enabled`, `protocol_glitch_level` 0-4).
 - **TLS chaos engine** (`internal/tlschaos/`) provides 5 chaos levels: 0=clean TLS 1.3, 1=version downgrade, 2=weak ciphers, 3=cert chaos (rotation through expired/wrong-host/weak-key certs), 4=nightmare (all + ALPN lies). Controlled via `tls_chaos_enabled` and `tls_chaos_level` admin config. HTTPS listener on port 8767 auto-generates self-signed certs. HTTP/2 is auto-enabled by Go stdlib over TLS.
