@@ -123,10 +123,9 @@ Cornerglitch has been deployed as a live honeypot and tested against popular sec
 
 - **Gobuster** -- instant crash. A single null byte in a response header kills Go's HTTP parser. Scan aborts with zero results.
 - **SQLMap** -- immediate abort. HTTP 102 (Processing) has no handler. Zero injection tests performed.
-- **Nuclei** -- 0% accurate detection under nightmare mode. Honeypot endpoints fool every template.
+- **Nuclei** -- honeypot endpoints fool every template. False positives on fake `.env` files, credential pages, and debug endpoints.
 - **WhatWeb** -- plugin crash cascade. Ruby's HTTP parser returns nil on null bytes.
-- **Nmap** -- identified the server as "Microsoft IIS 10.0 on Windows." Actually Go stdlib on Linux.
-- **Wapiti** -- trapped in the infinite labyrinth. Hundreds of fake URLs crawled before timeout.
+- **Wapiti** -- trapped in the infinite labyrinth. Hundreds of fake URLs crawled before timeout. No loop detection.
 - **ZAP** -- runs out of memory. The labyrinth generates unlimited URLs with API and media links.
 - **Real crawlers** hold connections for 2+ hours downloading procedurally generated audio.
 - **AI scrapers** poll robots.txt for 23 hours straight in infinite loops.
