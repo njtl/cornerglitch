@@ -233,6 +233,7 @@ type flagValues struct {
 	mediaChaos     bool
 	budgetTraps    bool
 	mcp            bool
+	browserChaos   bool
 }
 
 // FeatureFlags holds boolean toggles for each server subsystem.
@@ -273,6 +274,7 @@ func NewFeatureFlags() *FeatureFlags {
 		mediaChaos:     true,
 		budgetTraps:    true,
 		mcp:            true,
+		browserChaos:   true,
 	})
 	return f
 }
@@ -381,6 +383,10 @@ func (f *FeatureFlags) IsMCPEnabled() bool {
 	return f.v.Load().(*flagValues).mcp
 }
 
+func (f *FeatureFlags) IsBrowserChaosEnabled() bool {
+	return f.v.Load().(*flagValues).browserChaos
+}
+
 // Set toggles a named feature. Returns false if the name is unknown.
 // Uses copy-on-write: copies the current flagValues, modifies, then stores atomically.
 func (f *FeatureFlags) Set(name string, enabled bool) bool {
@@ -441,6 +447,8 @@ func (f *FeatureFlags) Set(name string, enabled bool) bool {
 		nv.budgetTraps = enabled
 	case "mcp":
 		nv.mcp = enabled
+	case "browser_chaos":
+		nv.browserChaos = enabled
 	default:
 		return false
 	}
@@ -479,6 +487,7 @@ func (f *FeatureFlags) Snapshot() map[string]bool {
 		"media_chaos":     v.mediaChaos,
 		"budget_traps":    v.budgetTraps,
 		"mcp":             v.mcp,
+		"browser_chaos":   v.browserChaos,
 	}
 }
 
@@ -547,6 +556,10 @@ type AdminConfig struct {
 	MCPHoneypotEnabled    bool // whether honeypot tools are active
 	MCPFingerprintEnabled bool // whether client fingerprinting is active
 	MCPTrapPromptsEnabled bool // whether trap/injection prompts are active
+
+	// Browser chaos controls
+	BrowserChaosEnabled bool // whether browser chaos injection is active
+	BrowserChaosLevel   int  // 0=off, 1=idle stall, 2=+SW+memory, 3=+CSS bombs, 4=nightmare
 }
 
 // NewAdminConfig returns an AdminConfig with sensible defaults.
@@ -591,6 +604,8 @@ func NewAdminConfig() *AdminConfig {
 		MCPHoneypotEnabled:          true,
 		MCPFingerprintEnabled:       true,
 		MCPTrapPromptsEnabled:       true,
+		BrowserChaosEnabled:         false,
+		BrowserChaosLevel:           0,
 	}
 }
 
@@ -636,6 +651,8 @@ func (c *AdminConfig) Get() map[string]interface{} {
 		"mcp_honeypot_enabled":              c.MCPHoneypotEnabled,
 		"mcp_fingerprint_enabled":           c.MCPFingerprintEnabled,
 		"mcp_trap_prompts_enabled":          c.MCPTrapPromptsEnabled,
+		"browser_chaos_enabled":             c.BrowserChaosEnabled,
+		"browser_chaos_level":               c.BrowserChaosLevel,
 	}
 }
 
@@ -894,6 +911,17 @@ func (c *AdminConfig) Set(key string, value float64) bool {
 		c.MCPFingerprintEnabled = value != 0
 	case "mcp_trap_prompts_enabled":
 		c.MCPTrapPromptsEnabled = value != 0
+	case "browser_chaos_enabled":
+		c.BrowserChaosEnabled = value != 0
+	case "browser_chaos_level":
+		v := int(value)
+		if v < 0 {
+			v = 0
+		}
+		if v > 4 {
+			v = 4
+		}
+		c.BrowserChaosLevel = v
 	default:
 		return false
 	}
@@ -2577,6 +2605,7 @@ func (f *FeatureFlags) SetAll(enabled bool) {
 	nv.mediaChaos = enabled
 	nv.budgetTraps = enabled
 	nv.mcp = enabled
+	nv.browserChaos = enabled
 	f.v.Store(&nv)
 }
 

@@ -31,6 +31,7 @@ import (
 	"github.com/cornerglitch/internal/errors"
 	"github.com/cornerglitch/internal/fingerprint"
 	"github.com/cornerglitch/internal/framework"
+	"github.com/cornerglitch/internal/browserchaos"
 	"github.com/cornerglitch/internal/h3chaos"
 	"github.com/cornerglitch/internal/headers"
 	"github.com/cornerglitch/internal/health"
@@ -272,6 +273,7 @@ func main() {
 		return honeypot, fingerprint, trapPrompts
 	})
 	h3Engine := h3chaos.NewEngine()
+	browserChaosEng := browserchaos.NewEngine()
 	dashboard.SetMCPProvider(mcpServer)
 
 	// Admin MCP server with authenticated tools
@@ -327,7 +329,7 @@ func main() {
 
 
 
-	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng, mediaGen, mediaChaosEng, budgetTrapEng, mcpServer, h3Engine)
+	handler := server.NewHandler(collector, fp, adapt, errGen, pageGen, lab, contentEng, apiRouter, honey, fw, captchaEng, vulnH, analytix, cdnEng, oauthH, privacyH, wsH, rec, searchH, emailH, healthH, i18nH, headerEng, cookieT, jsEng, botDet, spiderH, apiChaosEng, mediaGen, mediaChaosEng, budgetTrapEng, mcpServer, h3Engine, browserChaosEng)
 
 	// Set up secret internal health endpoint.
 	// The real health check is at /_internal/<secret>/healthz — only known to CI/selftest.
