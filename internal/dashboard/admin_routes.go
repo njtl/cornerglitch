@@ -2768,6 +2768,9 @@ func applyServerNightmare() {
 	globalConfig.Set("mcp_honeypot_enabled", 1)
 	globalConfig.Set("mcp_fingerprint_enabled", 1)
 	globalConfig.Set("mcp_trap_prompts_enabled", 1)
+	// Browser chaos
+	globalConfig.Set("browser_chaos_enabled", 1)
+	globalConfig.Set("browser_chaos_level", 4)
 }
 
 // restoreServerNightmare restores the config snapshot.

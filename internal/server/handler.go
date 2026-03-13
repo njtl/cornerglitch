@@ -22,6 +22,7 @@ import (
 	"github.com/cornerglitch/internal/apichaos"
 	"github.com/cornerglitch/internal/budgettrap"
 	"github.com/cornerglitch/internal/botdetect"
+	"github.com/cornerglitch/internal/browserchaos"
 	"github.com/cornerglitch/internal/captcha"
 	"github.com/cornerglitch/internal/cdn"
 	"github.com/cornerglitch/internal/content"
@@ -130,6 +131,7 @@ type Handler struct {
 	budgetTrap           *budgettrap.Engine
 	mcpServer            *mcp.Server
 	h3Engine             *h3chaos.Engine
+	browserChaosEng      *browserchaos.Engine
 	flags                *dashboard.FeatureFlags
 	config               *dashboard.AdminConfig
 	apiChaosConfig       *dashboard.APIChaosConfig
@@ -172,6 +174,7 @@ func NewHandler(
 	budgetTrap *budgettrap.Engine,
 	mcpServer *mcp.Server,
 	h3Engine *h3chaos.Engine,
+	browserChaosEng *browserchaos.Engine,
 ) *Handler {
 	return &Handler{
 		collector:      collector,
@@ -207,6 +210,7 @@ func NewHandler(
 		budgetTrap:       budgetTrap,
 		mcpServer:        mcpServer,
 		h3Engine:         h3Engine,
+		browserChaosEng: browserChaosEng,
 		flags:            dashboard.GetFeatureFlags(),
 		config:           dashboard.GetAdminConfig(),
 		apiChaosConfig:   dashboard.GetAPIChaosConfig(),
@@ -448,6 +452,12 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request, behavior *ada
 		return status, "spider"
 	}
 
+	// Browser chaos endpoints (ServiceWorker script)
+	if h.browserChaosEng != nil && h.browserChaosEng.IsEnabled() && h.browserChaosEng.ShouldHandle(r.URL.Path) {
+		status := h.browserChaosEng.ServeHTTP(w, r)
+		return status, "browserchaos"
+	}
+
 	// JS trap challenge/beacon endpoints
 	if h.jsEng != nil && h.flags.IsJSTrapsEnabled() && h.jsEng.ShouldHandle(r.URL.Path) {
 		status := h.jsEng.ServeHTTP(w, r)
@@ -687,7 +697,9 @@ func (h *Handler) servePage(w http.ResponseWriter, r *http.Request, behavior *ad
 	if h.content != nil && h.content.ShouldHandle(r.URL.Path) {
 		accept := r.Header.Get("Accept")
 		if accept == "" || strings.Contains(accept, "text/html") || strings.Contains(accept, "*/*") {
-			return h.content.Serve(w, r)
+			status := h.content.Serve(w, r)
+			h.injectBrowserChaos(w, r)
+			return status
 		}
 	}
 
@@ -695,7 +707,24 @@ func (h *Handler) servePage(w http.ResponseWriter, r *http.Request, behavior *ad
 	pageType := h.selectPageType(r, behavior)
 	h.pageGen.Generate(w, r, pageType)
 
+	// Inject browser chaos into HTML responses
+	if pageType == pages.PageHTML {
+		h.injectBrowserChaos(w, r)
+	}
+
 	return http.StatusOK
+}
+
+// injectBrowserChaos appends browser chaos payloads (scripts, CSS, hidden elements)
+// after the HTML response body. Browsers parse and execute these even after </html>.
+func (h *Handler) injectBrowserChaos(w http.ResponseWriter, r *http.Request) {
+	if h.browserChaosEng == nil || !h.browserChaosEng.IsEnabled() {
+		return
+	}
+	payload := h.browserChaosEng.GeneratePayload(r.URL.Path)
+	if payload != "" {
+		w.Write([]byte(payload))
+	}
 }
 
 func (h *Handler) shouldLabyrinth(r *http.Request, behavior *adaptive.ClientBehavior) bool {
@@ -964,6 +993,23 @@ func (h *Handler) syncConfigToSubsystems() {
 			for cat, enabled := range snap {
 				h.mediaChaosEng.SetCategoryEnabled(mediachaos.ChaosCategory(cat), enabled)
 			}
+		}
+	}
+
+	// Sync browser chaos engine
+	if h.browserChaosEng != nil {
+		bcEnabled := false
+		switch v := cfg["browser_chaos_enabled"].(type) {
+		case bool:
+			bcEnabled = v
+		case int:
+			bcEnabled = v != 0
+		case float64:
+			bcEnabled = v != 0
+		}
+		h.browserChaosEng.SetEnabled(bcEnabled && h.flags.IsBrowserChaosEnabled())
+		if level, ok := cfg["browser_chaos_level"].(int); ok {
+			h.browserChaosEng.SetLevel(level)
 		}
 	}
 }
