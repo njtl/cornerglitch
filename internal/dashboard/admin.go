@@ -1961,8 +1961,10 @@ func ExportNightmareConfig() map[string]interface{} {
 	globalNightmare.mu.RLock()
 	defer globalNightmare.mu.RUnlock()
 
-	if !globalNightmare.ServerActive && !globalNightmare.ScannerActive && !globalNightmare.ProxyActive {
-		return nil // not active, nothing to persist
+	hasState := globalNightmare.ServerActive || globalNightmare.ScannerActive || globalNightmare.ProxyActive ||
+		globalNightmare.PreviousProxyMode != "" || globalNightmare.PreviousConfig != nil || globalNightmare.PreviousFeatures != nil
+	if !hasState {
+		return nil // nothing to persist
 	}
 	cfg := map[string]interface{}{
 		"server_active":  globalNightmare.ServerActive,

@@ -1319,6 +1319,7 @@ func randomAdminConfig(rng *rand.Rand) adminConfigVals {
 			"media_chaos_slow_min_ms":        float64(rng.Intn(500) + 1),
 			"media_chaos_slow_max_ms":        float64(rng.Intn(5000) + 500),
 			"media_chaos_infinite_max_bytes": float64(rng.Intn(100000000) + 1),
+			"browser_chaos_level":            float64(rng.Intn(5)),
 		},
 		strings: map[string]string{
 			"honeypot_response_style": []string{"realistic", "minimal", "aggressive"}[rng.Intn(3)],
@@ -1327,11 +1328,13 @@ func randomAdminConfig(rng *rand.Rand) adminConfigVals {
 			"recorder_format":         []string{"jsonl", "pcap"}[rng.Intn(2)],
 		},
 	}
-	// protocol_glitch_enabled is a bool but gets round-tripped as 0/1.
-	if rng.Intn(2) == 0 {
-		v.numeric["protocol_glitch_enabled"] = 1
-	} else {
-		v.numeric["protocol_glitch_enabled"] = 0
+	// Bool-as-int config values (round-tripped as 0/1).
+	for _, key := range []string{"protocol_glitch_enabled", "browser_chaos_enabled"} {
+		if rng.Intn(2) == 0 {
+			v.numeric[key] = 1
+		} else {
+			v.numeric[key] = 0
+		}
 	}
 	return v
 }
