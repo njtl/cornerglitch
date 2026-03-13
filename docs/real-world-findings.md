@@ -314,3 +314,90 @@ A single null byte in `X-Chaos: before\x00after`, written via HTTP hijacking to 
 |---------|-----------|----------------|
 | Arjun | Deterministic content generation (SHA-256 path seeding) | **No features needed** — hangs with all features OFF |
 | ZAP | Full nightmare feature set overwhelming JVM heap | All features combined (labyrinth alone = 27MB stable) |
+
+---
+
+## Finding 6: Cloudflare Browser Rendering Has No Defense Against Adversarial Pages
+
+**Test target**: Cloudflare Browser Rendering API (`/crawl` and `/content` endpoints) pointed at Glitch server with browser chaos engine at level 4 (nightmare).
+
+**Test period**: 2026-03-12 23:56 to 2026-03-13 14:33 (multiple crawl sessions across ~15 hours)
+
+### Results Summary
+
+| Metric | Value |
+|--------|-------|
+| Initial page renders | 85 |
+| Total requests generated | 7,345 |
+| **Amplification ratio** | **86x per page** |
+| Unique URLs crawled | 5,529 |
+| Labyrinth pages followed | 3,838 |
+| Max labyrinth depth | 19 levels |
+| JS-discovered API endpoints | 22 |
+| Heartbeat requests (idle stall) | 973 |
+| Budget trap hits (breadcrumbs) | 972 |
+| Tarpit connections held | 208 |
+| Iframe-injected paths followed | 53 |
+| ServiceWorker registrations | 2 |
+| Unique headless Chrome instances | 415 |
+
+### Attack Vector Effectiveness
+
+**1. Infinite labyrinth — fully effective.** CF Chrome crawled 3,838 labyrinth pages across 19 depth levels with no loop detection or depth limit. The labyrinth generates deterministic, realistic-looking content (articles, documentation, tutorials) with internal links at every level. CF followed them all.
+
+Depth distribution:
+- Levels 1–5: 1,990 pages (initial exploration)
+- Levels 6–10: 911 pages (deep crawl)
+- Levels 11–15: 768 pages (still going)
+- Levels 16–19: 169 pages (only stopped because the crawl session ended)
+
+**2. Network idle stall — fully effective.** The chaos payload fires a `fetch("/api/v{1,2,3}/heartbeat")` every 200–450ms, preventing Puppeteer's `networkidle2` from ever resolving. CF Chrome made 973 heartbeat requests across sessions, never reaching idle state. This forces the crawler to rely on hard timeouts rather than page-load completion detection.
+
+**3. JS fetch() execution — fully effective.** CF Chrome executed all embedded JavaScript, including `fetch()` calls to API endpoints that existed only in JS (not in HTML links). Discovered and hit 22 distinct API routes:
+- `/api/v1/users/me`, `/api/auth/status`, `/api/csrf-token`
+- `/api/v1/analytics`, `/api/v2/events`, `/api/comments`
+- `/api/newsletter/status`, `/api/search/suggest`, `/api/autocomplete`
+- `/api/v1/notifications`, `/api/v1/products/recommendations`
+
+This means any trap endpoint reachable via JS will be hit by CF Browser Rendering.
+
+**4. Hidden iframe amplification — fully effective.** The chaos engine injects 2–6 hidden iframes (1x1px, positioned off-screen) loading unique paths. Each iframe loads a page that also receives chaos injection, creating recursive amplification. CF Chrome loaded all iframes and crawled 53 unique iframe-generated paths. This is more reliable than ServiceWorker for amplification because it requires no registration or scope negotiation.
+
+**5. Budget traps — fully effective.** Fake vulnerability breadcrumbs (hints in HTML comments and headers pointing to "sensitive" paths) generated 972 follow-up requests. Tarpits (slow-drip responses that hold connections open) caught the crawler 208 times. CF Chrome has no mechanism to detect or avoid these traps.
+
+**6. ServiceWorker poisoning — partially effective.** The SW endpoint at `/_bc/sw.js` was fetched twice, confirming CF Chrome can register ServiceWorkers via real URLs. Once active, the SW intercepts all fetch events and injects additional requests per navigation. However, registration only succeeded in 2 of the 415 Chrome instances — the others likely had SW blocked or timed out during registration. Blob URL-based SW registration (the original approach) was blocked entirely by headless Chrome.
+
+**7. Media asset exhaustion — effective.** CF Chrome fetched every media format variant it found: `.jpg`, `.webp`, `.gif`, `.svg`, `.ico`, `.bmp`, `.tiff`, `.wav`, `.mp3`, `.ogg`, `.flac`, `.mp4`, `.webm`, `.avi`, `.ts`, DASH manifests (`.mpd`), and HLS playlists. No format filtering or size limits observed.
+
+### What CF Browser Rendering Does NOT Do
+
+- **No crawl depth limit** — followed links 19 levels deep into procedurally generated content
+- **No per-page request budget** — a single page generated up to 75 requests in one second
+- **No idle detection hardening** — `networkidle2` was trivially defeated by periodic fetch()
+- **No trap/honeypot detection** — followed breadcrumbs, sat in tarpits, crawled labyrinth endlessly
+- **No deduplication of generated content** — every labyrinth page looks unique (seeded from URL via SHA-256), so content-based dedup doesn't help
+- **No JS execution sandboxing** — ServiceWorker registration, IndexedDB writes, and fetch() calls all execute without restriction
+- **No iframe recursion limit** — hidden iframes are loaded and their content is crawled
+
+### Practical Impact
+
+An adversarial website can use these techniques to:
+1. **Exhaust crawl budgets** — a single page can trigger thousands of requests via labyrinth links + JS execution + iframe amplification
+2. **Hold connections indefinitely** — tarpits and network idle stalls keep Chrome instances busy
+3. **Generate arbitrary server load** — the 86x amplification means 100 crawl requests become 8,600 requests hitting the target
+4. **Waste compute resources** — CSS rendering bombs, WASM CPU loops, and memory pressure (IndexedDB/Blob leaks) consume Chrome's CPU and RAM
+5. **Pollute crawl data** — procedurally generated content looks realistic but is meaningless, degrading any downstream analysis
+
+### Comparison with Traditional Scanner Findings
+
+| Behavior | Traditional scanners (Finding 1–5) | CF Browser Rendering |
+|----------|-------------------------------------|---------------------|
+| Follows infinite links | Yes (Finding 3: labyrinth trap) | Yes — 19 levels deep, 3,838 pages |
+| Executes JavaScript | No (HTTP-only) | Yes — full V8 execution |
+| Falls for budget traps | Partially (Finding 1: media tar pit) | Fully — breadcrumbs, tarpits, iframes |
+| Detects honeypots | No | No |
+| Download size limits | No (Finding 1: 2h17m audio) | No — fetched every media format |
+| Adaptive timeout | No (Finding 5) | No — network idle stall defeated |
+| **Attack surface** | **HTTP parser + response handling** | **HTTP + JS + SW + CSS + media + iframes** |
+
+CF Browser Rendering's JS execution capability dramatically expands the attack surface compared to traditional HTTP-only scanners. Every attack that works against scanners also works against CF Chrome, plus an entire category of browser-specific attacks (ServiceWorker, iframe amplification, CSS bombs, network idle stall) that HTTP scanners are immune to.
