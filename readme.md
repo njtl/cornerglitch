@@ -71,6 +71,8 @@ The server emulates a broken, hostile, or deceptive backend. It serves on `:8765
 
 **Protocol chaos** -- TLS chaos engine (5 levels from clean to nightmare). HSTS chaos with random Strict-Transport-Security headers. H3/QUIC confusion with fake Alt-Svc and malformed UDP packets. CVE-inspired header attacks (CRLF injection, null bytes, 65KB overflow, duplicate Content-Length).
 
+**Browser chaos** -- Targets headless Chrome crawlers (Puppeteer, Playwright, Cloudflare Browser Rendering). 4 severity levels: network idle stall (prevents `networkidle2` detection), ServiceWorker poisoning, memory bombs (IndexedDB/Blob leaks), CSS rendering bombs (nested calc, stacked blur filters), hidden iframe amplification (recursive chaos injection), link flood (hundreds of invisible crawl-budget-wasting links), WASM CPU bombs, and resource exhaustion (WebGL/AudioContext/Cache API). Tested against Cloudflare's Browser Rendering API.
+
 **MCP honeypot** -- Model Context Protocol server at `/mcp` with fake tools (credential harvesters, budget drains), poisoned resources (fake `.env`, SSH keys, K8s secrets), and trap prompts with injection attacks. Classifies AI agents (Claude, GPT, Cursor, Windsurf) by behavioral signals.
 
 **Everything else** -- REST API emulation with GraphQL and Swagger, OAuth2/SSO flows, CDN emulation, search engine, email/webmail, WebSocket streams, framework emulation (Rails, Django, Express, Spring, Laravel), traffic recording (JSONL/PCAP), media chaos engine.
